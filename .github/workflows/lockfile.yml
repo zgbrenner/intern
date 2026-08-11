@@ -24,9 +24,15 @@ jobs:
           rustup default 1.88.0
       - name: Generate dependency lock
         run: cargo generate-lockfile
-      - name: Upload Cargo.lock
+      - name: Format Rust sources
+        run: |
+          cargo fmt --all
+          git diff --output=rustfmt.patch
+      - name: Upload Cargo.lock and rustfmt patch
         uses: actions/upload-artifact@v4
         with:
           name: intern-cargo-lock
           if-no-files-found: error
-          path: Cargo.lock
+          path: |
+            Cargo.lock
+            rustfmt.patch
