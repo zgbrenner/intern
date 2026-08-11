@@ -48,10 +48,7 @@ fn evaluate() -> Result<Value, String> {
     let extraction_started = Instant::now();
     let worker = SupervisedWorker::new(worker_path);
     let parsed = worker.parse(
-        &format!(
-            "qa-{}",
-            fixture_name.replace(['/', '\\'], "-")
-        ),
+        &format!("qa-{}", fixture_name.replace(['/', '\\'], "-")),
         Path::new(fixture_path),
         &mut |_| {},
     );
@@ -284,7 +281,10 @@ mod tests {
 
     #[test]
     fn parties_are_compared_without_order_but_without_fuzzy_matching() {
-        assert!(same_strings(&json!(["Acme", "Mira"]), &["Mira".into(), "Acme".into()]));
+        assert!(same_strings(
+            &json!(["Acme", "Mira"]),
+            &["Mira".into(), "Acme".into()]
+        ));
         assert!(!same_strings(&json!(["Acme"]), &["Acme Corp".into()]));
     }
 

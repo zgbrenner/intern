@@ -107,9 +107,10 @@ fn verify_model_result(
             "{variant} production input evidence does not replay for {fixture_name}"
         ));
     }
-    let proposal: ModelProposal = serde_json::from_value(result["proposal"].clone()).map_err(
-        |error| format!("{variant} raw proposal is invalid for {fixture_name}: {error}"),
-    )?;
+    let proposal: ModelProposal =
+        serde_json::from_value(result["proposal"].clone()).map_err(|error| {
+            format!("{variant} raw proposal is invalid for {fixture_name}: {error}")
+        })?;
     let outcome = validate_proposal(proposal, packet);
     let readiness = match outcome.status {
         ProposalStatus::Ready => "ready",
