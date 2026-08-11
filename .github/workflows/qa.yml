@@ -79,6 +79,8 @@ jobs:
           cargo build --locked -p intern-worker
           New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
           Copy-Item target\debug\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
+          New-Item -ItemType File src-tauri\binaries\llama-server-x86_64-pc-windows-msvc.exe -Force | Out-Null
+          New-Item -ItemType File src-tauri\binaries\tesseract-x86_64-pc-windows-msvc.exe -Force | Out-Null
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Run Rust workspace tests with evidence log
