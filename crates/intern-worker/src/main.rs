@@ -56,21 +56,17 @@ fn extract_path(
             let rendered = RenderedPage::new(0, image);
             let result = ocr.recognize(&rendered, &cancel)?;
             let low_confidence = result.mean_confidence < 75.0;
-            let optional_image = if low_confidence {
-                Some(normalize_vision_image(
-                    0,
-                    apply_detected_rotation(rendered.image, result.rotation_degrees)?,
-                )?)
-            } else {
-                None
-            };
+            let optional_image = Some(normalize_vision_image(
+                0,
+                apply_detected_rotation(rendered.image, result.rotation_degrees)?,
+            )?);
             Ok(ExtractedDocument {
                 pages: vec![intern_worker::extract::ExtractedPage {
                     page_number: 1,
                     text: result.text,
                     source: intern_worker::extract::PageSource::Ocr,
                     ocr_confidence: Some(result.mean_confidence),
-                    vision_escalated: low_confidence,
+                    vision_escalated: true,
                 }],
                 warnings: if low_confidence {
                     vec![intern_worker::extract::ExtractionWarning::LowOcrConfidence]

@@ -2,6 +2,39 @@ use intern_app::{
     pipeline::{PipelineProgress, WorkerBoundary},
     worker::{SupervisedWorker, WorkerEvent, adapt_parsed_document, decode_worker_response},
 };
+use tempfile::tempdir;
+
+#[test]
+fn startup_sweep_is_bounded_and_only_removes_owned_workspace_names() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("worker-temp");
+    std::fs::create_dir(&root).unwrap();
+    for name in ["intern-worker-1-a-0-1", "intern-worker-2-b-0-2"] {
+        std::fs::create_dir(root.join(name)).unwrap();
+    }
+    let unrelated = root.join("unrelated");
+    std::fs::create_dir(&unrelated).unwrap();
+    let recent_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let recent = root.join(format!("intern-worker-3-active-{recent_nanos}-1"));
+    std::fs::create_dir(&recent).unwrap();
+
+    let removed = intern_app::worker::prepare_worker_temp_root(&root, 1).unwrap();
+
+    assert_eq!(removed, 1);
+    assert!(unrelated.exists());
+    assert!(recent.exists());
+    assert_eq!(
+        std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("intern-worker-"))
+            .count(),
+        2
+    );
+}
 
 #[test]
 fn owned_worker_wire_requires_protocol_v1_and_preserves_progress_strings() {
@@ -60,6 +93,22 @@ fn worker_rejects_unknown_sources_and_invalid_image_references() {
         panic!("expected parsed event");
     };
     assert!(adapt_parsed_document(document).is_err());
+}
+
+#[test]
+fn high_confidence_vision_routing_does_not_invent_a_low_ocr_warning() {
+    let response = decode_worker_response(
+        r#"{"protocol_version":1,"request_id":"image","event":{"type":"parsed","document":{"pages":[{"page_number":1,"text":"Clear text","source":"ocr","ocr_confidence":95.0,"vision_escalated":true}],"warnings":[],"truncated":false,"optional_image":{"page_number":1,"mime_type":"image/png","data_base64":"aW1hZ2U="}}}}"#,
+    )
+    .unwrap();
+    let WorkerEvent::Parsed { document } = response.event else {
+        panic!("expected parsed event");
+    };
+
+    let adapted = adapt_parsed_document(document).unwrap();
+
+    assert!(adapted.extracted.parser_warnings.is_empty());
+    assert!(adapted.image.is_some());
 }
 
 #[cfg(target_os = "linux")]

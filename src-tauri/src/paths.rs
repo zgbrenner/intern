@@ -51,6 +51,27 @@ pub fn canonical_file(path: &Path) -> PipelineResult<PathBuf> {
     Ok(canonical)
 }
 
+pub fn canonical_model_file(path: &Path) -> PipelineResult<PathBuf> {
+    reject_reparse_point(path)?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| PipelineError::new("MODEL_FILE_INVALID", "selected model file is missing"))?;
+    let metadata = fs::metadata(&canonical).map_err(|_| {
+        PipelineError::new("MODEL_FILE_INVALID", "selected model file is unavailable")
+    })?;
+    let gguf = canonical
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("gguf"));
+    if !metadata.is_file() || metadata.len() == 0 || !gguf {
+        return Err(PipelineError::new(
+            "MODEL_FILE_INVALID",
+            "selected path is not a nonempty GGUF model file",
+        ));
+    }
+    Ok(canonical)
+}
+
 pub fn canonical_folder(path: &Path) -> PipelineResult<PathBuf> {
     reject_reparse_point(path)?;
     let canonical = path

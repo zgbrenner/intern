@@ -70,6 +70,8 @@ pub enum ReviewReason {
     ModelRequestedReview,
     ParserWarning,
     DescriptionTooLong,
+    DescriptionInvalid,
+    DescriptionUnsupported,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

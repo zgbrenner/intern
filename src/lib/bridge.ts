@@ -17,10 +17,16 @@ export interface SelectionResult {
   folder?: FolderSelection;
 }
 
+export interface ExistingModelFiles {
+  modelPath: string;
+  projectorPath: string;
+}
+
 /** Platform-specific selection is injected; the Tauri bridge remains path-only. */
 export interface SelectionBoundary {
   pickFiles(): Promise<FileSelection[]>;
   pickFolder(): Promise<FolderSelection | undefined>;
+  pickExistingModelFiles(): Promise<ExistingModelFiles | undefined>;
   resolveDrop(payload: unknown): Promise<SelectionResult>;
 }
 
@@ -30,6 +36,7 @@ export interface DesktopBridge {
   addFolder(folder: FolderSelection): Promise<void>;
   pauseQueue(): Promise<void>;
   resumeQueue(): Promise<void>;
+  cancel(id: string): Promise<void>;
   approve(id: string, filename: string, description: string): Promise<void>;
   keepOriginal(id: string): Promise<void>;
   retry(id: string): Promise<void>;
@@ -39,4 +46,7 @@ export interface DesktopBridge {
   saveSettings(settings: AppSettings): Promise<void>;
   getSetup(): Promise<SetupState>;
   startModelDownload(): Promise<void>;
+  setupCancel(): Promise<void>;
+  setupChooseExisting(files: ExistingModelFiles): Promise<void>;
+  clearHistory(): Promise<void>;
 }

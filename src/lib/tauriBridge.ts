@@ -3,6 +3,7 @@ import { listen as tauriListen } from '@tauri-apps/api/event';
 import type { AppSettings, QueueItem, SetupState } from '../types';
 import type {
   DesktopBridge,
+  ExistingModelFiles,
   FileSelection,
   FolderSelection,
   SelectionBoundary,
@@ -109,6 +110,10 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
 
   getSetup(): Promise<SetupState> { return this.transport.invoke('setup_get'); }
   startModelDownload(): Promise<void> { return this.transport.invoke('setup_start'); }
+  setupCancel(): Promise<void> { return this.transport.invoke('setup_cancel'); }
+  setupChooseExisting(files: ExistingModelFiles): Promise<void> {
+    return this.transport.invoke('setup_choose_existing', { files });
+  }
   clearHistory(): Promise<void> { return this.transport.invoke('history_clear'); }
 
   async subscribeQueue(listener: (event: QueueBridgeEvent) => void): Promise<() => void> {
@@ -160,6 +165,12 @@ export function createTauriSelectionBoundary(transport: TauriTransport = default
       const path = paths[0];
       return path ? { path, displayName: displayName(path) } : undefined;
     },
+    pickExistingModelFiles: async () => {
+      const modelPath = await openGgufDialog(transport, 'Choose a Q4 or Q8 model GGUF', 'GGUF model files');
+      if (!modelPath) return undefined;
+      const projectorPath = await openGgufDialog(transport, 'Choose the matching mmproj GGUF', 'GGUF projector files');
+      return projectorPath ? { modelPath, projectorPath } : undefined;
+    },
     resolveDrop: async (payload: unknown): Promise<SelectionResult> => {
       const drop = payload as { paths?: unknown; kind?: unknown };
       const paths = stringPaths(drop?.paths);
@@ -201,6 +212,7 @@ function normalizeItem(item: QueueItemDto): QueueItem {
     ...(item.evidence === undefined ? {} : { evidence: item.evidence }),
     ...(item.reason === undefined && item.errorCode === undefined ? {} : { reason: item.reason ?? item.errorCode }),
     ...(item.progress === undefined ? {} : { progress: item.progress }),
+    ...(status === 'processing' ? { cancelable: item.status !== 'applying' } : {}),
     ...(item.undoable === undefined ? {} : { undoable: item.undoable }),
     ...(item.proposalRevision === undefined ? {} : { proposalRevision: String(item.proposalRevision) }),
   };
@@ -225,6 +237,18 @@ async function openDialog(transport: TauriTransport, directory: boolean): Promis
     options: { multiple: !directory, directory },
   });
   return stringPaths(result);
+}
+
+async function openGgufDialog(transport: TauriTransport, title: string, filterName: string): Promise<string | undefined> {
+  const result = await transport.invoke<unknown>('plugin:dialog|open', {
+    options: {
+      multiple: false,
+      directory: false,
+      title,
+      filters: [{ name: filterName, extensions: ['gguf'] }],
+    },
+  });
+  return stringPaths(result)[0];
 }
 
 function stringPaths(value: unknown): string[] {

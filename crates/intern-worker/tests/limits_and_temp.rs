@@ -6,6 +6,7 @@ use intern_worker::limits::{
     MAX_RESIDENT_RENDERED_PAGES, MAX_SOURCE_BYTES, MAX_TEMP_BYTES, ResourceLimits,
 };
 use intern_worker::temp::TempWorkspace;
+use tempfile::tempdir;
 
 #[test]
 fn default_limits_enforce_the_worker_resource_contract() {
@@ -57,6 +58,23 @@ fn temporary_workspace_is_deleted_on_drop() {
     };
 
     assert!(!path.exists());
+}
+
+#[test]
+fn temporary_workspace_stays_inside_its_owned_private_root() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("owned");
+    std::fs::create_dir(&root).unwrap();
+    let unrelated = temp.path().join("unrelated.txt");
+    std::fs::write(&unrelated, b"keep").unwrap();
+
+    let workspace = TempWorkspace::create_in(&root, "privacy-test", MAX_TEMP_BYTES).unwrap();
+    assert_eq!(workspace.path().parent(), Some(root.as_path()));
+    let workspace_path = workspace.path().to_path_buf();
+    drop(workspace);
+
+    assert!(!workspace_path.exists());
+    assert_eq!(std::fs::read(unrelated).unwrap(), b"keep");
 }
 
 #[test]

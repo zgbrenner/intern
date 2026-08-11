@@ -296,6 +296,15 @@ pub fn page_needs_ocr(page: &PdfPageInspection) -> bool {
     (meaningful < 20 && page.image_coverage >= 0.65) || replacement_ratio > 0.03
 }
 
+fn page_needs_vision(page: &PdfPageInspection) -> bool {
+    let meaningful = page
+        .native_text
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    meaningful < 100 && page.image_coverage >= 0.65
+}
+
 pub fn extract_pdf(
     path: &Path,
     pdf: &dyn PdfBackend,
@@ -309,18 +318,28 @@ pub fn extract_pdf(
     limits.validate_page_count(inspections.len())?;
     let mut pages = Vec::with_capacity(inspections.len());
     let mut warnings = Vec::new();
-    let mut vision_candidate: Option<(f32, VisionImage)> = None;
+    let mut vision_candidate: Option<VisionImage> = None;
 
     for inspection in inspections {
         timed_check(cancel, started, limits)?;
         limits.validate_page_pixels(inspection.width_pixels, inspection.height_pixels)?;
         if !page_needs_ocr(&inspection) {
+            let vision_escalated = page_needs_vision(&inspection) && vision_candidate.is_none();
+            if vision_escalated {
+                let rendered = pdf.render(path, inspection.page_index, cancel)?;
+                let (render_width, render_height) = rendered.image.dimensions();
+                limits.validate_page_pixels(render_width, render_height)?;
+                vision_candidate = Some(normalize_vision_image(
+                    inspection.page_index,
+                    rendered.image,
+                )?);
+            }
             pages.push(ExtractedPage {
                 page_number: inspection.page_index + 1,
                 text: inspection.native_text,
                 source: PageSource::Native,
                 ocr_confidence: None,
-                vision_escalated: false,
+                vision_escalated,
             });
             continue;
         }
@@ -335,49 +354,33 @@ pub fn extract_pdf(
         limits.validate_page_pixels(render_width, render_height)?;
         timed_check(cancel, started, limits)?;
         let result = ocr.recognize(&rendered, cancel)?;
+        let vision_escalated = vision_candidate.is_none()
+            && (result.mean_confidence < 75.0 || page_needs_vision(&inspection));
         if result.mean_confidence < 75.0 {
             if !warnings.contains(&ExtractionWarning::LowOcrConfidence) {
                 warnings.push(ExtractionWarning::LowOcrConfidence);
             }
-            if vision_candidate
-                .as_ref()
-                .map(|candidate| result.mean_confidence < candidate.0)
-                .unwrap_or(true)
-            {
-                vision_candidate = Some((
-                    result.mean_confidence,
-                    normalize_vision_image(
-                        inspection.page_index,
-                        apply_detected_rotation(rendered.image, result.rotation_degrees)?,
-                    )?,
-                ));
-            }
+        }
+        if vision_escalated {
+            vision_candidate = Some(normalize_vision_image(
+                inspection.page_index,
+                apply_detected_rotation(rendered.image, result.rotation_degrees)?,
+            )?);
         }
         pages.push(ExtractedPage {
             page_number: inspection.page_index + 1,
             text: result.text,
             source: PageSource::Ocr,
             ocr_confidence: Some(result.mean_confidence),
-            vision_escalated: false,
+            vision_escalated,
         });
     }
 
-    let optional_image = if let Some((_, image)) = vision_candidate {
-        if let Some(page) = pages
-            .iter_mut()
-            .find(|page| page.page_number == image.page_number)
-        {
-            page.vision_escalated = true;
-        }
-        Some(image)
-    } else {
-        None
-    };
     Ok(ExtractedDocument {
         pages,
         warnings,
         truncated: false,
-        optional_image,
+        optional_image: vision_candidate,
     })
 }
 

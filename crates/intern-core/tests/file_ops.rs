@@ -731,7 +731,7 @@ fn complete_receipt_resolves_after_crash_reopen_without_blocking_queue() {
 }
 
 #[test]
-fn source_delete_failure_retains_both_paths_and_published_receipt() {
+fn source_delete_failure_requires_explicit_reconciliation_before_source_deletion() {
     let temp = TempDir::new().unwrap();
     let database = temp.path().join("queue.sqlite3");
     let source = temp.path().join("source.pdf");
@@ -754,7 +754,7 @@ fn source_delete_failure_retains_both_paths_and_published_receipt() {
     );
     assert!(source.exists());
     assert_eq!(fs::read(&destination).unwrap(), b"original");
-    assert_eq!(store.list().unwrap()[0].status, QueueStatus::Applying);
+    assert_eq!(store.list().unwrap()[0].status, QueueStatus::NeedsReview);
 
     drop(applier);
     drop(store);
@@ -763,8 +763,10 @@ fn source_delete_failure_retains_both_paths_and_published_receipt() {
         reopened.load_receipt(item_id).unwrap().unwrap().stage,
         OperationStage::Published
     );
-    assert_eq!(reopened.list().unwrap()[0].status, QueueStatus::Applying);
-    reopened.claim_applying_reconciliation(item_id).unwrap();
+    assert_eq!(reopened.list().unwrap()[0].status, QueueStatus::NeedsReview);
+    reopened.recover_interrupted().unwrap();
+    assert!(source.exists(), "periodic recovery must not silently delete source");
+    reopened.claim_deferred_reconciliation(item_id).unwrap();
     let resolved = FileApplier::local(reopened.clone())
         .reconcile(item_id)
         .unwrap();

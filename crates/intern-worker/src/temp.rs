@@ -17,6 +17,17 @@ pub struct TempWorkspace {
 
 impl TempWorkspace {
     pub fn create(label: &str, budget: u64) -> Result<Self, ExtractionError> {
+        let root = std::env::var_os("INTERN_TEMP_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        Self::create_in(&root, label, budget)
+    }
+
+    pub fn create_in(
+        root: &Path,
+        label: &str,
+        budget: u64,
+    ) -> Result<Self, ExtractionError> {
         let safe_label: String = label
             .chars()
             .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
@@ -27,7 +38,7 @@ impl TempWorkspace {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
+        let path = root.join(format!(
             "intern-worker-{}-{}-{timestamp}-{nonce}",
             std::process::id(),
             if safe_label.is_empty() {
@@ -37,6 +48,12 @@ impl TempWorkspace {
             }
         ));
         fs::create_dir(&path).map_err(ExtractionError::io)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+                .map_err(ExtractionError::io)?;
+        }
         Ok(Self {
             path,
             budget,

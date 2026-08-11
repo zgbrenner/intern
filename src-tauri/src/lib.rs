@@ -35,6 +35,8 @@ pub fn run() {
             commands::settings_save,
             commands::setup_get,
             commands::setup_start,
+            commands::setup_cancel,
+            commands::setup_choose_existing,
             commands::history_clear,
         ])
         .run(tauri::generate_context!())

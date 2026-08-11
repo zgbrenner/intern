@@ -3,14 +3,34 @@ import { byteCount } from '../lib/format';
 import type { SetupState } from '../types';
 import { Icon } from './Icon';
 
-export function SetupScreen({ setup, onStart }: { setup?: SetupState; onStart(): void }) {
+interface SetupScreenProps {
+  setup?: SetupState;
+  busy: boolean;
+  canChooseExisting: boolean;
+  operationError?: string;
+  onStart(): void;
+  onCancel(): void;
+  onChooseExisting(): void;
+}
+
+export function SetupScreen({ setup, busy, canChooseExisting, operationError, onStart, onCancel, onChooseExisting }: SetupScreenProps) {
   if (!setup) return <main className="setup-screen" aria-label="Intern setup"><section><p role="status" aria-label="Loading setup" aria-live="polite">Loading setup</p></section></main>;
   const failed = setup.state === 'failed';
   const downloading = setup.state === 'downloading';
+  const canceled = setup.state === 'required' && setup.error === 'MODEL_DOWNLOAD_CANCELED';
+  const resumable = setup.downloadedBytes > 0 && setup.downloadedBytes < setup.totalBytes;
+  const showProgress = downloading || resumable || failed && setup.downloadedBytes > 0;
   return <main className="setup-screen" aria-label="Intern setup"><section>
     <Icon icon={failed ? TriangleAlert : Download} /><h1>{failed ? 'Model setup needs attention' : 'Set up Intern'}</h1>
-    <p>{failed ? setup.error ?? 'The local model could not be prepared.' : 'Download the local model to begin processing on this device.'}</p>
-    {downloading && <><progress value={setup.downloadedBytes} max={setup.totalBytes} /><p aria-live="polite">{byteCount(setup.downloadedBytes)} of {byteCount(setup.totalBytes)} bytes</p></>}
-    <button type="button" className="primary" onClick={onStart} disabled={downloading}>{downloading ? 'Downloading model…' : failed ? 'Try download again' : 'Download model'}</button>
+    <p>Download approximately 3.27 GB of model files, or choose matching files already on this computer.</p>
+    <p>Your documents and filenames stay on this device. After setup, processing runs fully locally with no network dependency.</p>
+    {operationError && <p className="setup-error" role="alert">{operationError}</p>}
+    {canceled && !operationError && <p role="status" aria-label="Setup status" aria-live="polite">Download canceled. Your progress was saved.</p>}
+    {showProgress && <><progress aria-label="Model setup progress" value={setup.downloadedBytes} max={setup.totalBytes} /><p aria-live="polite">{byteCount(setup.downloadedBytes)} of {byteCount(setup.totalBytes)} bytes</p></>}
+    <div className="setup-actions">
+      <button type="button" className="primary" onClick={onStart} disabled={downloading || busy}>{downloading ? 'Downloading model…' : failed ? 'Try download again' : resumable ? 'Resume download' : 'Download model'}</button>
+      {downloading && <button type="button" onClick={onCancel} disabled={busy}>Cancel setup</button>}
+      <button type="button" onClick={onChooseExisting} disabled={downloading || busy || !canChooseExisting}>Choose existing model files</button>
+    </div>
   </section></main>;
 }

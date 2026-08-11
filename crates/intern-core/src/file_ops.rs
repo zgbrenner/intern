@@ -1161,10 +1161,17 @@ impl FileApplier {
         code: ErrorCode,
         message: &str,
     ) -> InternError {
-        match self
-            .store
-            .record_applying_rollback(receipt.queue_item_id, receipt.id, code)
+        let journaled = if code == ErrorCode::SourceDeleteFailed
+            && receipt.direction == OperationDirection::Apply
+            && receipt.stage == OperationStage::Published
         {
+            self.store
+                .defer_published_reconciliation(receipt.queue_item_id, receipt.id, code)
+        } else {
+            self.store
+                .record_applying_rollback(receipt.queue_item_id, receipt.id, code)
+        };
+        match journaled {
             Ok(_) => InternError::new(code, message).with_receipt(receipt),
             Err(_) => InternError::new(
                 ErrorCode::StateConflict,

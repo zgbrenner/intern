@@ -33,3 +33,5 @@ The same spec switches to 1024×768 and asserts a 64px accessible icon navigatio
 ## Sign-off procedure still required
 
 After the workflow produces the screenshot, inspect the accepted concept and implementation capture side by side with `view_image`. Record actual differences in copy, structure, typography, palette, row density, inspector width, icon optical weight, selection/focus state, and the 1024px layout. Any Critical or Important discrepancy must be fixed and recaptured before this ledger may change to accepted.
+
+Acceptance is machine-gated through `docs/qa/rendered-fidelity-signoff.json`. The reviewer must record the accepted screenshot SHA-256, the model report's `release_inputs_sha256`, their identity, review time, and useful notes. The tagged release recaptures the same screenshot and fails closed if either digest no longer matches.

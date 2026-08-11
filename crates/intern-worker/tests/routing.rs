@@ -154,7 +154,7 @@ fn clean_mixed_page_preserves_native_text() {
 }
 
 #[test]
-fn low_ocr_confidence_selects_exactly_one_lowest_confidence_image() {
+fn low_ocr_confidence_selects_exactly_one_first_triggering_image() {
     let mut first = page("", 1.0);
     first.page_index = 0;
     let mut second = page("", 1.0);
@@ -168,7 +168,7 @@ fn low_ocr_confidence_selects_exactly_one_lowest_confidence_image() {
     );
 
     assert_eq!(renders, 2);
-    assert_eq!(document.optional_image.as_ref().unwrap().page_number, 2);
+    assert_eq!(document.optional_image.as_ref().unwrap().page_number, 1);
     assert_eq!(
         document
             .pages
@@ -177,6 +177,19 @@ fn low_ocr_confidence_selects_exactly_one_lowest_confidence_image() {
             .count(),
         1
     );
+}
+
+#[test]
+fn large_non_text_page_under_one_hundred_characters_routes_first_page_to_vision() {
+    let (document, renders) = route(
+        vec![page(&"a".repeat(99), 0.65)],
+        vec![OcrResult::new("unused", 99.0)],
+    );
+
+    assert_eq!(renders, 1);
+    assert_eq!(document.pages[0].source, PageSource::Native);
+    assert!(document.pages[0].vision_escalated);
+    assert_eq!(document.optional_image.as_ref().unwrap().page_number, 1);
 }
 
 #[test]

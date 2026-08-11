@@ -28,7 +28,7 @@
   },
   "prompt": {
     "path": "src-tauri/src/model/prompt.rs",
-    "sha256": "08dc85b2565e7bb49219e41535158c10de168cf5b897129c825035c26ec5072c"
+    "sha256": "29f2bcfb498a71792b164abab5a31083acfa2b970abfc0bc39e780c1f1a667c6"
   },
   "corpus": {
     "manifest_path": "fixtures/manifest.json",

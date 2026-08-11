@@ -7,7 +7,7 @@ vi.mock('./lib/inMemoryBridge', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lib/inMemoryBridge')>();
   return {
     ...actual,
-    createBrowserSelectionBoundary: () => ({ pickFiles: picker, pickFolder: async () => undefined, resolveDrop: async () => ({}) }),
+    createBrowserSelectionBoundary: () => ({ pickFiles: picker, pickFolder: async () => undefined, pickExistingModelFiles: async () => undefined, resolveDrop: async () => ({}) }),
   };
 });
 

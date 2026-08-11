@@ -73,20 +73,17 @@ impl ModelClient {
         for attempt in 0..=1 {
             match self.propose_once(document) {
                 Ok(proposal) => return Ok(proposal),
-                Err(AttemptError::Retryable) if attempt == 0 => continue,
-                Err(AttemptError::Retryable) => {
-                    return Err(ModelError::new(
-                        ModelErrorCode::ModelResponseInvalid,
-                        "local model returned malformed or interrupted output twice",
-                    ));
-                }
-                Err(AttemptError::Fatal(error)) => return Err(error),
+                Err(_) if attempt == 0 => continue,
+                Err(error) => return Err(error.into_model_error()),
             }
         }
         unreachable!("the retry loop has exactly two attempts")
     }
 
-    fn propose_once(&self, document: &DocumentInput) -> Result<ModelProposal, AttemptError> {
+    pub(crate) fn propose_once(
+        &self,
+        document: &DocumentInput,
+    ) -> Result<ModelProposal, ModelAttemptError> {
         let request = completion_request(document);
         let response = self
             .http
@@ -94,11 +91,15 @@ impl ModelClient {
             .bearer_auth(&self.api_key)
             .json(&request)
             .send()
-            .map_err(|_| AttemptError::Retryable)?;
+            .map_err(|_| ModelAttemptError::Retryable(ModelErrorCode::ModelRequestFailed))?;
         if !response.status().is_success() {
-            return Err(AttemptError::Fatal(request_failed()));
+            return Err(ModelAttemptError::Retryable(
+                ModelErrorCode::ModelRequestFailed,
+            ));
         }
-        let completion: ChatCompletion = response.json().map_err(|_| AttemptError::Retryable)?;
+        let completion: ChatCompletion = response.json().map_err(|_| {
+            ModelAttemptError::Retryable(ModelErrorCode::ModelResponseInvalid)
+        })?;
         decode_completion(completion)
     }
 }
@@ -129,26 +130,26 @@ fn completion_request(document: &DocumentInput) -> Value {
     })
 }
 
-fn decode_completion(completion: ChatCompletion) -> Result<ModelProposal, AttemptError> {
+fn decode_completion(completion: ChatCompletion) -> Result<ModelProposal, ModelAttemptError> {
     if completion.object != "chat.completion" || completion.choices.len() != 1 {
-        return Err(AttemptError::Retryable);
+        return Err(invalid_response());
     }
     let choice = completion
         .choices
         .into_iter()
         .next()
-        .ok_or(AttemptError::Retryable)?;
+        .ok_or_else(invalid_response)?;
     if choice.finish_reason.as_deref() != Some("stop") || choice.message.role != "assistant" {
-        return Err(AttemptError::Retryable);
+        return Err(invalid_response());
     }
     let content = choice
         .message
         .content
         .into_text()
-        .ok_or(AttemptError::Retryable)?;
-    let json = extract_json_object(&content).ok_or(AttemptError::Retryable)?;
-    let proposal: WireProposal = serde_json::from_str(json).map_err(|_| AttemptError::Retryable)?;
-    proposal.into_domain().ok_or(AttemptError::Retryable)
+        .ok_or_else(invalid_response)?;
+    let json = extract_json_object(&content).ok_or_else(invalid_response)?;
+    let proposal: WireProposal = serde_json::from_str(json).map_err(|_| invalid_response())?;
+    proposal.into_domain().ok_or_else(invalid_response)
 }
 
 fn extract_json_object(content: &str) -> Option<&str> {
@@ -306,9 +307,30 @@ fn is_iso_date_shape(value: &str) -> bool {
             .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
 }
 
-enum AttemptError {
-    Retryable,
-    Fatal(ModelError),
+pub(crate) enum ModelAttemptError {
+    Retryable(ModelErrorCode),
+}
+
+impl ModelAttemptError {
+    pub(crate) fn code(&self) -> ModelErrorCode {
+        match self {
+            Self::Retryable(code) => *code,
+        }
+    }
+
+    fn into_model_error(self) -> ModelError {
+        match self.code() {
+            ModelErrorCode::ModelRequestFailed => request_failed(),
+            _ => ModelError::new(
+                ModelErrorCode::ModelResponseInvalid,
+                "local model returned malformed or interrupted output twice",
+            ),
+        }
+    }
+}
+
+fn invalid_response() -> ModelAttemptError {
+    ModelAttemptError::Retryable(ModelErrorCode::ModelResponseInvalid)
 }
 
 const fn request_failed() -> ModelError {

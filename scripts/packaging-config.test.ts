@@ -10,4 +10,8 @@ it('packages the license directory as a tree so vcpkg subpaths match the signed 
   const smoke = await readFile('scripts/smoke-installer.ps1', 'utf8');
   expect(smoke).toContain('$Relative = [string]$Entry.install_path');
   expect(smoke).toContain('Join-Path $InstallDirectory $Relative');
+  expect(smoke).toContain('Start-Process -FilePath $App');
+  expect(smoke).toContain('CloseMainWindow()');
+  expect(smoke).toContain('WaitForExit(');
+  expect(smoke).toContain('$EvidencePath');
 });

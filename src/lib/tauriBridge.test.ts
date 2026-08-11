@@ -49,6 +49,8 @@ describe('TauriBridge', () => {
     await bridge.saveSettings({ destination: 'C:\\Output', startMinimized: false, automaticRename: true });
     await bridge.getSetup();
     await bridge.startModelDownload();
+    await bridge.setupCancel();
+    await bridge.setupChooseExisting({ modelPath: 'C:\\Models\\intern-q4.gguf', projectorPath: 'C:\\Models\\mmproj.gguf' });
     await bridge.clearHistory();
 
     expect(fake.calls).toEqual([
@@ -67,6 +69,8 @@ describe('TauriBridge', () => {
       { command: 'settings_save', args: { settings: { destination: 'C:\\Output', startMinimized: false, automaticRename: true } } },
       { command: 'setup_get', args: undefined },
       { command: 'setup_start', args: undefined },
+      { command: 'setup_cancel', args: undefined },
+      { command: 'setup_choose_existing', args: { files: { modelPath: 'C:\\Models\\intern-q4.gguf', projectorPath: 'C:\\Models\\mmproj.gguf' } } },
       { command: 'history_clear', args: undefined },
     ]);
   });
@@ -79,15 +83,18 @@ describe('TauriBridge', () => {
         { id: 3, originalFilename: 'review.pdf', status: 'needs_review', proposedFilename: 'reviewed.pdf', confidence: 0.72 },
         { id: 4, originalFilename: 'done.pdf', status: 'completed', undoable: true },
         { id: 5, originalFilename: 'canceled.pdf', status: 'canceled', errorCode: 'CANCELED' },
+        { id: 6, originalFilename: 'applying.pdf', status: 'applying', progress: 90 },
       ],
     });
 
     const items = await new TauriBridge(fake.transport).listItems();
 
-    expect(items.map((item) => item.status)).toEqual(['waiting', 'processing', 'review', 'completed', 'failed']);
+    expect(items.map((item) => item.status)).toEqual(['waiting', 'processing', 'review', 'completed', 'failed', 'processing']);
     expect(items[0]).not.toHaveProperty('proposedFilename');
     expect(items[0]).not.toHaveProperty('confidence');
     expect(items[2].proposedFilename).toBe('reviewed.pdf');
+    expect(items[1].cancelable).toBe(true);
+    expect(items[5].cancelable).toBe(false);
   });
 
   it('normalizes queue events and unsubscribes every listener exactly once', async () => {
@@ -151,6 +158,44 @@ describe('TauriBridge', () => {
 
     expect(dropped).toEqual({ files: [{ path: 'C:\\Docs\\Dropped.pdf', displayName: 'Dropped.pdf' }] });
     expect(fake.calls).toEqual([]);
+  });
+
+  it('selects native model and projector paths using two clearly labeled GGUF dialogs', async () => {
+    const responses: unknown[] = ['C:\\Models\\intern-q8.gguf', 'C:\\Models\\mmproj-f16.gguf'];
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const transport: TauriTransport = {
+      invoke: async <T>(command: string, args?: Record<string, unknown>) => {
+        calls.push({ command, args });
+        return responses.shift() as T;
+      },
+      listen: async () => () => undefined,
+    };
+
+    const files = await createTauriSelectionBoundary(transport).pickExistingModelFiles();
+
+    expect(files).toEqual({ modelPath: 'C:\\Models\\intern-q8.gguf', projectorPath: 'C:\\Models\\mmproj-f16.gguf' });
+    expect(calls).toEqual([
+      { command: 'plugin:dialog|open', args: { options: {
+        multiple: false,
+        directory: false,
+        title: 'Choose a Q4 or Q8 model GGUF',
+        filters: [{ name: 'GGUF model files', extensions: ['gguf'] }],
+      } } },
+      { command: 'plugin:dialog|open', args: { options: {
+        multiple: false,
+        directory: false,
+        title: 'Choose the matching mmproj GGUF',
+        filters: [{ name: 'GGUF projector files', extensions: ['gguf'] }],
+      } } },
+    ]);
+  });
+
+  it('does not request a projector when model selection is canceled', async () => {
+    const fake = fakeTransport({ 'plugin:dialog|open': null });
+    const selection = createTauriSelectionBoundary(fake.transport);
+
+    expect(await selection.pickExistingModelFiles()).toBeUndefined();
+    expect(fake.calls).toHaveLength(1);
   });
 
   it('converts native drag-drop paths at the same selection boundary and unsubscribes', async () => {

@@ -19,14 +19,21 @@ use crate::{
         },
         manifest::ModelManifest,
         server::LlamaServer,
+        setup::{
+            ExistingModelSelection, SetupOperationGate, install_existing_model_files,
+            semantic_probes, validate_semantic_probe,
+        },
     },
-    paths::{canonical_file, canonical_folder, collect_supported_files, parse_item_id},
+    paths::{
+        canonical_file, canonical_folder, canonical_model_file, collect_supported_files,
+        parse_item_id,
+    },
     pipeline::{
         ModelBoundary, ModelFailure, Pipeline, PipelineError, PipelineEventSink, PipelineItem,
         PipelineProgress,
     },
     settings::{AppSettings, SettingsStore},
-    worker::SupervisedWorker,
+    worker::{SupervisedWorker, prepare_worker_temp_root},
 };
 
 #[derive(Clone, Debug, Deserialize)]
@@ -41,6 +48,13 @@ pub struct FileSelectionDto {
 pub struct FolderSelectionDto {
     pub path: String,
     pub display_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExistingModelFilesDto {
+    pub model_path: String,
+    pub projector_path: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -82,6 +96,7 @@ pub struct QueueItemDto {
     error_code: Option<String>,
     undoable: bool,
     proposal_revision: Option<String>,
+    reconciliation: Option<ReconciliationDto>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -90,6 +105,14 @@ struct EvidenceDto {
     date: Option<String>,
     r#type: Option<String>,
     parties: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReconciliationDto {
+    source_path: String,
+    destination_path: String,
+    error_code: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -164,14 +187,70 @@ impl RuntimeModel {
             Duration::from_secs(120),
         )?;
         let client = ModelClient::new(&server.completion_endpoint(), server.api_key().to_owned())?;
-        *self.client.write().map_err(|_| CommandError {
-            code: "MODEL_NOT_READY".into(),
-            message: "model state is unavailable".into(),
-        })? = Some(client);
-        *self.server.lock().map_err(|_| CommandError {
+        let mut server_state = self.server.lock().map_err(|_| CommandError {
             code: "MODEL_NOT_READY".into(),
             message: "model process state is unavailable".into(),
-        })? = Some(server);
+        })?;
+        let mut client_state = self.client.write().map_err(|_| CommandError {
+            code: "MODEL_NOT_READY".into(),
+            message: "model state is unavailable".into(),
+        })?;
+        if server_state.is_some() || client_state.is_some() {
+            return Err(CommandError {
+                code: "MODEL_ALREADY_RUNNING".into(),
+                message: "local model process is already running".into(),
+            });
+        }
+        *server_state = Some(server);
+        *client_state = Some(client);
+        Ok(())
+    }
+
+    fn start_verified(
+        &self,
+        manifest: &ModelManifest,
+        cancellation: &CancellationToken,
+    ) -> Result<(), CommandError> {
+        self.stop_runtime().map_err(|error| CommandError {
+            code: error.code,
+            message: "existing local model process could not be stopped".into(),
+        })?;
+        if cancellation.is_canceled() {
+            return Err(setup_canceled_error());
+        }
+        self.start(manifest)?;
+        let result = self.semantic_self_test(cancellation);
+        if result.is_err() {
+            let _ = self.stop_runtime();
+        }
+        result
+    }
+
+    fn semantic_self_test(&self, cancellation: &CancellationToken) -> Result<(), CommandError> {
+        for probe in semantic_probes()? {
+            if cancellation.is_canceled() {
+                return Err(setup_canceled_error());
+            }
+            let proposal = {
+                let client = self.client.read().map_err(|_| CommandError {
+                    code: "MODEL_SELF_TEST_FAILED".into(),
+                    message: "local model state is unavailable during self-test".into(),
+                })?;
+                let client = client.as_ref().ok_or_else(|| CommandError {
+                    code: "MODEL_SELF_TEST_FAILED".into(),
+                    message: "local model is unavailable during self-test".into(),
+                })?;
+                client.propose(&probe.document)
+            };
+            if cancellation.is_canceled() {
+                return Err(setup_canceled_error());
+            }
+            let proposal = proposal.map_err(|_| CommandError {
+                code: "MODEL_SELF_TEST_FAILED".into(),
+                message: "local model semantic self-test request failed".into(),
+            })?;
+            validate_semantic_probe(&probe, &proposal)?;
+        }
         Ok(())
     }
 
@@ -208,8 +287,20 @@ impl ModelBoundary for RuntimeModel {
             .as_ref()
             .ok_or_else(|| ModelFailure::fatal("MODEL_NOT_READY"))?;
         client
-            .propose(document)
-            .map_err(|error| ModelFailure::fatal(error.code().as_str()))
+            .propose_once(document)
+            .map_err(|error| ModelFailure::retryable(error.code().as_str()))
+    }
+
+    fn recover(&self, failure: &ModelFailure) -> Result<(), ModelFailure> {
+        if failure.code != "MODEL_REQUEST_FAILED" {
+            return Ok(());
+        }
+        self.stop_runtime()
+            .map_err(|_| ModelFailure::fatal("MODEL_RECOVERY_FAILED"))?;
+        let manifest = ModelManifest::embedded()
+            .map_err(|_| ModelFailure::fatal("MODEL_RECOVERY_FAILED"))?;
+        self.start(&manifest)
+            .map_err(|_| ModelFailure::fatal("MODEL_RECOVERY_FAILED"))
     }
 
     fn cancel(&self) -> Result<(), ModelFailure> {
@@ -229,7 +320,7 @@ struct SetupManager {
     app: AppHandle,
     runtime: Arc<RuntimeModel>,
     state: Mutex<SetupStateDto>,
-    running: AtomicBool,
+    operation: SetupOperationGate,
     scheduler: Mutex<Option<std::sync::mpsc::Sender<SchedulerMessage>>>,
     model_ready: Arc<AtomicBool>,
 }
@@ -252,7 +343,7 @@ impl SetupManager {
             app,
             runtime,
             state: Mutex::new(state),
-            running: AtomicBool::new(false),
+            operation: SetupOperationGate::default(),
             scheduler: Mutex::new(None),
             model_ready: Arc::new(AtomicBool::new(installed)),
         }
@@ -269,23 +360,65 @@ impl SetupManager {
     }
 
     fn start(self: &Arc<Self>) -> Result<(), CommandError> {
-        if self.running.swap(true, Ordering::SeqCst) {
+        if self.model_ready.load(Ordering::SeqCst) {
             return Ok(());
         }
+        self.start_operation(SetupSource::Download)
+    }
+
+    fn choose_existing(
+        self: &Arc<Self>,
+        selection: ExistingModelSelection,
+    ) -> Result<(), CommandError> {
+        if self.model_ready.load(Ordering::SeqCst) {
+            return Err(CommandError {
+                code: "SETUP_ALREADY_READY".into(),
+                message: "local model setup is already complete".into(),
+            });
+        }
+        self.start_operation(SetupSource::Existing(selection))
+    }
+
+    fn start_operation(self: &Arc<Self>, source: SetupSource) -> Result<(), CommandError> {
+        let completed = self.get()?.downloaded_bytes;
+        let cancellation = self.operation.begin()?;
+        self.set_state(SetupStatus::Downloading, completed, None);
         let manager = Arc::clone(self);
         std::thread::Builder::new()
             .name("intern-model-setup".into())
             .spawn(move || {
-                manager.set_state(SetupStatus::Downloading, 0, None);
-                let result = manager.download_and_start();
-                match result {
-                    Ok(total) => manager.set_state(SetupStatus::Ready, total, None),
-                    Err(error) => manager.set_state(SetupStatus::Failed, 0, Some(error.code)),
-                }
-                manager.running.store(false, Ordering::SeqCst);
+                let result = manager.install_and_start(source, &cancellation);
+                let final_state = match result {
+                    Ok(total) => (SetupStatus::Ready, total, None),
+                    Err(error) if error.code == "MODEL_DOWNLOAD_CANCELED" => {
+                        let completed = manager
+                            .get()
+                            .map(|state| state.downloaded_bytes)
+                            .unwrap_or(0);
+                        (
+                            SetupStatus::Required,
+                            completed,
+                            Some(error.code),
+                        )
+                    }
+                    Err(error) => {
+                        let completed = manager
+                            .get()
+                            .map(|state| state.downloaded_bytes)
+                            .unwrap_or(0);
+                        (SetupStatus::Failed, completed, Some(error.code))
+                    }
+                };
+                manager.set_state(final_state.0, final_state.1, final_state.2);
+                manager.operation.finish();
             })
             .map_err(|_| {
-                self.running.store(false, Ordering::SeqCst);
+                self.set_state(
+                    SetupStatus::Failed,
+                    completed,
+                    Some("SETUP_UNAVAILABLE".into()),
+                );
+                self.operation.finish();
                 CommandError {
                     code: "SETUP_UNAVAILABLE".into(),
                     message: "setup thread could not start".into(),
@@ -294,29 +427,65 @@ impl SetupManager {
         Ok(())
     }
 
-    fn download_and_start(&self) -> Result<u64, CommandError> {
-        let manifest = ModelManifest::embedded()?;
-        let downloader = Downloader::new(ReqwestHttpTransport::new()?, SystemDiskSpace);
-        let cancellation = CancellationToken::new();
-        let total = manifest.files.iter().map(|file| file.size).sum::<u64>();
-        let mut completed_before = 0;
-        for file in &manifest.files {
-            let offset = completed_before;
-            downloader.download(
-                file,
-                &self.runtime.model_directory,
-                &cancellation,
-                |progress: SetupProgress| {
-                    self.set_state(
-                        SetupStatus::Downloading,
-                        offset + progress.completed_bytes,
-                        None,
-                    );
-                },
-            )?;
-            completed_before += file.size;
+    fn cancel(&self) -> Result<(), CommandError> {
+        if !self.operation.cancel() {
+            return Ok(());
         }
-        self.runtime.start(&manifest)?;
+        self.runtime.stop_runtime().map_err(|error| CommandError {
+            code: error.code,
+            message: "local model setup could not be canceled cleanly".into(),
+        })
+    }
+
+    fn install_and_start(
+        &self,
+        source: SetupSource,
+        cancellation: &CancellationToken,
+    ) -> Result<u64, CommandError> {
+        let manifest = ModelManifest::embedded()?;
+        let total = manifest.files.iter().map(|file| file.size).sum::<u64>();
+        match source {
+            SetupSource::Download => {
+                let downloader = Downloader::new(ReqwestHttpTransport::new()?, SystemDiskSpace);
+                let mut completed_before = 0;
+                for file in &manifest.files {
+                    let offset = completed_before;
+                    downloader.download(
+                        file,
+                        &self.runtime.model_directory,
+                        cancellation,
+                        |progress: SetupProgress| {
+                            self.set_state(
+                                SetupStatus::Downloading,
+                                offset + progress.completed_bytes,
+                                None,
+                            );
+                        },
+                    )?;
+                    completed_before += file.size;
+                }
+            }
+            SetupSource::Existing(selection) => {
+                install_existing_model_files(
+                    &manifest,
+                    &selection,
+                    &self.runtime.model_directory,
+                    &SystemDiskSpace,
+                    cancellation,
+                    |progress| {
+                        self.set_state(
+                            SetupStatus::Downloading,
+                            progress.completed_bytes,
+                            None,
+                        );
+                    },
+                )?;
+            }
+        }
+        if cancellation.is_canceled() {
+            return Err(setup_canceled_error());
+        }
+        self.runtime.start_verified(&manifest, cancellation)?;
         Ok(total)
     }
 
@@ -336,6 +505,18 @@ impl SetupManager {
                 }
             }
         }
+    }
+}
+
+enum SetupSource {
+    Download,
+    Existing(ExistingModelSelection),
+}
+
+fn setup_canceled_error() -> CommandError {
+    CommandError {
+        code: "MODEL_DOWNLOAD_CANCELED".into(),
+        message: "model setup was canceled".into(),
     }
 }
 
@@ -472,15 +653,22 @@ impl AppState {
             &manifest,
         ));
         if runtime.installed(&manifest) {
-            if let Err(error) = runtime.start(&manifest) {
-                setup.set_state(SetupStatus::Failed, 0, Some(error.code));
+            if let Err(error) = runtime.start_verified(&manifest, &CancellationToken::new()) {
+                let installed_bytes = manifest.files.iter().map(|file| file.size).sum();
+                setup.set_state(SetupStatus::Failed, installed_bytes, Some(error.code));
             }
         }
         let settings = SettingsStore::new(data.join("settings.json"));
+        let worker_temp_root = data.join("worker-temp");
+        prepare_worker_temp_root(&worker_temp_root, 128).map_err(|_| CommandError {
+            code: "APP_DATA_UNAVAILABLE".into(),
+            message: "private worker temporary directory is unavailable".into(),
+        })?;
         let pipeline = Arc::new(Pipeline::with_local_files(
             data.join("queue.sqlite3"),
-            Arc::new(SupervisedWorker::new(
+            Arc::new(SupervisedWorker::with_temp_root(
                 executable_directory.join(worker_name),
+                worker_temp_root,
             )),
             runtime,
             Arc::new(TauriPipelineEvents { app: app.clone() }),
@@ -649,6 +837,24 @@ pub fn setup_start(state: State<'_, AppState>) -> Result<(), CommandError> {
 }
 
 #[tauri::command]
+pub fn setup_cancel(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.setup.cancel()
+}
+
+#[tauri::command]
+pub fn setup_choose_existing(
+    files: ExistingModelFilesDto,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let model_path = canonical_model_file(Path::new(&files.model_path))?;
+    let projector_path = canonical_model_file(Path::new(&files.projector_path))?;
+    state.setup.choose_existing(ExistingModelSelection {
+        model_path,
+        projector_path,
+    })
+}
+
+#[tauri::command]
 pub fn history_clear(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.pipeline.clear_history()?;
     Ok(())
@@ -662,6 +868,20 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
         parties: (!record.outcome.proposal.parties.is_empty())
             .then(|| record.outcome.proposal.parties.join("; ")),
     });
+    let reconciliation = item
+        .receipt
+        .as_ref()
+        .filter(|receipt| {
+            item.status == QueueStatus::NeedsReview
+                && item.error_code == Some(intern_core::ErrorCode::SourceDeleteFailed)
+                && receipt.direction == OperationDirection::Apply
+                && receipt.stage == OperationStage::Published
+        })
+        .map(|receipt| ReconciliationDto {
+            source_path: receipt.source.to_string_lossy().into_owned(),
+            destination_path: receipt.destination.to_string_lossy().into_owned(),
+            error_code: "SOURCE_DELETE_FAILED".into(),
+        });
     Ok(QueueItemDto {
         id: item.id.to_string(),
         original_filename: item
@@ -685,12 +905,13 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
                     && receipt.stage == OperationStage::Complete
             }),
         proposal_revision: proposal.map(|record| record.revision.to_string()),
+        reconciliation,
     })
 }
 
 #[cfg(test)]
 mod scheduler_tests {
-    use super::scheduler_actions;
+    use super::{ExistingModelFilesDto, scheduler_actions};
 
     #[test]
     fn timer_recovers_but_does_not_drain_until_model_is_ready() {
@@ -698,5 +919,27 @@ mod scheduler_tests {
         assert_eq!(scheduler_actions(false, false), (false, false));
         assert_eq!(scheduler_actions(false, true), (false, true));
         assert_eq!(scheduler_actions(true, true), (true, true));
+    }
+
+    #[test]
+    fn existing_model_dto_is_a_strict_pair_of_backend_paths() {
+        let files: ExistingModelFilesDto = serde_json::from_value(serde_json::json!({
+            "modelPath": "C:\\Models\\model.gguf",
+            "projectorPath": "C:\\Models\\projector.gguf"
+        }))
+        .unwrap();
+        assert!(files.model_path.ends_with("model.gguf"));
+        assert!(files.projector_path.ends_with("projector.gguf"));
+        assert!(serde_json::from_value::<ExistingModelFilesDto>(serde_json::json!({
+            "modelPath": { "name": "model.gguf" },
+            "projectorPath": "projector.gguf"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<ExistingModelFilesDto>(serde_json::json!({
+            "modelPath": "model.gguf",
+            "projectorPath": "projector.gguf",
+            "extra": true
+        }))
+        .is_err());
     }
 }

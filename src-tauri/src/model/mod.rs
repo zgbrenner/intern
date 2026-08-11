@@ -5,6 +5,7 @@ pub mod download;
 pub mod manifest;
 pub mod prompt;
 pub mod server;
+pub mod setup;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum ModelErrorCode {
@@ -28,6 +29,10 @@ pub enum ModelErrorCode {
     ModelRequestFailed,
     #[serde(rename = "MODEL_RESPONSE_INVALID")]
     ModelResponseInvalid,
+    #[serde(rename = "MODEL_SELF_TEST_FAILED")]
+    ModelSelfTestFailed,
+    #[serde(rename = "SETUP_BUSY")]
+    SetupBusy,
 }
 
 impl ModelErrorCode {
@@ -43,6 +48,8 @@ impl ModelErrorCode {
             Self::ModelServerUnhealthy => "MODEL_SERVER_UNHEALTHY",
             Self::ModelRequestFailed => "MODEL_REQUEST_FAILED",
             Self::ModelResponseInvalid => "MODEL_RESPONSE_INVALID",
+            Self::ModelSelfTestFailed => "MODEL_SELF_TEST_FAILED",
+            Self::SetupBusy => "SETUP_BUSY",
         }
     }
 }

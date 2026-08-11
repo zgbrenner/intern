@@ -138,6 +138,80 @@ impl ModelBoundary for FakeModel {
     }
 }
 
+struct GatedSuccessModel {
+    calls: AtomicUsize,
+    gate: (Mutex<bool>, Condvar),
+}
+
+struct RecoveringModel {
+    responses: Mutex<VecDeque<Result<ModelProposal, ModelFailure>>>,
+    calls: AtomicUsize,
+    recoveries: AtomicUsize,
+    recovery_succeeds: bool,
+}
+
+impl RecoveringModel {
+    fn new(
+        responses: Vec<Result<ModelProposal, ModelFailure>>,
+        recovery_succeeds: bool,
+    ) -> Self {
+        Self {
+            responses: Mutex::new(responses.into()),
+            calls: AtomicUsize::new(0),
+            recoveries: AtomicUsize::new(0),
+            recovery_succeeds,
+        }
+    }
+}
+
+impl ModelBoundary for RecoveringModel {
+    fn propose(
+        &self,
+        _document: &intern_app::model::client::DocumentInput,
+    ) -> Result<ModelProposal, ModelFailure> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.responses.lock().unwrap().pop_front().unwrap()
+    }
+
+    fn recover(&self, _failure: &ModelFailure) -> Result<(), ModelFailure> {
+        self.recoveries.fetch_add(1, Ordering::SeqCst);
+        if self.recovery_succeeds {
+            Ok(())
+        } else {
+            Err(ModelFailure::fatal("MODEL_RECOVERY_FAILED"))
+        }
+    }
+}
+
+impl GatedSuccessModel {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            gate: (Mutex::new(true), Condvar::new()),
+        }
+    }
+
+    fn release(&self) {
+        *self.gate.0.lock().unwrap() = false;
+        self.gate.1.notify_all();
+    }
+}
+
+impl ModelBoundary for GatedSuccessModel {
+    fn propose(
+        &self,
+        _document: &intern_app::model::client::DocumentInput,
+    ) -> Result<ModelProposal, ModelFailure> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let (lock, wake) = &self.gate;
+        let mut blocked = lock.lock().unwrap();
+        while *blocked {
+            blocked = wake.wait(blocked).unwrap();
+        }
+        Ok(proposal(0.94, false))
+    }
+}
+
 struct BlockingModel {
     calls: AtomicUsize,
     cancel_started: AtomicBool,
@@ -390,7 +464,7 @@ fn retryable_malformed_model_output_retries_once_only() {
     let pipeline = pipeline(
         temp.path(),
         worker,
-        Arc::clone(&model),
+        model.clone(),
         files,
         AppSettings::default(),
     );
@@ -400,6 +474,78 @@ fn retryable_malformed_model_output_retries_once_only() {
 
     assert_eq!(model.calls.load(Ordering::SeqCst), 2);
     assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+}
+
+#[test]
+fn crashed_model_endpoint_is_recovered_once_before_the_only_retry() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "model-crash.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(RecoveringModel::new(
+        vec![
+            Err(ModelFailure::retryable("MODEL_REQUEST_FAILED")),
+            Ok(proposal(0.94, false)),
+        ],
+        true,
+    ));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "model-hash");
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings.save(&AppSettings::default()).unwrap();
+    let pipeline = Pipeline::open(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model.clone(),
+        files,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+    pipeline.enqueue_files(&[path]).unwrap();
+
+    pipeline.run_until_idle().unwrap();
+
+    assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(model.recoveries.load(Ordering::SeqCst), 1);
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+}
+
+#[test]
+fn failed_model_recovery_pauses_before_retrying_or_draining_next_item() {
+    let temp = tempdir().unwrap();
+    let first = source(temp.path(), "model-crash.pdf");
+    let second = source(temp.path(), "must-wait.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(RecoveringModel::new(
+        vec![Err(ModelFailure::retryable("MODEL_REQUEST_FAILED"))],
+        false,
+    ));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&first, "first-hash");
+    files.trust(&second, "second-hash");
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings.save(&AppSettings::default()).unwrap();
+    let pipeline = Pipeline::open(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model.clone(),
+        files,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+    pipeline.enqueue_files(&[first, second]).unwrap();
+
+    pipeline.run_until_idle().unwrap();
+
+    assert!(pipeline.is_paused());
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(model.recoveries.load(Ordering::SeqCst), 1);
+    assert_eq!(pipeline.list().unwrap()[1].status, QueueStatus::Queued);
 }
 
 #[test]
@@ -477,6 +623,86 @@ fn pause_starts_no_item_and_cancel_interrupts_the_active_worker_request() {
 
     assert_eq!(worker.cancellations.load(Ordering::SeqCst), 1);
     assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Canceled);
+}
+
+#[test]
+fn pause_during_extraction_returns_item_to_queue_before_analysis() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "pause-extracting.pdf");
+    let worker = Arc::new(FakeWorker::blocking(Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "pause-hash");
+    let pipeline = Arc::new(pipeline(
+        temp.path(),
+        Arc::clone(&worker),
+        Arc::clone(&model),
+        files,
+        AppSettings::default(),
+    ));
+    pipeline.enqueue_files(&[path]).unwrap();
+
+    let running = Arc::clone(&pipeline);
+    let join = thread::spawn(move || running.run_until_idle());
+    while worker.active.load(Ordering::SeqCst) == 0 {
+        thread::yield_now();
+    }
+    pipeline.pause();
+    *worker.gate.0.lock().unwrap() = false;
+    worker.gate.1.notify_all();
+    join.join().unwrap().unwrap();
+
+    assert_eq!(model.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Queued);
+}
+
+#[test]
+fn pause_during_analysis_prevents_automatic_apply_until_resume() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "pause-analysis.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(GatedSuccessModel::new());
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "pause-hash");
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Arc::new(
+        Pipeline::open(
+            temp.path().join("queue.sqlite3"),
+            worker,
+            model.clone(),
+            files.clone(),
+            Arc::new(RecordingEvents::default()),
+            settings,
+        )
+        .unwrap(),
+    );
+    pipeline.enqueue_files(&[path]).unwrap();
+
+    let running = Arc::clone(&pipeline);
+    let join = thread::spawn(move || running.run_until_idle());
+    while model.calls.load(Ordering::SeqCst) == 0 {
+        thread::yield_now();
+    }
+    pipeline.pause();
+    model.release();
+    join.join().unwrap().unwrap();
+
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+    assert!(files.applies.lock().unwrap().is_empty());
+
+    pipeline.resume();
+    pipeline.run_until_idle().unwrap();
+    assert_eq!(files.applies.lock().unwrap().len(), 1);
 }
 
 #[test]

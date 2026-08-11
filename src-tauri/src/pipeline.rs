@@ -273,6 +273,9 @@ pub trait WorkerBoundary: Send + Sync {
 
 pub trait ModelBoundary: Send + Sync {
     fn propose(&self, document: &DocumentInput) -> Result<ModelProposal, ModelFailure>;
+    fn recover(&self, _failure: &ModelFailure) -> Result<(), ModelFailure> {
+        Ok(())
+    }
     fn cancel(&self) -> Result<(), ModelFailure> {
         Err(ModelFailure::fatal("MODEL_CANCEL_UNAVAILABLE"))
     }
@@ -283,8 +286,8 @@ pub trait ModelBoundary: Send + Sync {
 
 impl ModelBoundary for ModelClient {
     fn propose(&self, document: &DocumentInput) -> Result<ModelProposal, ModelFailure> {
-        ModelClient::propose(self, document)
-            .map_err(|error| ModelFailure::fatal(error.code().as_str()))
+        self.propose_once(document)
+            .map_err(|error| ModelFailure::retryable(error.code().as_str()))
     }
 }
 
@@ -519,6 +522,7 @@ impl Pipeline {
             .run_lock
             .lock()
             .map_err(|_| PipelineError::new("STATE_CONFLICT", "pipeline lock is unavailable"))?;
+        self.apply_pending_automatic_ready()?;
         while !self.paused.load(Ordering::SeqCst) && self.run_next_inner()? {}
         Ok(())
     }
@@ -529,6 +533,7 @@ impl Pipeline {
             .lock()
             .map_err(|_| PipelineError::new("STATE_CONFLICT", "pipeline lock is unavailable"))?;
         if !self.paused.load(Ordering::SeqCst) {
+            self.apply_pending_automatic_ready()?;
             let _ = self.run_next_inner()?;
         }
         Ok(())
@@ -616,6 +621,18 @@ impl Pipeline {
             }
         };
         self.ensure_lease(&lease)?;
+        if self.paused.load(Ordering::SeqCst) {
+            lease.stop_and_check()?;
+            self.store.transition(
+                item.id,
+                QueueStatus::Extracting,
+                QueueStatus::Queued,
+                None,
+            )?;
+            self.active_item.store(0, Ordering::SeqCst);
+            self.events.queue_changed();
+            return Ok(true);
+        }
         self.store.transition(
             item.id,
             QueueStatus::Extracting,
@@ -655,7 +672,13 @@ impl Pipeline {
                 }
                 self.store
                     .record_processing_failure(item.id, model_error_code(&error))?;
-                if error.code == "MODEL_CANCEL_FAILED" {
+                if matches!(
+                    error.code.as_str(),
+                    "MODEL_CANCEL_FAILED"
+                        | "MODEL_RECOVERY_FAILED"
+                        | "MODEL_REQUEST_FAILED"
+                        | "MODEL_RESPONSE_INVALID"
+                ) {
                     self.paused.store(true, Ordering::SeqCst);
                 }
                 self.events.queue_changed();
@@ -718,11 +741,46 @@ impl Pipeline {
                     return Ok(true);
                 }
             };
-            if settings.automatic_rename {
+            if settings.automatic_rename && !self.paused.load(Ordering::SeqCst) {
                 let _ = self.apply_if_unchanged(&ready_item, &record.filename, &settings);
             }
         }
         Ok(true)
+    }
+
+    fn apply_pending_automatic_ready(&self) -> PipelineResult<()> {
+        if self.paused.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let ready = self
+            .list()?
+            .into_iter()
+            .filter(|item| item.status == QueueStatus::Ready)
+            .collect::<Vec<_>>();
+        if ready.is_empty() {
+            return Ok(());
+        }
+        let settings = self.settings.load()?;
+        if !settings.automatic_rename {
+            return Ok(());
+        }
+        for item in ready {
+            if self.paused.load(Ordering::SeqCst) {
+                break;
+            }
+            let Some(proposal) = item.proposal else {
+                self.repository.mark_needs_review(item.id, "PROPOSAL_MISSING")?;
+                continue;
+            };
+            let queue_item = self
+                .store
+                .list()?
+                .into_iter()
+                .find(|candidate| candidate.id == item.id)
+                .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
+            let _ = self.apply_if_unchanged(&queue_item, &proposal.filename, &settings);
+        }
+        Ok(())
     }
 
     fn ensure_lease(&self, lease: &LeaseKeeper) -> PipelineResult<()> {
@@ -747,7 +805,9 @@ impl Pipeline {
             .name("intern-model-request".into())
             .spawn(move || {
                 let result = match request_model.propose(&document) {
-                    Err(error) if error.retryable => request_model.propose(&document),
+                    Err(error) if error.retryable => request_model
+                        .recover(&error)
+                        .and_then(|()| request_model.propose(&document)),
                     result => result,
                 };
                 let _ = sender.send(result);
@@ -850,6 +910,14 @@ impl Pipeline {
             .into_iter()
             .find(|item| item.id == id)
             .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
+        if item.status == QueueStatus::NeedsReview
+            && item.error_code == Some(ErrorCode::SourceDeleteFailed)
+        {
+            return Err(PipelineError::new(
+                "RECONCILIATION_REQUIRED",
+                "retry the verified source deletion or resolve the files manually",
+            ));
+        }
         match item.status {
             QueueStatus::Queued
             | QueueStatus::Extracting
@@ -890,14 +958,21 @@ impl Pipeline {
     }
 
     pub fn retry(&self, id: i64) -> PipelineResult<()> {
-        let status = self
+        let item = self
             .store
             .list()?
             .into_iter()
             .find(|item| item.id == id)
-            .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?
-            .status;
-        match status {
+            .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
+        if item.status == QueueStatus::NeedsReview
+            && item.error_code == Some(ErrorCode::SourceDeleteFailed)
+        {
+            let claimed = self.store.claim_deferred_reconciliation(id)?;
+            let result = self.files.reconcile(&claimed);
+            self.events.queue_changed();
+            return result;
+        }
+        match item.status {
             QueueStatus::Failed => {
                 self.store.manual_retry(id)?;
             }
@@ -915,6 +990,7 @@ impl Pipeline {
     }
 
     pub fn remove(&self, id: i64) -> PipelineResult<()> {
+        self.reject_deferred_reconciliation_mutation(id)?;
         self.repository.remove_item(id)?;
         self.events.queue_changed();
         Ok(())
@@ -928,6 +1004,12 @@ impl Pipeline {
             .into_iter()
             .find(|item| item.id == id)
             .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
+        if item.error_code == Some(ErrorCode::SourceDeleteFailed) {
+            return Err(PipelineError::new(
+                "RECONCILIATION_REQUIRED",
+                "retry the verified source deletion or resolve the files manually",
+            ));
+        }
         let source_extension = item
             .source_path
             .extension()
@@ -976,6 +1058,12 @@ impl Pipeline {
             .into_iter()
             .find(|item| item.id == id)
             .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
+        if item.error_code == Some(ErrorCode::SourceDeleteFailed) {
+            return Err(PipelineError::new(
+                "RECONCILIATION_REQUIRED",
+                "retry the verified source deletion or resolve the files manually",
+            ));
+        }
         self.store.complete_keep_original(id, item.status)?;
         self.events.queue_changed();
         Ok(())
@@ -1009,6 +1097,24 @@ impl Pipeline {
         let removed = self.store.clear_terminal()?;
         self.events.queue_changed();
         Ok(removed)
+    }
+
+    fn reject_deferred_reconciliation_mutation(&self, id: i64) -> PipelineResult<()> {
+        let item = self
+            .store
+            .list()?
+            .into_iter()
+            .find(|item| item.id == id)
+            .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
+        if item.status == QueueStatus::NeedsReview
+            && item.error_code == Some(ErrorCode::SourceDeleteFailed)
+        {
+            return Err(PipelineError::new(
+                "RECONCILIATION_REQUIRED",
+                "retry the verified source deletion or resolve the files manually",
+            ));
+        }
+        Ok(())
     }
 
     pub fn recover(&self) -> PipelineResult<()> {
@@ -1305,6 +1411,8 @@ fn review_reason(reason: &ReviewReason) -> &'static str {
         ReviewReason::ModelRequestedReview => "MODEL_REQUESTED_REVIEW",
         ReviewReason::ParserWarning => "PARSER_WARNING",
         ReviewReason::DescriptionTooLong => "DESCRIPTION_TOO_LONG",
+        ReviewReason::DescriptionInvalid => "DESCRIPTION_INVALID",
+        ReviewReason::DescriptionUnsupported => "DESCRIPTION_UNSUPPORTED",
     }
 }
 

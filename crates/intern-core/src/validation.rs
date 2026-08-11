@@ -9,7 +9,11 @@ pub fn validate_proposal(candidate: ModelProposal, packet: &DocumentPacket) -> V
     let mut reasons = Vec::new();
     let mut document_date = candidate.document_date.clone();
     let mut date_kind = document_date.as_ref().and(candidate.date_kind.clone());
-    if let Some(date) = document_date.as_deref() {
+    if matches!(candidate.date_kind, Some(crate::DateKind::Due)) {
+        document_date = None;
+        date_kind = None;
+        push_reason(&mut reasons, ReviewReason::InvalidDate);
+    } else if let Some(date) = document_date.as_deref() {
         if !valid_iso_date(date) {
             document_date = None;
             date_kind = None;
@@ -54,7 +58,7 @@ pub fn validate_proposal(candidate: ModelProposal, packet: &DocumentPacket) -> V
         })
         .collect();
 
-    let description = first_sentence(&candidate.description, &mut reasons);
+    let description = validated_description(&candidate.description, packet, &mut reasons);
     if !candidate.confidence.is_finite() || candidate.confidence < READY_CONFIDENCE {
         push_reason(&mut reasons, ReviewReason::LowConfidence);
     }
@@ -105,15 +109,71 @@ fn supported_optional_field(
     }
 }
 
-fn first_sentence(description: &str, reasons: &mut Vec<ReviewReason>) -> String {
+fn validated_description(
+    description: &str,
+    packet: &DocumentPacket,
+    reasons: &mut Vec<ReviewReason>,
+) -> String {
     let trimmed = description.trim();
+    let mut sentence = trimmed.to_owned();
     for (index, character) in trimmed.char_indices() {
         if matches!(character, '.' | '!' | '?') && index + character.len_utf8() < trimmed.len() {
             push_reason(reasons, ReviewReason::DescriptionTooLong);
-            return trimmed[..index + character.len_utf8()].to_owned();
+            sentence = trimmed[..index + character.len_utf8()].to_owned();
+            break;
         }
     }
-    trimmed.to_owned()
+    if sentence.split_whitespace().count() > 30 {
+        push_reason(reasons, ReviewReason::DescriptionTooLong);
+        let mut words = sentence.split_whitespace().take(30).collect::<Vec<_>>();
+        if let Some(last) = words.last_mut() {
+            *last = last.trim_end_matches(|character| matches!(character, '.' | '!' | '?'));
+        }
+        sentence = format!("{}.", words.join(" "));
+    }
+    if !is_single_complete_sentence(&sentence) {
+        push_reason(reasons, ReviewReason::DescriptionInvalid);
+    }
+    if contains_unsupported_description_fact(&sentence, packet) {
+        push_reason(reasons, ReviewReason::DescriptionUnsupported);
+    }
+    sentence
+}
+
+fn is_single_complete_sentence(description: &str) -> bool {
+    let trimmed = description.trim();
+    let Some(last) = trimmed.chars().last() else {
+        return false;
+    };
+    if !matches!(last, '.' | '!' | '?') {
+        return false;
+    }
+    let terminal_count = trimmed
+        .chars()
+        .filter(|character| matches!(character, '.' | '!' | '?'))
+        .count();
+    let starts_like_sentence = trimmed
+        .chars()
+        .find(|character| character.is_alphabetic())
+        .is_some_and(char::is_uppercase);
+    terminal_count == 1 && starts_like_sentence && trimmed.split_whitespace().count() <= 30
+}
+
+fn contains_unsupported_description_fact(description: &str, packet: &DocumentPacket) -> bool {
+    description
+        .split_whitespace()
+        .enumerate()
+        .filter_map(|(index, raw)| {
+            let token = raw.trim_matches(|character: char| !character.is_alphanumeric());
+            (!token.is_empty()).then_some((index, token))
+        })
+        .any(|(index, token)| {
+            let date_like = token.len() == 4 && token.bytes().all(|byte| byte.is_ascii_digit());
+            let named_fact = index > 0
+                && token.chars().next().is_some_and(char::is_uppercase)
+                && token.chars().any(char::is_alphabetic);
+            (date_like || named_fact) && !packet_contains(packet, token)
+        })
 }
 
 fn push_reason(reasons: &mut Vec<ReviewReason>, reason: ReviewReason) {

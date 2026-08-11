@@ -8,4 +8,10 @@ describe('App', () => {
 
     expect(screen.getByRole('main', { name: 'Intern' })).toBeInTheDocument();
   });
+
+  it('exposes one unambiguous Settings action', async () => {
+    render(<App />);
+
+    expect(await screen.findAllByRole('button', { name: 'Settings' })).toHaveLength(1);
+  });
 });

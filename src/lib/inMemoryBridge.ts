@@ -45,7 +45,7 @@ function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
 function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): DesktopBridge {
   let items = (options.items ?? seedItems).map((item) => ({ ...item }));
   let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false };
-  let setup: SetupState = { state: 'ready', downloadedBytes: 3_221_225_472, totalBytes: 3_221_225_472, ...options.setup };
+  let setup: SetupState = { state: 'ready', downloadedBytes: 3_278_329_184, totalBytes: 3_278_329_184, ...options.setup };
   const downloadStepBytes = options.downloadStepBytes ?? Math.max(1, Math.ceil(setup.totalBytes / 4));
   const downloadIntervalMs = options.downloadIntervalMs ?? 40;
   let downloadTimer: ReturnType<typeof setInterval> | undefined;
@@ -83,6 +83,7 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     addFolder: async (folder) => addFolder(folder),
     pauseQueue: async () => { items = items.map((item) => item.status === 'processing' ? { ...item, status: 'waiting' as const } : item); },
     resumeQueue: async () => { const item = items.find((entry) => entry.status === 'waiting'); if (item) update(item.id, { status: 'processing', progress: 0 }); },
+    cancel: async (id) => update(id, { status: 'failed', progress: undefined, reason: 'Canceled.' }),
     approve: async (id, filename, description) => update(id, { status: 'completed', proposedFilename: filename, description, undoable: true }),
     keepOriginal: async (id) => update(id, { status: 'completed', proposedFilename: undefined, undoable: true }),
     retry: async (id) => update(id, { status: 'waiting', progress: undefined }),
@@ -98,13 +99,23 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     getSetup: async () => ({ ...setup }),
     startModelDownload: async () => {
       if (setup.state === 'downloading') return;
-      setup = { ...setup, state: 'downloading', downloadedBytes: 0, error: undefined };
+      setup = { ...setup, state: 'downloading', error: undefined };
       downloadTimer = setInterval(() => {
         const downloadedBytes = Math.min(setup.totalBytes, setup.downloadedBytes + downloadStepBytes);
         setup = { ...setup, downloadedBytes };
         if (downloadedBytes >= setup.totalBytes) finishDownload();
       }, downloadIntervalMs);
     },
+    setupCancel: async () => {
+      if (downloadTimer) clearInterval(downloadTimer);
+      downloadTimer = undefined;
+      setup = { ...setup, state: 'required', error: 'MODEL_DOWNLOAD_CANCELED' };
+    },
+    setupChooseExisting: async () => {
+      if (setup.state === 'downloading') throw { code: 'SETUP_BUSY', message: 'a model setup operation is already active' };
+      setup = { ...setup, state: 'ready', downloadedBytes: setup.totalBytes, error: undefined };
+    },
+    clearHistory: async () => { items = items.filter((item) => item.status !== 'completed' && item.status !== 'failed'); },
   };
 }
 
@@ -146,6 +157,7 @@ export function createBrowserSelectionBoundary(): SelectionBoundary {
   return {
     pickFiles: async () => (await chooseBrowserFiles(false)).map((file) => browserFileSelection(file as BrowserFile)),
     pickFolder: async () => browserFolderSelection(await chooseBrowserFiles(true)),
+    pickExistingModelFiles: async () => undefined,
     resolveDrop: async (payload: unknown): Promise<SelectionResult> => {
       const transfer = payload as DataTransfer;
       const files = Array.from(transfer.files ?? []);

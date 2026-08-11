@@ -21,7 +21,7 @@ fn proposal() -> ModelProposal {
         document_type: Some("Agreement".into()),
         filename_subject: Some("Acme Corporation".into()),
         parties: vec!["Acme Corporation".into()],
-        description: "An agreement with Acme Corporation".into(),
+        description: "An agreement with Acme Corporation.".into(),
         confidence: 0.86,
         needs_review: false,
         review_reasons: Vec::new(),
@@ -108,6 +108,7 @@ fn evidence_matching_normalizes_unicode_case_quotes_and_whitespace() {
     let mut candidate = proposal();
     candidate.filename_subject = Some("ＡＣＭＥ “North”".into());
     candidate.parties = vec!["ＡＣＭＥ “North”".into()];
+    candidate.description = "An agreement for ＡＣＭＥ “North”.".into();
     candidate.evidence.subject = Some("acme \"north\"".into());
     candidate.evidence.parties = vec!["acme \"north\"".into()];
     let outcome = validate_proposal(
@@ -122,6 +123,7 @@ fn evidence_matching_uses_full_unicode_case_folding() {
     let mut candidate = proposal();
     candidate.filename_subject = Some("STRASSE".into());
     candidate.parties = vec!["STRASSE".into()];
+    candidate.description = "An agreement for STRASSE.".into();
     candidate.evidence.subject = Some("Straße".into());
     candidate.evidence.parties = vec!["Straße".into()];
     let outcome = validate_proposal(candidate, &packet("Agreement for Straße"));
@@ -160,6 +162,72 @@ fn multiple_sentence_description_is_reduced_and_reviewed() {
     assert_eq!(outcome.proposal.description, "First sentence.");
     assert_eq!(outcome.status, ProposalStatus::NeedsReview);
     assert!(outcome.reasons.contains(&ReviewReason::DescriptionTooLong));
+}
+
+#[test]
+fn description_over_thirty_words_is_bounded_and_reviewed() {
+    let mut candidate = proposal();
+    candidate.description = format!("{}.", vec!["agreement"; 31].join(" "));
+    let outcome = validate_proposal(candidate, &packet("Agreement with Acme Corporation."));
+
+    assert!(outcome.proposal.description.split_whitespace().count() <= 30);
+    assert_eq!(outcome.status, ProposalStatus::NeedsReview);
+    assert!(outcome.reasons.contains(&ReviewReason::DescriptionTooLong));
+}
+
+#[test]
+fn description_without_a_complete_sentence_is_never_ready() {
+    let mut candidate = proposal();
+    candidate.description = "Agreement with Acme Corporation".into();
+    let outcome = validate_proposal(candidate, &packet("Agreement with Acme Corporation."));
+
+    assert_eq!(outcome.status, ProposalStatus::NeedsReview);
+    assert!(outcome.reasons.contains(&ReviewReason::DescriptionInvalid));
+}
+
+#[test]
+fn unsupported_party_or_date_in_description_forces_review() {
+    let mut party = proposal();
+    party.description = "An agreement between Acme Corporation and Globex Corporation.".into();
+    let party_outcome = validate_proposal(party, &packet("Agreement with Acme Corporation."));
+    assert_eq!(party_outcome.status, ProposalStatus::NeedsReview);
+    assert!(party_outcome
+        .reasons
+        .contains(&ReviewReason::DescriptionUnsupported));
+
+    let mut date = proposal();
+    date.description = "An agreement effective in 2037 for Acme Corporation.".into();
+    let date_outcome = validate_proposal(date, &packet("Agreement with Acme Corporation."));
+    assert_eq!(date_outcome.status, ProposalStatus::NeedsReview);
+    assert!(date_outcome
+        .reasons
+        .contains(&ReviewReason::DescriptionUnsupported));
+}
+
+#[test]
+fn due_date_is_removed_and_never_ready_even_with_literal_evidence() {
+    let mut candidate = proposal();
+    candidate.document_date = Some("2024-04-12".into());
+    candidate.date_kind = Some(DateKind::Due);
+    candidate.evidence.date = Some("due April 12, 2024".into());
+    let outcome = validate_proposal(
+        candidate,
+        &packet("Agreement with Acme Corporation, due April 12, 2024."),
+    );
+
+    assert_eq!(outcome.proposal.document_date, None);
+    assert_eq!(outcome.proposal.date_kind, None);
+    assert_eq!(outcome.status, ProposalStatus::NeedsReview);
+    assert!(outcome.reasons.contains(&ReviewReason::InvalidDate));
+
+    let mut kind_only = proposal();
+    kind_only.date_kind = Some(DateKind::Due);
+    let kind_only_outcome =
+        validate_proposal(kind_only, &packet("Agreement with Acme Corporation."));
+    assert_eq!(kind_only_outcome.status, ProposalStatus::NeedsReview);
+    assert!(kind_only_outcome
+        .reasons
+        .contains(&ReviewReason::InvalidDate));
 }
 
 #[test]

@@ -679,6 +679,92 @@ impl QueueStore {
         Ok(item)
     }
 
+    pub fn defer_published_reconciliation(
+        &self,
+        id: i64,
+        receipt_id: i64,
+        error: ErrorCode,
+    ) -> InternResult<QueueItem> {
+        if error != ErrorCode::SourceDeleteFailed {
+            return Err(InternError::new(
+                ErrorCode::InvalidData,
+                "only source-delete uncertainty can be deferred for user review",
+            ));
+        }
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(InternError::from)?;
+        let changed = transaction
+            .execute(
+                "UPDATE queue_items
+             SET status = 'needs_review', reconciliation_receipt_id = ?1,
+                 active_receipt_id = NULL, previous_status = NULL,
+                 owner_session = NULL, lease_expires_at = NULL,
+                 error_code = ?2, updated_at = ?3
+             WHERE id = ?4 AND status = 'applying' AND owner_session = ?5
+               AND active_receipt_id = ?1
+               AND EXISTS (
+                 SELECT 1 FROM operation_receipts receipts
+                 WHERE receipts.id = ?1 AND receipts.queue_item_id = ?4
+                   AND receipts.direction = 'apply' AND receipts.stage = 'published'
+               )",
+                params![receipt_id, error.as_str(), now(), id, self.session_id],
+            )
+            .map_err(InternError::from)?;
+        if changed != 1 {
+            transaction.rollback().map_err(InternError::from)?;
+            return Err(InternError::new(
+                ErrorCode::StateConflict,
+                "published source-delete uncertainty could not be deferred",
+            ));
+        }
+        let item = query_one(&transaction, "WHERE id = ?1", params![id])?;
+        transaction.commit().map_err(InternError::from)?;
+        Ok(item)
+    }
+
+    pub fn claim_deferred_reconciliation(&self, id: i64) -> InternResult<QueueItem> {
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(InternError::from)?;
+        touch_session(&transaction, &self.session_id)?;
+        let changed = transaction
+            .execute(
+                "UPDATE queue_items
+             SET status = 'applying', previous_status = 'ready', owner_session = ?1,
+                 lease_expires_at = ?2, active_receipt_id = reconciliation_receipt_id,
+                 updated_at = ?3
+             WHERE id = ?4 AND status = 'needs_review'
+               AND error_code = 'SOURCE_DELETE_FAILED'
+               AND active_receipt_id IS NULL AND reconciliation_receipt_id IS NOT NULL
+               AND EXISTS (
+                 SELECT 1 FROM operation_receipts receipts
+                 WHERE receipts.id = queue_items.reconciliation_receipt_id
+                   AND receipts.queue_item_id = queue_items.id
+                   AND receipts.direction = 'apply' AND receipts.stage = 'published'
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM queue_items active
+                 WHERE active.id <> ?4
+                   AND active.status IN ('extracting', 'analyzing', 'applying')
+               )",
+                params![self.session_id, lease_deadline(), now(), id],
+            )
+            .map_err(InternError::from)?;
+        if changed != 1 {
+            transaction.rollback().map_err(InternError::from)?;
+            return Err(InternError::new(
+                ErrorCode::StateConflict,
+                "deferred source deletion is not available for explicit retry",
+            ));
+        }
+        let item = query_one(&transaction, "WHERE id = ?1", params![id])?;
+        transaction.commit().map_err(InternError::from)?;
+        Ok(item)
+    }
+
     pub fn recover_interrupted(&self) -> InternResult<usize> {
         let connection = self.lock()?;
         let timestamp = now();

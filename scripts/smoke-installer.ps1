@@ -2,7 +2,12 @@
 param(
     [Parameter(Mandatory = $true)][string]$InstallerPath,
     [string]$InstallDirectory = (Join-Path $env:LOCALAPPDATA "Intern"),
-    [string]$FixtureDirectory = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")).Path "fixtures/generated")
+    [string]$FixtureDirectory = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")).Path "fixtures/generated"),
+    [string]$EvidencePath,
+    [string]$Commit = $env:GITHUB_SHA,
+    [string]$Workflow = $env:GITHUB_WORKFLOW,
+    [string]$RunId = $env:GITHUB_RUN_ID,
+    [string]$RunAttempt = $env:GITHUB_RUN_ATTEMPT
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,12 +15,17 @@ Set-StrictMode -Version Latest
 
 $Installer = (Resolve-Path -LiteralPath $InstallerPath).Path
 if ([System.IO.Path]::GetExtension($Installer) -ne ".exe") { throw "Installer must be an NSIS executable" }
+$InstallerSha256 = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($EvidencePath -and (@($Commit, $Workflow, $RunId, $RunAttempt) | Where-Object { [string]::IsNullOrWhiteSpace($_) })) {
+    throw "Evidence output requires commit, workflow, run id, and run attempt"
+}
 $UserDataDirectory = Join-Path $env:LOCALAPPDATA "com.intern.app"
 $Sentinel = Join-Path $UserDataDirectory "installer-smoke-user-data.txt"
 New-Item -ItemType Directory -Path $UserDataDirectory -Force | Out-Null
 Set-Content -LiteralPath $Sentinel -Value "must survive uninstall" -Encoding utf8NoBOM
 
 if (Test-Path -LiteralPath $InstallDirectory) { throw "Smoke install target already exists: $InstallDirectory" }
+$AppProcess = $null
 $Install = Start-Process -FilePath $Installer -ArgumentList "/S" -Wait -PassThru
 if ($Install.ExitCode -ne 0) { throw "NSIS installer exited with $($Install.ExitCode)" }
 
@@ -55,6 +65,22 @@ try {
 
     & (Join-Path $PSScriptRoot "smoke-worker.ps1") -WorkerPath (Join-Path $InstallDirectory "intern-worker.exe") -RuntimeDirectory $InstallDirectory -FixtureDirectory $FixtureDirectory
 
+    $AppProcess = Start-Process -FilePath $App -PassThru
+    $WindowReady = $false
+    for ($Attempt = 0; $Attempt -lt 60; $Attempt += 1) {
+        Start-Sleep -Milliseconds 500
+        $AppProcess.Refresh()
+        if ($AppProcess.HasExited) { throw "Installed Intern.exe exited before its window became ready" }
+        if ($AppProcess.MainWindowHandle -ne 0) {
+            $WindowReady = $true
+            break
+        }
+    }
+    if (-not $WindowReady) { throw "Installed Intern.exe did not create a main window" }
+    if (-not $AppProcess.CloseMainWindow()) { throw "Installed Intern.exe rejected a normal window close request" }
+    if (-not $AppProcess.WaitForExit(15000)) { throw "Installed Intern.exe did not shut down cleanly" }
+    if ($AppProcess.ExitCode -ne 0) { throw "Installed Intern.exe exited with $($AppProcess.ExitCode)" }
+
     $Uninstaller = Get-ChildItem -LiteralPath $InstallDirectory -File -Filter "uninstall*.exe" | Select-Object -First 1
     if (-not $Uninstaller) { throw "NSIS uninstaller is missing" }
     $Uninstall = Start-Process -FilePath $Uninstaller.FullName -ArgumentList "/S" -Wait -PassThru
@@ -65,9 +91,33 @@ try {
         throw "Installation files remain after uninstall: $InstallDirectory"
     }
     if (-not (Test-Path -LiteralPath $Sentinel -PathType Leaf)) { throw "Uninstall removed user data" }
-    Write-Host "Per-user NSIS signed runtime, worker PDF/OCR, and install/uninstall smoke passed."
+    if ($EvidencePath) {
+        $EvidenceDirectory = Split-Path -Parent $EvidencePath
+        if ($EvidenceDirectory) { New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null }
+        [ordered]@{
+            schema_version = 1
+            status = "accepted"
+            commit = $Commit
+            workflow = $Workflow
+            run_id = $RunId
+            run_attempt = $RunAttempt
+            installer_sha256 = $InstallerSha256
+            checks = [ordered]@{
+                app_launched = $true
+                clean_shutdown = $true
+                runtime_inventory_verified = $true
+                installed_worker_core_path = $true
+                uninstall_succeeded = $true
+                user_data_retained = $true
+            }
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $EvidencePath -Encoding utf8NoBOM
+    }
+    Write-Host "Per-user NSIS app launch, clean shutdown, signed runtime, worker PDF/OCR, and install/uninstall smoke passed."
 }
 finally {
+    if ($AppProcess -and -not $AppProcess.HasExited) {
+        Stop-Process -Id $AppProcess.Id -Force -ErrorAction SilentlyContinue
+    }
     if (Test-Path -LiteralPath $InstallDirectory) {
         Write-Warning "Installer smoke directory remains for inspection: $InstallDirectory"
     }

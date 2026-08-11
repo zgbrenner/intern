@@ -25,6 +25,7 @@ use intern_core::{ExtractedDocument, ParserWarning};
 const PROTOCOL_VERSION: u32 = 1;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+const STALE_WORKSPACE_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -137,10 +138,9 @@ pub fn adapt_parsed_document(document: WorkerDocument) -> Result<ParsedDocument,
         .collect::<Vec<_>>();
     if document.pages.iter().any(|page| {
         page.source == WorkerPageSource::Ocr
-            && (page.vision_escalated
-                || page
-                    .ocr_confidence
-                    .is_some_and(|confidence| confidence < 75.0))
+            && page
+                .ocr_confidence
+                .is_some_and(|confidence| confidence < 75.0)
     }) && !parser_warnings
         .iter()
         .any(|warning| warning.code == "LOW_OCR_CONFIDENCE")
@@ -234,6 +234,7 @@ impl Drop for WorkerProcess {
 
 pub struct SupervisedWorker {
     executable: PathBuf,
+    temp_root: Option<PathBuf>,
     handshake_timeout: Duration,
     parser_timeout: Duration,
     running: Mutex<Option<Arc<WorkerProcess>>>,
@@ -245,12 +246,19 @@ impl SupervisedWorker {
     pub fn new(executable: impl Into<PathBuf>) -> Self {
         Self {
             executable: executable.into(),
+            temp_root: None,
             handshake_timeout: HANDSHAKE_TIMEOUT,
             parser_timeout: Duration::from_secs(PARSER_TIMEOUT_SECONDS),
             running: Mutex::new(None),
             active: Mutex::new(None),
             canceled: Mutex::new(HashSet::new()),
         }
+    }
+
+    pub fn with_temp_root(executable: impl Into<PathBuf>, temp_root: impl Into<PathBuf>) -> Self {
+        let mut worker = Self::new(executable);
+        worker.temp_root = Some(temp_root.into());
+        worker
     }
 
     #[doc(hidden)]
@@ -270,7 +278,7 @@ impl SupervisedWorker {
         if let Some(process) = running.as_ref() {
             return Ok(Arc::clone(process));
         }
-        let process = Arc::new(launch(&self.executable)?);
+        let process = Arc::new(launch(&self.executable, self.temp_root.as_deref())?);
         handshake(&process, self.handshake_timeout)?;
         *running = Some(Arc::clone(&process));
         Ok(process)
@@ -448,7 +456,7 @@ impl WorkerBoundary for SupervisedWorker {
         {
             process.terminate();
         }
-        let process = Arc::new(launch(&self.executable)?);
+        let process = Arc::new(launch(&self.executable, self.temp_root.as_deref())?);
         handshake(&process, self.handshake_timeout)?;
         *self.running.lock().map_err(|_| WorkerFailure::crashed())? = Some(process);
         Ok(())
@@ -466,8 +474,11 @@ impl Drop for SupervisedWorker {
     }
 }
 
-fn launch(executable: &Path) -> Result<WorkerProcess, WorkerFailure> {
+fn launch(executable: &Path, temp_root: Option<&Path>) -> Result<WorkerProcess, WorkerFailure> {
     let mut command = Command::new(executable);
+    if let Some(temp_root) = temp_root {
+        command.env("INTERN_TEMP_ROOT", temp_root);
+    }
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -524,6 +535,59 @@ fn launch(executable: &Path) -> Result<WorkerProcess, WorkerFailure> {
         input: Mutex::new(input),
         output: Mutex::new(receiver),
     })
+}
+
+pub fn prepare_worker_temp_root(root: &Path, max_entries: usize) -> std::io::Result<usize> {
+    std::fs::create_dir_all(root)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let mut removed = 0;
+    for entry in std::fs::read_dir(root)? {
+        if removed >= max_entries {
+            break;
+        }
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        #[cfg(windows)]
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        let owned_name = entry
+            .file_name()
+            .to_str()
+            .is_some_and(is_stale_owned_workspace_name);
+        #[cfg(windows)]
+        let reparse_point = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0
+        };
+        #[cfg(not(windows))]
+        let reparse_point = false;
+        if owned_name && file_type.is_dir() && !file_type.is_symlink() && !reparse_point {
+            std::fs::remove_dir_all(entry.path())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn is_stale_owned_workspace_name(name: &str) -> bool {
+    if !name.starts_with("intern-worker-") {
+        return false;
+    }
+    let mut suffix = name.rsplit('-');
+    let Some(_nonce) = suffix.next().and_then(|value| value.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(created_nanos) = suffix.next().and_then(|value| value.parse::<u128>().ok()) else {
+        return false;
+    };
+    let now_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    now_nanos.saturating_sub(created_nanos) >= STALE_WORKSPACE_AGE.as_nanos()
 }
 
 fn handshake(process: &WorkerProcess, timeout: Duration) -> Result<(), WorkerFailure> {

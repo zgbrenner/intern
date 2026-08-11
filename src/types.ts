@@ -11,6 +11,7 @@ export interface QueueItem {
   evidence?: { date?: string; type?: string; parties?: string };
   reason?: string;
   progress?: number;
+  cancelable?: boolean;
   undoable?: boolean;
   proposalRevision?: string;
 }
