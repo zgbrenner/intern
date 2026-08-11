@@ -5,6 +5,7 @@ use intern_core::{DateKind, Evidence, ModelProposal};
 use reqwest::{Url, blocking::Client};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use super::{
     ModelError, ModelErrorCode, ModelResult,
@@ -21,6 +22,18 @@ pub struct ImageInput {
 pub struct DocumentInput {
     pub text: String,
     pub image: Option<ImageInput>,
+}
+
+pub fn document_input_sha256(document: &DocumentInput) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(document.text.as_bytes());
+    if let Some(image) = &document.image {
+        hasher.update([0]);
+        hasher.update(image.media_type.as_bytes());
+        hasher.update([0]);
+        hasher.update(&image.bytes);
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 pub struct ModelClient {

@@ -36,8 +36,6 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.0.x
-      - name: Require accepted Q4 evaluation evidence
-        run: node scripts/validate-model-evaluation.mjs docs/qa/model-evaluation.json
       - name: Install pinned Rust toolchain
         shell: pwsh
         run: |
@@ -59,6 +57,12 @@ jobs:
       - run: npm run check
       - run: npx playwright install chromium
       - run: npm run test:e2e
+      - name: Stage parser worker for desktop compile checks
+        shell: pwsh
+        run: |
+          cargo build --locked -p intern-worker
+          New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
+          Copy-Item target\debug\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace --all-targets
@@ -66,6 +70,7 @@ jobs:
         shell: pwsh
         run: |
           cargo build --locked -p intern-worker --release --features windows-native
+          cargo build --locked -p intern-app --release --bin intern-model-evidence-validator
           New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
           Copy-Item target\release\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
       - name: Fetch and verify pinned Windows assets
@@ -80,7 +85,15 @@ jobs:
           ./scripts/stage-windows-runtime.ps1 -Destination $Stage
           ./scripts/smoke-worker.ps1 -WorkerPath (Join-Path $Stage "intern-worker.exe") -RuntimeDirectory $Stage
           "INTERN_RUNTIME_STAGE=$Stage" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Run accepted production Q4 runtime smoke
+      - name: Require replayed and accepted Q4 or Q8 evaluation evidence
+        shell: pwsh
+        run: |
+          target\release\intern-model-evidence-validator.exe `
+            --worker (Join-Path $env:INTERN_RUNTIME_STAGE "intern-worker.exe") `
+            --fixtures fixtures\generated `
+            --report docs\qa\model-evaluation.json
+          node scripts/validate-model-evaluation.mjs docs/qa/model-evaluation.json
+      - name: Run accepted production selected-model runtime smoke
         shell: pwsh
         run: ./scripts/smoke-q4-runtime.ps1 -LlamaServerPath (Join-Path $env:INTERN_RUNTIME_STAGE "llama-server.exe")
       - run: npm run tauri build -- --bundles nsis -- --locked

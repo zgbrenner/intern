@@ -9,14 +9,18 @@ Set-StrictMode -Version Latest
 
 $Server = (Resolve-Path -LiteralPath $LlamaServerPath).Path
 $Manifest = Get-Content -LiteralPath $ModelManifestPath -Raw | ConvertFrom-Json
-if ($Manifest.schema_version -ne 1 -or $Manifest.model_id -ne "qwen2.5-vl-3b-instruct-q4-k-m" -or $Manifest.files.Count -ne 2) {
-    throw "Production Q4 model manifest is missing or changed"
+$ApprovedModels = @{
+    "qwen2.5-vl-3b-instruct-q4-k-m" = @{ name = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"; size = 1929901056L; sha256 = "d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12" }
+    "qwen2.5-vl-3b-instruct-q8-0" = @{ name = "Qwen2.5-VL-3B-Instruct-Q8_0.gguf"; size = 3285474304L; sha256 = "fa8aeb3b6bf6152774e87d13e09892aa065f4e0c4abe90806cd8ab18ff72d9fe" }
 }
-$Expected = @{
-    "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf" = @{ size = 1929901056; sha256 = "d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12" }
-    "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf" = @{ size = 1338428128; sha256 = "b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e" }
+$SelectedModel = $ApprovedModels[[string]$Manifest.model_id]
+if ($Manifest.schema_version -ne 1 -or $null -eq $SelectedModel -or $Manifest.files.Count -ne 2) {
+    throw "Production selected-model manifest is missing or changed"
 }
-$Work = Join-Path ([IO.Path]::GetTempPath()) ("intern-q4-smoke-" + [guid]::NewGuid().ToString("N"))
+$Expected = @{}
+$Expected[[string]$SelectedModel.name] = @{ size = $SelectedModel.size; sha256 = $SelectedModel.sha256 }
+$Expected["mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf"] = @{ size = 1338428128; sha256 = "b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e" }
+$Work = Join-Path ([IO.Path]::GetTempPath()) ("intern-selected-model-smoke-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $Work | Out-Null
 $Process = $null
 
@@ -38,7 +42,7 @@ try {
     $Port = ([Net.IPEndPoint]$Listener.LocalEndpoint).Port
     $Listener.Stop()
     $ApiKey = [guid]::NewGuid().ToString("N")
-    $Model = Join-Path $Work "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+    $Model = Join-Path $Work ([string]$SelectedModel.name)
     $Projector = Join-Path $Work "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf"
     $Log = Join-Path $Work "llama-server.log"
     $ErrorLog = Join-Path $Work "llama-server-error.log"
@@ -47,10 +51,10 @@ try {
     $Headers = @{ Authorization = "Bearer $ApiKey" }
     $Healthy = $false
     for ($Attempt = 0; $Attempt -lt 180; $Attempt += 1) {
-        if ($Process.HasExited) { throw "llama-server exited during Q4 startup: $(Get-Content -LiteralPath $Log -Raw) $(Get-Content -LiteralPath $ErrorLog -Raw)" }
+        if ($Process.HasExited) { throw "llama-server exited during selected-model startup: $(Get-Content -LiteralPath $Log -Raw) $(Get-Content -LiteralPath $ErrorLog -Raw)" }
         try { Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -Headers $Headers -TimeoutSec 5 | Out-Null; $Healthy = $true; break } catch { Start-Sleep -Seconds 2 }
     }
-    if (-not $Healthy) { throw "Timed out starting the production Q4 runtime" }
+    if (-not $Healthy) { throw "Timed out starting the production selected-model runtime" }
 
     $Body = @{
         model = $Manifest.model_id
@@ -61,8 +65,8 @@ try {
     $Response = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/v1/chat/completions" -Headers $Headers -ContentType "application/json" -Body $Body -TimeoutSec 300
     $Content = [string]$Response.choices[0].message.content
     $HasDate = $Content.Contains("February 14, 2025") -or $Content.Contains("2025-02-14")
-    if (-not $Content.Contains("Mira Vale") -or -not $HasDate) { throw "Production Q4 runtime omitted supported smoke facts: $Content" }
-    Write-Host "Pinned llama.cpp b10361 loaded the exact Q4+projector production pair and extracted representative supported facts."
+    if (-not $Content.Contains("Mira Vale") -or -not $HasDate) { throw "Production selected-model runtime omitted supported smoke facts: $Content" }
+    Write-Host "Pinned llama.cpp b10361 loaded the exact accepted model+projector production pair and extracted representative supported facts."
 }
 finally {
     if ($null -ne $Process -and -not $Process.HasExited) { Stop-Process -Id $Process.Id -Force }

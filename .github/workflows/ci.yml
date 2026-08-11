@@ -68,6 +68,12 @@ jobs:
       - run: npm run check
       - run: npx playwright install chromium
       - run: npm run test:e2e
+      - name: Stage parser worker for desktop compile checks
+        shell: pwsh
+        run: |
+          cargo build --locked -p intern-worker
+          New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
+          Copy-Item target\debug\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace --all-targets
