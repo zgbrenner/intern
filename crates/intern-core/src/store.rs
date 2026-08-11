@@ -1354,7 +1354,7 @@ fn invalid_column(index: usize, message: &str) -> rusqlite::Error {
     )
 }
 
-fn path_text(path: &PathBuf) -> String {
+fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 

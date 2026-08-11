@@ -676,6 +676,7 @@ impl FileApplier {
         self.cross_volume_transfer(receipt, identity, locked)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn planned_receipt(
         &self,
         queue_item_id: i64,
@@ -1296,10 +1297,7 @@ mod windows_file {
 
         fn delete(self: Box<Self>) -> io::Result<()> {
             if file_identity(&self.file)? != self.identity {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "locked file identity changed",
-                ));
+                return Err(io::Error::other("locked file identity changed"));
             }
             let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
             // SAFETY: `self.file` owns a live handle opened with DELETE access, and

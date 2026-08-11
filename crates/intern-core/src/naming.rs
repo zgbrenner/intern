@@ -164,6 +164,6 @@ fn fit_filename(base: &str, suffix: &str, extension: &str) -> String {
 
 fn windows_name_key(value: &str) -> String {
     value
-        .trim_end_matches(|character| matches!(character, ' ' | '.'))
+        .trim_end_matches([' ', '.'])
         .to_lowercase()
 }

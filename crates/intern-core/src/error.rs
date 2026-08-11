@@ -56,7 +56,7 @@ impl ErrorCode {
 pub struct InternError {
     code: ErrorCode,
     message: String,
-    receipt: Option<OperationReceipt>,
+    receipt: Option<Box<OperationReceipt>>,
 }
 
 impl InternError {
@@ -73,11 +73,11 @@ impl InternError {
     }
 
     pub fn receipt(&self) -> Option<&OperationReceipt> {
-        self.receipt.as_ref()
+        self.receipt.as_deref()
     }
 
     pub(crate) fn with_receipt(mut self, receipt: OperationReceipt) -> Self {
-        self.receipt = Some(receipt);
+        self.receipt = Some(Box::new(receipt));
         self
     }
 }
