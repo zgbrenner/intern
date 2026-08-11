@@ -12,9 +12,9 @@ use std::time::Duration;
 #[cfg(feature = "native-tesseract")]
 use image::{DynamicImage, ImageFormat};
 
-use crate::extract::{CancellationToken, ExtractionError, OcrBackend, OcrResult, RenderedPage};
 #[cfg(feature = "native-tesseract")]
 use crate::extract::apply_detected_rotation;
+use crate::extract::{CancellationToken, ExtractionError, OcrBackend, OcrResult, RenderedPage};
 #[cfg(feature = "native-tesseract")]
 use crate::limits::ResourceLimits;
 #[cfg(feature = "native-tesseract")]
@@ -94,8 +94,8 @@ impl TesseractOcr {
 
     fn is_sparse_osd_diagnostic(diagnostic: &str) -> bool {
         let diagnostic = diagnostic.to_ascii_lowercase();
-        let sparse = diagnostic.contains("too few characters")
-            || diagnostic.contains("skipping this page");
+        let sparse =
+            diagnostic.contains("too few characters") || diagnostic.contains("skipping this page");
         sparse && !Self::is_osd_initialization_diagnostic(&diagnostic)
     }
 
@@ -114,7 +114,12 @@ impl TesseractOcr {
     }
 
     fn diagnostic_summary(diagnostic: &str) -> String {
-        diagnostic.chars().take(512).collect::<String>().trim().to_owned()
+        diagnostic
+            .chars()
+            .take(512)
+            .collect::<String>()
+            .trim()
+            .to_owned()
     }
 
     fn write_png(
@@ -211,9 +216,7 @@ impl OcrBackend for TesseractOcr {
             let osd_path = Self::osd_output_path(&osd_base);
             workspace.register_existing(&osd_path)?;
             self.parse_osd(&std::fs::read(osd_path).map_err(ExtractionError::io)?)?
-        } else if osd_status.code() == Some(1)
-            && Self::is_sparse_osd_diagnostic(&osd_diagnostic)
-        {
+        } else if osd_status.code() == Some(1) && Self::is_sparse_osd_diagnostic(&osd_diagnostic) {
             // Tesseract uses exit code 1 when OSD cannot determine an
             // orientation for sparse or blank input. OCR remains useful.
             0
@@ -303,6 +306,8 @@ impl OcrBackend for TesseractOcr {
         _page: &RenderedPage,
         _cancel: &CancellationToken,
     ) -> Result<OcrResult, ExtractionError> {
-        Err(ExtractionError::native_assets_missing("Tesseract support is unavailable"))
+        Err(ExtractionError::native_assets_missing(
+            "Tesseract support is unavailable",
+        ))
     }
 }

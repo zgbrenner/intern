@@ -1,8 +1,10 @@
 use std::{
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use intern_core::{
@@ -24,8 +26,17 @@ fn applying(
     let item = store.enqueue(source, "queue-fingerprint").unwrap();
     let claimed = store.claim_next().unwrap().unwrap();
     assert_eq!(claimed.id, item.id);
-    store.transition(item.id, QueueStatus::Extracting, QueueStatus::Analyzing, None).unwrap();
-    store.transition(item.id, QueueStatus::Analyzing, QueueStatus::Ready, None).unwrap();
+    store
+        .transition(
+            item.id,
+            QueueStatus::Extracting,
+            QueueStatus::Analyzing,
+            None,
+        )
+        .unwrap();
+    store
+        .transition(item.id, QueueStatus::Analyzing, QueueStatus::Ready, None)
+        .unwrap();
     store.begin_applying(item.id, QueueStatus::Ready).unwrap();
     (FileApplier::new(filesystem, store.clone()), store, item.id)
 }
@@ -33,9 +44,18 @@ fn applying(
 #[test]
 fn filesystem_error_codes_are_stable() {
     assert_eq!(ErrorCode::FileChanged.as_str(), "FILE_CHANGED");
-    assert_eq!(ErrorCode::DestinationUnavailable.as_str(), "DESTINATION_UNAVAILABLE");
-    assert_eq!(ErrorCode::MoveVerificationFailed.as_str(), "MOVE_VERIFICATION_FAILED");
-    assert_eq!(ErrorCode::SourceDeleteFailed.as_str(), "SOURCE_DELETE_FAILED");
+    assert_eq!(
+        ErrorCode::DestinationUnavailable.as_str(),
+        "DESTINATION_UNAVAILABLE"
+    );
+    assert_eq!(
+        ErrorCode::MoveVerificationFailed.as_str(),
+        "MOVE_VERIFICATION_FAILED"
+    );
+    assert_eq!(
+        ErrorCode::SourceDeleteFailed.as_str(),
+        "SOURCE_DELETE_FAILED"
+    );
 }
 
 struct CopyingFileSystem {
@@ -53,27 +73,50 @@ struct HashMismatchLocked {
 }
 
 impl LockedFile for DeleteFailLocked {
-    fn hash(&mut self) -> io::Result<String> { self.inner.hash() }
-    fn identity(&self) -> io::Result<FileIdentity> { self.inner.identity() }
+    fn hash(&mut self) -> io::Result<String> {
+        self.inner.hash()
+    }
+    fn identity(&self) -> io::Result<FileIdentity> {
+        self.inner.identity()
+    }
     fn delete(self: Box<Self>) -> io::Result<()> {
-        Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected locked delete failure"))
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "injected locked delete failure",
+        ))
     }
 }
 
 impl LockedFile for HashMismatchLocked {
-    fn hash(&mut self) -> io::Result<String> { Ok("injected-copy-mismatch".into()) }
-    fn identity(&self) -> io::Result<FileIdentity> { self.inner.identity() }
-    fn delete(self: Box<Self>) -> io::Result<()> { self.inner.delete() }
+    fn hash(&mut self) -> io::Result<String> {
+        Ok("injected-copy-mismatch".into())
+    }
+    fn identity(&self) -> io::Result<FileIdentity> {
+        self.inner.identity()
+    }
+    fn delete(self: Box<Self>) -> io::Result<()> {
+        self.inner.delete()
+    }
 }
 
 impl FileSystem for CopyingFileSystem {
-    fn exists(&self, path: &Path) -> bool { self.inner.exists(path) }
-    fn hash(&self, path: &Path) -> io::Result<String> { self.inner.hash(path) }
-    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> { Ok(false) }
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
     fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
         self.inner.rename_no_replace(source, destination)
     }
-    fn copy_new_locked(&self, source: &Path, destination: &Path) -> io::Result<Box<dyn LockedFile>> {
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
         let locked = self.inner.copy_new_locked(source, destination)?;
         if self.corrupt_copy {
             Ok(Box::new(HashMismatchLocked { inner: locked }))
@@ -92,7 +135,11 @@ impl FileSystem for CopyingFileSystem {
 }
 
 fn copying_filesystem(corrupt_copy: bool, fail_source_delete: bool) -> Arc<dyn FileSystem> {
-    Arc::new(CopyingFileSystem { inner: StdFileSystem, corrupt_copy, fail_source_delete })
+    Arc::new(CopyingFileSystem {
+        inner: StdFileSystem,
+        corrupt_copy,
+        fail_source_delete,
+    })
 }
 
 struct PostRenameMismatchFileSystem {
@@ -100,7 +147,9 @@ struct PostRenameMismatchFileSystem {
 }
 
 impl FileSystem for PostRenameMismatchFileSystem {
-    fn exists(&self, path: &Path) -> bool { self.inner.exists(path) }
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
     fn hash(&self, path: &Path) -> io::Result<String> {
         if path.file_name().and_then(|value| value.to_str()) == Some("named.pdf") {
             Ok("injected-mismatch".into())
@@ -108,11 +157,17 @@ impl FileSystem for PostRenameMismatchFileSystem {
             self.inner.hash(path)
         }
     }
-    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> { Ok(true) }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(true)
+    }
     fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
         self.inner.rename_no_replace(source, destination)
     }
-    fn copy_new_locked(&self, source: &Path, destination: &Path) -> io::Result<Box<dyn LockedFile>> {
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
         self.inner.copy_new_locked(source, destination)
     }
     fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
@@ -138,13 +193,26 @@ struct CrossPublishFailFileSystem {
 }
 
 impl FileSystem for RenameFailFileSystem {
-    fn exists(&self, path: &Path) -> bool { self.inner.exists(path) }
-    fn hash(&self, path: &Path) -> io::Result<String> { self.inner.hash(path) }
-    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> { Ok(true) }
-    fn rename_no_replace(&self, _source: &Path, _destination: &Path) -> io::Result<()> {
-        Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected rename failure"))
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
     }
-    fn copy_new_locked(&self, source: &Path, destination: &Path) -> io::Result<Box<dyn LockedFile>> {
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(true)
+    }
+    fn rename_no_replace(&self, _source: &Path, _destination: &Path) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "injected rename failure",
+        ))
+    }
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
         self.inner.copy_new_locked(source, destination)
     }
     fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
@@ -153,13 +221,26 @@ impl FileSystem for RenameFailFileSystem {
 }
 
 impl FileSystem for CrossPublishFailFileSystem {
-    fn exists(&self, path: &Path) -> bool { self.inner.exists(path) }
-    fn hash(&self, path: &Path) -> io::Result<String> { self.inner.hash(path) }
-    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> { Ok(false) }
-    fn rename_no_replace(&self, _source: &Path, _destination: &Path) -> io::Result<()> {
-        Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected publish failure"))
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
     }
-    fn copy_new_locked(&self, source: &Path, destination: &Path) -> io::Result<Box<dyn LockedFile>> {
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
+    fn rename_no_replace(&self, _source: &Path, _destination: &Path) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "injected publish failure",
+        ))
+    }
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
         self.inner.copy_new_locked(source, destination)
     }
     fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
@@ -185,31 +266,50 @@ impl LockedFile for ReconciliationProbeLocked {
     fn hash(&mut self) -> io::Result<String> {
         if !self.attempted.swap(true, Ordering::SeqCst) {
             let inspector = rusqlite::Connection::open(&self.database).unwrap();
-            inspector.execute(
-                "UPDATE queue_items SET lease_expires_at = 0 WHERE id = ?1",
-                [self.item_id],
-            ).unwrap();
+            inspector
+                .execute(
+                    "UPDATE queue_items SET lease_expires_at = 0 WHERE id = ?1",
+                    [self.item_id],
+                )
+                .unwrap();
             let reconcilier = QueueStore::open(&self.database).unwrap();
             assert_eq!(
-                reconcilier.claim_applying_reconciliation(self.item_id).unwrap_err().code(),
+                reconcilier
+                    .claim_applying_reconciliation(self.item_id)
+                    .unwrap_err()
+                    .code(),
                 ErrorCode::StateConflict,
             );
         }
         self.inner.hash()
     }
 
-    fn identity(&self) -> io::Result<FileIdentity> { self.inner.identity() }
-    fn delete(self: Box<Self>) -> io::Result<()> { self.inner.delete() }
+    fn identity(&self) -> io::Result<FileIdentity> {
+        self.inner.identity()
+    }
+    fn delete(self: Box<Self>) -> io::Result<()> {
+        self.inner.delete()
+    }
 }
 
 impl FileSystem for ReconciliationProbeFileSystem {
-    fn exists(&self, path: &Path) -> bool { self.inner.exists(path) }
-    fn hash(&self, path: &Path) -> io::Result<String> { self.inner.hash(path) }
-    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> { Ok(false) }
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
     fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
         self.inner.rename_no_replace(source, destination)
     }
-    fn copy_new_locked(&self, source: &Path, destination: &Path) -> io::Result<Box<dyn LockedFile>> {
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
         self.inner.copy_new_locked(source, destination)
     }
     fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
@@ -228,16 +328,29 @@ impl FileSystem for ReconciliationProbeFileSystem {
 }
 
 impl FileSystem for PartialCopyFileSystem {
-    fn exists(&self, path: &Path) -> bool { self.inner.exists(path) }
-    fn hash(&self, path: &Path) -> io::Result<String> { self.inner.hash(path) }
-    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> { Ok(false) }
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
     fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
         self.inner.rename_no_replace(source, destination)
     }
-    fn copy_new_locked(&self, source: &Path, destination: &Path) -> io::Result<Box<dyn LockedFile>> {
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
         let locked = self.inner.copy_new_locked(source, destination)?;
         locked.delete()?;
-        Err(io::Error::new(io::ErrorKind::WriteZero, "injected partial copy"))
+        Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "injected partial copy",
+        ))
     }
     fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
         self.inner.lock_for_delete(path)
@@ -254,7 +367,14 @@ fn same_volume_apply_never_overwrites_and_uses_deterministic_suffix() {
     write(&requested, b"existing");
     write(&second_collision, b"existing two");
     let (applier, _store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
-    let receipt = applier.apply(item_id, &source, &requested, &applier.fingerprint(&source).unwrap()).unwrap();
+    let receipt = applier
+        .apply(
+            item_id,
+            &source,
+            &requested,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap();
     assert_eq!(receipt.destination, temp.path().join("named (3).pdf"));
     assert_eq!(fs::read(&requested).unwrap(), b"existing");
     assert_eq!(fs::read(&second_collision).unwrap(), b"existing two");
@@ -270,7 +390,9 @@ fn changed_source_is_rejected_before_a_receipt_or_mutation() {
     let destination = temp.path().join("named.pdf");
     write(&source, b"changed");
     let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
-    let err = applier.apply(item_id, &source, &destination, "old-fingerprint").unwrap_err();
+    let err = applier
+        .apply(item_id, &source, &destination, "old-fingerprint")
+        .unwrap_err();
     assert_eq!(err.code(), ErrorCode::FileChanged);
     assert!(store.load_receipt(item_id).unwrap().is_none());
     assert!(source.exists());
@@ -284,14 +406,20 @@ fn one_active_receipt_is_bound_to_each_applying_epoch() {
     let source = temp.path().join("source.pdf");
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
-    let filesystem = Arc::new(RenameFailFileSystem { inner: StdFileSystem });
+    let filesystem = Arc::new(RenameFailFileSystem {
+        inner: StdFileSystem,
+    });
     let (applier, store, item_id) = applying(&temp, &source, filesystem);
     let fingerprint = applier.fingerprint(&source).unwrap();
-    let first = applier.apply(item_id, &source, &destination, &fingerprint).unwrap_err();
+    let first = applier
+        .apply(item_id, &source, &destination, &fingerprint)
+        .unwrap_err();
     assert_eq!(first.receipt().unwrap().stage, OperationStage::Planned);
     let first_id = first.receipt().unwrap().id;
 
-    let second = applier.apply(item_id, &source, &destination, &fingerprint).unwrap_err();
+    let second = applier
+        .apply(item_id, &source, &destination, &fingerprint)
+        .unwrap_err();
 
     assert_eq!(second.code(), ErrorCode::StateConflict);
     assert_eq!(store.load_receipt(item_id).unwrap().unwrap().id, first_id);
@@ -313,13 +441,20 @@ fn same_volume_verification_uncertainty_journals_successful_rollback() {
     let source = temp.path().join("source.pdf");
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
-    let filesystem = Arc::new(PostRenameMismatchFileSystem { inner: StdFileSystem });
+    let filesystem = Arc::new(PostRenameMismatchFileSystem {
+        inner: StdFileSystem,
+    });
     let (applier, store, item_id) = applying(&temp, &source, filesystem);
     let fingerprint = applier.fingerprint(&source).unwrap();
-    let err = applier.apply(item_id, &source, &destination, &fingerprint).unwrap_err();
+    let err = applier
+        .apply(item_id, &source, &destination, &fingerprint)
+        .unwrap_err();
     assert_eq!(err.code(), ErrorCode::MoveVerificationFailed);
     assert_eq!(err.receipt().unwrap().stage, OperationStage::RolledBack);
-    assert_eq!(store.load_receipt(item_id).unwrap().unwrap().stage, OperationStage::RolledBack);
+    assert_eq!(
+        store.load_receipt(item_id).unwrap().unwrap().stage,
+        OperationStage::RolledBack
+    );
     assert_eq!(fs::read(&source).unwrap(), b"original");
     assert!(!destination.exists());
     assert_eq!(store.list().unwrap()[0].status, QueueStatus::Applying);
@@ -341,9 +476,18 @@ fn undo_refuses_destination_modified_after_apply() {
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
-    let receipt = applier.apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap()).unwrap();
+    let receipt = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap();
     store.complete_apply(item_id, receipt.id).unwrap();
-    store.begin_applying(item_id, QueueStatus::Completed).unwrap();
+    store
+        .begin_applying(item_id, QueueStatus::Completed)
+        .unwrap();
     write(&receipt.destination, b"modified");
     let err = applier.undo(item_id, &receipt).unwrap_err();
     assert_eq!(err.code(), ErrorCode::FileChanged);
@@ -358,15 +502,33 @@ fn undo_restores_an_unchanged_destination_with_its_own_receipt() {
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
-    let applied = applier.apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap()).unwrap();
-    assert_eq!(store.complete_apply(item_id, applied.id + 1).unwrap_err().code(), ErrorCode::StateConflict);
+    let applied = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .complete_apply(item_id, applied.id + 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::StateConflict
+    );
     store.complete_apply(item_id, applied.id).unwrap();
-    store.begin_applying(item_id, QueueStatus::Completed).unwrap();
+    store
+        .begin_applying(item_id, QueueStatus::Completed)
+        .unwrap();
     let undone = applier.undo(item_id, &applied).unwrap();
     assert_eq!(undone.stage, OperationStage::Complete);
     assert_eq!(fs::read(&source).unwrap(), b"original");
     assert!(!destination.exists());
-    assert_eq!(store.complete_undo(item_id, undone.id).unwrap().status, QueueStatus::Ready);
+    assert_eq!(
+        store.complete_undo(item_id, undone.id).unwrap().status,
+        QueueStatus::Ready
+    );
 }
 
 #[test]
@@ -376,11 +538,24 @@ fn cross_volume_hash_mismatch_cleans_temp_and_retains_source() {
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, copying_filesystem(true, false));
-    let err = applier.apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap()).unwrap_err();
+    let err = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap_err();
     assert_eq!(err.code(), ErrorCode::MoveVerificationFailed);
     assert!(source.exists());
     assert!(!destination.exists());
-    assert!(!store.load_receipt(item_id).unwrap().unwrap().temporary_exists);
+    assert!(
+        !store
+            .load_receipt(item_id)
+            .unwrap()
+            .unwrap()
+            .temporary_exists
+    );
 }
 
 #[test]
@@ -392,13 +567,28 @@ fn partial_copy_failure_cleans_temp_and_retains_source() {
     let (applier, store, item_id) = applying(
         &temp,
         &source,
-        Arc::new(PartialCopyFileSystem { inner: StdFileSystem }),
+        Arc::new(PartialCopyFileSystem {
+            inner: StdFileSystem,
+        }),
     );
-    let err = applier.apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap()).unwrap_err();
+    let err = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap_err();
     assert_eq!(err.code(), ErrorCode::DestinationUnavailable);
     assert!(source.exists());
     assert!(!destination.exists());
-    assert!(!store.load_receipt(item_id).unwrap().unwrap().temporary_exists);
+    assert!(
+        !store
+            .load_receipt(item_id)
+            .unwrap()
+            .unwrap()
+            .temporary_exists
+    );
 }
 
 #[test]
@@ -408,10 +598,17 @@ fn publish_failure_reopen_verifies_and_deletes_temp_before_rollback_resolution()
     let source = temp.path().join("source.pdf");
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
-    let filesystem = Arc::new(CrossPublishFailFileSystem { inner: StdFileSystem });
+    let filesystem = Arc::new(CrossPublishFailFileSystem {
+        inner: StdFileSystem,
+    });
     let (applier, store, item_id) = applying(&temp, &source, filesystem);
     let error = applier
-        .apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap())
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
         .unwrap_err();
     assert_eq!(error.code(), ErrorCode::DestinationUnavailable);
     let receipt = store.load_receipt(item_id).unwrap().unwrap();
@@ -438,12 +635,25 @@ fn cross_volume_verifies_and_journals_before_locked_source_deletion() {
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, copying_filesystem(false, false));
-    let receipt = applier.apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap()).unwrap();
+    let receipt = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap();
     assert!(!source.exists());
     assert_eq!(fs::read(&destination).unwrap(), b"original");
     assert_eq!(receipt.kind, OperationKind::VerifiedCopy);
-    assert_eq!(receipt.post_operation_hash.as_deref(), Some(receipt.pre_operation_hash.as_str()));
-    assert_eq!(store.load_receipt(item_id).unwrap().unwrap().stage, OperationStage::Complete);
+    assert_eq!(
+        receipt.post_operation_hash.as_deref(),
+        Some(receipt.pre_operation_hash.as_str())
+    );
+    assert_eq!(
+        store.load_receipt(item_id).unwrap().unwrap().stage,
+        OperationStage::Complete
+    );
 }
 
 #[test]
@@ -456,8 +666,17 @@ fn published_verification_renews_ownership_and_blocks_a_reconcilier() {
     let store = Arc::new(QueueStore::open(&database).unwrap());
     let item = store.enqueue(&source, "queue-fingerprint").unwrap();
     store.claim_next().unwrap().unwrap();
-    store.transition(item.id, QueueStatus::Extracting, QueueStatus::Analyzing, None).unwrap();
-    store.transition(item.id, QueueStatus::Analyzing, QueueStatus::Ready, None).unwrap();
+    store
+        .transition(
+            item.id,
+            QueueStatus::Extracting,
+            QueueStatus::Analyzing,
+            None,
+        )
+        .unwrap();
+    store
+        .transition(item.id, QueueStatus::Analyzing, QueueStatus::Ready, None)
+        .unwrap();
     store.begin_applying(item.id, QueueStatus::Ready).unwrap();
     let attempted = Arc::new(AtomicBool::new(false));
     let filesystem = Arc::new(ReconciliationProbeFileSystem {
@@ -469,7 +688,12 @@ fn published_verification_renews_ownership_and_blocks_a_reconcilier() {
     let applier = FileApplier::new(filesystem, store.clone());
 
     let receipt = applier
-        .apply(item.id, &source, &destination, &applier.fingerprint(&source).unwrap())
+        .apply(
+            item.id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
         .unwrap();
 
     assert!(attempted.load(Ordering::SeqCst));
@@ -487,7 +711,12 @@ fn complete_receipt_resolves_after_crash_reopen_without_blocking_queue() {
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
     let receipt = applier
-        .apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap())
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
         .unwrap();
     assert_eq!(receipt.stage, OperationStage::Complete);
     drop(applier);
@@ -509,10 +738,20 @@ fn source_delete_failure_retains_both_paths_and_published_receipt() {
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, copying_filesystem(false, true));
-    let err = applier.apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap()).unwrap_err();
+    let err = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap_err();
     assert_eq!(err.code(), ErrorCode::SourceDeleteFailed);
     assert_eq!(err.receipt().unwrap().stage, OperationStage::Published);
-    assert_eq!(store.load_receipt(item_id).unwrap().unwrap().stage, OperationStage::Published);
+    assert_eq!(
+        store.load_receipt(item_id).unwrap().unwrap().stage,
+        OperationStage::Published
+    );
     assert!(source.exists());
     assert_eq!(fs::read(&destination).unwrap(), b"original");
     assert_eq!(store.list().unwrap()[0].status, QueueStatus::Applying);
@@ -520,10 +759,15 @@ fn source_delete_failure_retains_both_paths_and_published_receipt() {
     drop(applier);
     drop(store);
     let reopened = Arc::new(QueueStore::open(database).unwrap());
-    assert_eq!(reopened.load_receipt(item_id).unwrap().unwrap().stage, OperationStage::Published);
+    assert_eq!(
+        reopened.load_receipt(item_id).unwrap().unwrap().stage,
+        OperationStage::Published
+    );
     assert_eq!(reopened.list().unwrap()[0].status, QueueStatus::Applying);
     reopened.claim_applying_reconciliation(item_id).unwrap();
-    let resolved = FileApplier::local(reopened.clone()).reconcile(item_id).unwrap();
+    let resolved = FileApplier::local(reopened.clone())
+        .reconcile(item_id)
+        .unwrap();
     assert_eq!(resolved.status, QueueStatus::Completed);
     assert!(!source.exists());
     assert_eq!(fs::read(&destination).unwrap(), b"original");
@@ -536,9 +780,18 @@ fn undo_does_not_overwrite_recreated_source() {
     let destination = temp.path().join("named.pdf");
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
-    let receipt = applier.apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap()).unwrap();
+    let receipt = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap();
     store.complete_apply(item_id, receipt.id).unwrap();
-    store.begin_applying(item_id, QueueStatus::Completed).unwrap();
+    store
+        .begin_applying(item_id, QueueStatus::Completed)
+        .unwrap();
     write(&source, b"new file");
     let err = applier.undo(item_id, &receipt).unwrap_err();
     assert_eq!(err.code(), ErrorCode::DestinationUnavailable);
@@ -554,10 +807,17 @@ fn undo_rejects_a_receipt_that_does_not_match_the_durable_apply() {
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
     let applied = applier
-        .apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap())
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
         .unwrap();
     store.complete_apply(item_id, applied.id).unwrap();
-    store.begin_applying(item_id, QueueStatus::Completed).unwrap();
+    store
+        .begin_applying(item_id, QueueStatus::Completed)
+        .unwrap();
     let mut forged = applied.clone();
     forged.source = temp.path().join("different.pdf");
     let error = applier.undo(item_id, &forged).unwrap_err();
@@ -576,10 +836,17 @@ fn applying_direction_is_bound_to_the_previous_queue_status() {
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
     let applied = applier
-        .apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap())
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
         .unwrap();
     store.complete_apply(item_id, applied.id).unwrap();
-    store.begin_applying(item_id, QueueStatus::Completed).unwrap();
+    store
+        .begin_applying(item_id, QueueStatus::Completed)
+        .unwrap();
 
     let error = applier
         .apply(
@@ -605,10 +872,17 @@ fn reopen_does_not_bind_a_historical_receipt_to_an_empty_applying_epoch() {
     write(&source, b"original");
     let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
     let historical = applier
-        .apply(item_id, &source, &destination, &applier.fingerprint(&source).unwrap())
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
         .unwrap();
     store.complete_apply(item_id, historical.id).unwrap();
-    store.begin_applying(item_id, QueueStatus::Completed).unwrap();
+    store
+        .begin_applying(item_id, QueueStatus::Completed)
+        .unwrap();
     assert_eq!(store.list().unwrap()[0].active_receipt_id, None);
     drop(applier);
     drop(store);
@@ -636,7 +910,9 @@ mod windows_safety {
         let destination = temp.path().join("destination.pdf");
         write(&source, b"source");
         write(&destination, b"destination");
-        let error = StdFileSystem.rename_no_replace(&source, &destination).unwrap_err();
+        let error = StdFileSystem
+            .rename_no_replace(&source, &destination)
+            .unwrap_err();
         assert!(matches!(error.raw_os_error(), Some(80 | 183)));
         assert_eq!(fs::read(&source).unwrap(), b"source");
         assert_eq!(fs::read(&destination).unwrap(), b"destination");
@@ -663,11 +939,19 @@ mod windows_safety {
         let source = temp.path().join("source.pdf");
         let destination = temp.path().join("destination.pdf");
         write(&source, b"source");
-        let mut competing = fs::OpenOptions::new().write(true).create_new(true).open(&destination).unwrap();
+        let mut competing = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .unwrap();
         competing.write_all(b"winner").unwrap();
         competing.sync_all().unwrap();
         drop(competing);
-        assert!(StdFileSystem.rename_no_replace(&source, &destination).is_err());
+        assert!(
+            StdFileSystem
+                .rename_no_replace(&source, &destination)
+                .is_err()
+        );
         assert_eq!(fs::read(&source).unwrap(), b"source");
         assert_eq!(fs::read(&destination).unwrap(), b"winner");
     }

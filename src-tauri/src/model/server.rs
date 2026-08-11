@@ -23,7 +23,11 @@ pub trait ProcessControl: Send {
 }
 
 pub trait ProcessLauncher: Send + Sync {
-    fn launch(&self, executable: &Path, arguments: &[String]) -> ModelResult<Box<dyn ProcessControl>>;
+    fn launch(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+    ) -> ModelResult<Box<dyn ProcessControl>>;
 }
 
 pub trait PortAllocator: Send + Sync {
@@ -176,7 +180,9 @@ impl LlamaServer {
     }
 
     pub fn health(&self) -> bool {
-        let Ok(mut process) = self.process.lock() else { return false };
+        let Ok(mut process) = self.process.lock() else {
+            return false;
+        };
         if process.has_exited().unwrap_or(true) {
             return false;
         }
@@ -185,7 +191,10 @@ impl LlamaServer {
     }
 
     pub fn stop(&mut self) -> ModelResult<()> {
-        self.process.lock().map_err(|_| start_failed())?.terminate_and_wait()
+        self.process
+            .lock()
+            .map_err(|_| start_failed())?
+            .terminate_and_wait()
     }
 }
 
@@ -219,7 +228,9 @@ fn confirm_startup(
         }
         if healthy {
             if !confirmation_delay.is_zero() {
-                thread::sleep(confirmation_delay.min(deadline.saturating_duration_since(Instant::now())));
+                thread::sleep(
+                    confirmation_delay.min(deadline.saturating_duration_since(Instant::now())),
+                );
             }
             if process.has_exited()? {
                 return Ok(StartupState::Exited);
@@ -243,7 +254,10 @@ struct StdChildProcess(Child);
 
 impl ProcessControl for StdChildProcess {
     fn has_exited(&mut self) -> ModelResult<bool> {
-        self.0.try_wait().map(|status| status.is_some()).map_err(|_| start_failed())
+        self.0
+            .try_wait()
+            .map(|status| status.is_some())
+            .map_err(|_| start_failed())
     }
 
     fn terminate_and_wait(&mut self) -> ModelResult<()> {
@@ -263,7 +277,11 @@ impl ProcessControl for StdChildProcess {
 struct StdProcessLauncher;
 
 impl ProcessLauncher for StdProcessLauncher {
-    fn launch(&self, executable: &Path, arguments: &[String]) -> ModelResult<Box<dyn ProcessControl>> {
+    fn launch(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+    ) -> ModelResult<Box<dyn ProcessControl>> {
         let mut command = Command::new(executable);
         command
             .args(arguments)
@@ -286,7 +304,10 @@ struct EphemeralPortAllocator;
 impl PortAllocator for EphemeralPortAllocator {
     fn next_port(&self) -> ModelResult<u16> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|_| start_failed())?;
-        listener.local_addr().map(|address| address.port()).map_err(|_| start_failed())
+        listener
+            .local_addr()
+            .map(|address| address.port())
+            .map_err(|_| start_failed())
     }
 }
 
@@ -333,9 +354,15 @@ fn require_file(path: &Path) -> ModelResult<()> {
 }
 
 const fn start_failed() -> ModelError {
-    ModelError::new(ModelErrorCode::ModelServerStartFailed, "local model server could not be started")
+    ModelError::new(
+        ModelErrorCode::ModelServerStartFailed,
+        "local model server could not be started",
+    )
 }
 
 const fn unhealthy() -> ModelError {
-    ModelError::new(ModelErrorCode::ModelServerUnhealthy, "local model server did not become healthy")
+    ModelError::new(
+        ModelErrorCode::ModelServerUnhealthy,
+        "local model server did not become healthy",
+    )
 }

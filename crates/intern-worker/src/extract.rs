@@ -1,11 +1,17 @@
 use std::fs::File;
 use std::io::{BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Instant;
 
 use base64::Engine as _;
-use image::{DynamicImage, GenericImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader, Rgb, RgbImage, imageops::FilterType};
+use image::{
+    DynamicImage, GenericImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader, Rgb,
+    RgbImage, imageops::FilterType,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -31,27 +37,45 @@ pub struct ExtractionError {
 
 impl ExtractionError {
     pub fn canceled() -> Self {
-        Self { kind: ExtractionErrorKind::Canceled, message: "request canceled".to_owned() }
+        Self {
+            kind: ExtractionErrorKind::Canceled,
+            message: "request canceled".to_owned(),
+        }
     }
 
     pub fn resource_limit(message: impl Into<String>) -> Self {
-        Self { kind: ExtractionErrorKind::ResourceLimit, message: message.into() }
+        Self {
+            kind: ExtractionErrorKind::ResourceLimit,
+            message: message.into(),
+        }
     }
 
     pub fn unsupported(message: impl Into<String>) -> Self {
-        Self { kind: ExtractionErrorKind::Unsupported, message: message.into() }
+        Self {
+            kind: ExtractionErrorKind::Unsupported,
+            message: message.into(),
+        }
     }
 
     pub fn native_assets_missing(message: impl Into<String>) -> Self {
-        Self { kind: ExtractionErrorKind::NativeAssetsMissing, message: message.into() }
+        Self {
+            kind: ExtractionErrorKind::NativeAssetsMissing,
+            message: message.into(),
+        }
     }
 
     pub fn parse_failed(message: impl Into<String>) -> Self {
-        Self { kind: ExtractionErrorKind::ParseFailed, message: message.into() }
+        Self {
+            kind: ExtractionErrorKind::ParseFailed,
+            message: message.into(),
+        }
     }
 
     pub fn io(error: std::io::Error) -> Self {
-        Self { kind: ExtractionErrorKind::Io, message: error.to_string() }
+        Self {
+            kind: ExtractionErrorKind::Io,
+            message: error.to_string(),
+        }
     }
 
     pub fn code(&self) -> &'static str {
@@ -79,7 +103,9 @@ struct CancellationState {
 pub struct CancellationToken(Arc<CancellationState>);
 
 impl Default for CancellationToken {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CancellationToken {
@@ -89,13 +115,19 @@ impl CancellationToken {
             deadline: Instant::now() + MAX_EXTRACTION_DURATION,
         }))
     }
-    pub fn cancel(&self) { self.0.canceled.store(true, Ordering::SeqCst); }
-    pub fn is_canceled(&self) -> bool { self.0.canceled.load(Ordering::SeqCst) }
+    pub fn cancel(&self) {
+        self.0.canceled.store(true, Ordering::SeqCst);
+    }
+    pub fn is_canceled(&self) -> bool {
+        self.0.canceled.load(Ordering::SeqCst)
+    }
     pub fn check(&self) -> Result<(), ExtractionError> {
         if self.is_canceled() {
             Err(ExtractionError::canceled())
         } else if Instant::now() > self.0.deadline {
-            Err(ExtractionError::resource_limit("extraction exceeded 30 minutes"))
+            Err(ExtractionError::resource_limit(
+                "extraction exceeded 30 minutes",
+            ))
         } else {
             Ok(())
         }
@@ -118,7 +150,9 @@ pub struct RenderedPage {
 }
 
 impl RenderedPage {
-    pub fn new(page_index: usize, image: DynamicImage) -> Self { Self { page_index, image } }
+    pub fn new(page_index: usize, image: DynamicImage) -> Self {
+        Self { page_index, image }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -131,7 +165,11 @@ pub struct OcrResult {
 
 impl OcrResult {
     pub fn new(text: impl Into<String>, mean_confidence: f32) -> Self {
-        Self { text: text.into(), mean_confidence, rotation_degrees: 0 }
+        Self {
+            text: text.into(),
+            mean_confidence,
+            rotation_degrees: 0,
+        }
     }
 
     pub fn with_rotation(mut self, rotation_degrees: u16) -> Self {
@@ -156,17 +194,35 @@ pub fn apply_detected_rotation(
 }
 
 pub trait PdfBackend {
-    fn inspect(&self, path: &Path, cancel: &CancellationToken) -> Result<Vec<PdfPageInspection>, ExtractionError>;
-    fn render(&self, path: &Path, page_index: usize, cancel: &CancellationToken) -> Result<RenderedPage, ExtractionError>;
+    fn inspect(
+        &self,
+        path: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<PdfPageInspection>, ExtractionError>;
+    fn render(
+        &self,
+        path: &Path,
+        page_index: usize,
+        cancel: &CancellationToken,
+    ) -> Result<RenderedPage, ExtractionError>;
 }
 
 pub trait OcrBackend {
-    fn recognize(&self, page: &RenderedPage, cancel: &CancellationToken) -> Result<OcrResult, ExtractionError>;
+    fn recognize(
+        &self,
+        page: &RenderedPage,
+        cancel: &CancellationToken,
+    ) -> Result<OcrResult, ExtractionError>;
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum PageSource { Native, Ocr, AnyDoc, Text }
+pub enum PageSource {
+    Native,
+    Ocr,
+    AnyDoc,
+    Text,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ExtractedPage {
@@ -179,7 +235,11 @@ pub struct ExtractedPage {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ExtractionWarning { LowOcrConfidence, NativeTextCorrupt, TextTruncated }
+pub enum ExtractionWarning {
+    LowOcrConfidence,
+    NativeTextCorrupt,
+    TextTruncated,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct VisionImage {
@@ -196,19 +256,43 @@ pub struct ExtractedDocument {
     pub optional_image: Option<VisionImage>,
 }
 
-fn timed_check(cancel: &CancellationToken, started: Instant, limits: &ResourceLimits) -> Result<(), ExtractionError> {
+fn timed_check(
+    cancel: &CancellationToken,
+    started: Instant,
+    limits: &ResourceLimits,
+) -> Result<(), ExtractionError> {
     cancel.check()?;
     if started.elapsed() > limits.max_duration {
-        return Err(ExtractionError::resource_limit("extraction exceeded 30 minutes"));
+        return Err(ExtractionError::resource_limit(
+            "extraction exceeded 30 minutes",
+        ));
     }
     Ok(())
 }
 
 pub fn page_needs_ocr(page: &PdfPageInspection) -> bool {
-    let meaningful = page.native_text.chars().filter(|character| !character.is_whitespace() && !character.is_control() && *character != '\u{fffd}').count();
-    let considered = page.native_text.chars().filter(|character| !character.is_whitespace()).count();
-    let replacements = page.native_text.chars().filter(|character| *character == '\u{fffd}').count();
-    let replacement_ratio = if considered == 0 { 0.0 } else { replacements as f32 / considered as f32 };
+    let meaningful = page
+        .native_text
+        .chars()
+        .filter(|character| {
+            !character.is_whitespace() && !character.is_control() && *character != '\u{fffd}'
+        })
+        .count();
+    let considered = page
+        .native_text
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    let replacements = page
+        .native_text
+        .chars()
+        .filter(|character| *character == '\u{fffd}')
+        .count();
+    let replacement_ratio = if considered == 0 {
+        0.0
+    } else {
+        replacements as f32 / considered as f32
+    };
     (meaningful < 20 && page.image_coverage >= 0.65) || replacement_ratio > 0.03
 }
 
@@ -241,7 +325,9 @@ pub fn extract_pdf(
             continue;
         }
 
-        if inspection.native_text.contains('\u{fffd}') && !warnings.contains(&ExtractionWarning::NativeTextCorrupt) {
+        if inspection.native_text.contains('\u{fffd}')
+            && !warnings.contains(&ExtractionWarning::NativeTextCorrupt)
+        {
             warnings.push(ExtractionWarning::NativeTextCorrupt);
         }
         let rendered = pdf.render(path, inspection.page_index, cancel)?;
@@ -253,7 +339,11 @@ pub fn extract_pdf(
             if !warnings.contains(&ExtractionWarning::LowOcrConfidence) {
                 warnings.push(ExtractionWarning::LowOcrConfidence);
             }
-            if vision_candidate.as_ref().map(|candidate| result.mean_confidence < candidate.0).unwrap_or(true) {
+            if vision_candidate
+                .as_ref()
+                .map(|candidate| result.mean_confidence < candidate.0)
+                .unwrap_or(true)
+            {
                 vision_candidate = Some((
                     result.mean_confidence,
                     normalize_vision_image(
@@ -273,17 +363,28 @@ pub fn extract_pdf(
     }
 
     let optional_image = if let Some((_, image)) = vision_candidate {
-        if let Some(page) = pages.iter_mut().find(|page| page.page_number == image.page_number) {
+        if let Some(page) = pages
+            .iter_mut()
+            .find(|page| page.page_number == image.page_number)
+        {
             page.vision_escalated = true;
         }
         Some(image)
     } else {
         None
     };
-    Ok(ExtractedDocument { pages, warnings, truncated: false, optional_image })
+    Ok(ExtractedDocument {
+        pages,
+        warnings,
+        truncated: false,
+        optional_image,
+    })
 }
 
-pub fn normalize_vision_image(page_index: usize, image: DynamicImage) -> Result<VisionImage, ExtractionError> {
+pub fn normalize_vision_image(
+    page_index: usize,
+    image: DynamicImage,
+) -> Result<VisionImage, ExtractionError> {
     let (width, height) = image.dimensions();
     if width == 0 || height == 0 {
         return Err(ExtractionError::parse_failed("image has zero dimensions"));
@@ -291,11 +392,15 @@ pub fn normalize_vision_image(page_index: usize, image: DynamicImage) -> Result<
     let scale = (MAX_VISION_LONG_EDGE as f64 / f64::from(width.max(height))).min(1.0);
     let resized_width = (f64::from(width) * scale).round().max(1.0) as u32;
     let resized_height = (f64::from(height) * scale).round().max(1.0) as u32;
-    let rgb = image.resize_exact(resized_width, resized_height, FilterType::Lanczos3).into_rgb8();
+    let rgb = image
+        .resize_exact(resized_width, resized_height, FilterType::Lanczos3)
+        .into_rgb8();
     let padded_width = resized_width.div_ceil(VISION_GRID) * VISION_GRID;
     let padded_height = resized_height.div_ceil(VISION_GRID) * VISION_GRID;
     let mut padded = RgbImage::from_pixel(padded_width, padded_height, Rgb([255, 255, 255]));
-    padded.copy_from(&rgb, 0, 0).map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    padded
+        .copy_from(&rgb, 0, 0)
+        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
     let mut bytes = Vec::new();
     DynamicImage::ImageRgb8(padded)
         .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
@@ -307,16 +412,27 @@ pub fn normalize_vision_image(page_index: usize, image: DynamicImage) -> Result<
     })
 }
 
-pub fn extract_anydoc(path: &Path, limits: &ResourceLimits, cancel: &CancellationToken) -> Result<ExtractedDocument, ExtractionError> {
+pub fn extract_anydoc(
+    path: &Path,
+    limits: &ResourceLimits,
+    cancel: &CancellationToken,
+) -> Result<ExtractedDocument, ExtractionError> {
     cancel.check()?;
     let metadata = std::fs::metadata(path).map_err(ExtractionError::io)?;
     limits.validate_source_size(metadata.len())?;
     enforce_office_decompressed_limit(path, limits, cancel)?;
     cancel.check()?;
-    let markdown = anydoc::to_markdown(path).map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    let markdown = anydoc::to_markdown(path)
+        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
     cancel.check()?;
     Ok(ExtractedDocument {
-        pages: vec![ExtractedPage { page_number: 1, text: markdown, source: PageSource::AnyDoc, ocr_confidence: None, vision_escalated: false }],
+        pages: vec![ExtractedPage {
+            page_number: 1,
+            text: markdown,
+            source: PageSource::AnyDoc,
+            ocr_confidence: None,
+            vision_escalated: false,
+        }],
         warnings: vec![],
         truncated: false,
         optional_image: None,
@@ -328,10 +444,17 @@ fn enforce_office_decompressed_limit(
     limits: &ResourceLimits,
     cancel: &CancellationToken,
 ) -> Result<(), ExtractionError> {
-    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
-    if !matches!(extension.as_str(), "docx" | "docm") { return Ok(()); }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(extension.as_str(), "docx" | "docm") {
+        return Ok(());
+    }
     let file = File::open(path).map_err(ExtractionError::io)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
     let mut total = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     for index in 0..archive.len() {
@@ -342,19 +465,27 @@ fn enforce_office_decompressed_limit(
         loop {
             cancel.check()?;
             let read = entry.read(&mut buffer).map_err(ExtractionError::io)?;
-            if read == 0 { break; }
-            total = total
-                .checked_add(read as u64)
-                .ok_or_else(|| ExtractionError::resource_limit("Office decompression size overflow"))?;
+            if read == 0 {
+                break;
+            }
+            total = total.checked_add(read as u64).ok_or_else(|| {
+                ExtractionError::resource_limit("Office decompression size overflow")
+            })?;
             if total > limits.max_decompressed_office_bytes {
-                return Err(ExtractionError::resource_limit("decompressed Office content exceeds 1 GiB"));
+                return Err(ExtractionError::resource_limit(
+                    "decompressed Office content exceeds 1 GiB",
+                ));
             }
         }
     }
     Ok(())
 }
 
-pub fn extract_text(path: &Path, limits: &ResourceLimits, cancel: &CancellationToken) -> Result<ExtractedDocument, ExtractionError> {
+pub fn extract_text(
+    path: &Path,
+    limits: &ResourceLimits,
+    cancel: &CancellationToken,
+) -> Result<ExtractedDocument, ExtractionError> {
     cancel.check()?;
     let metadata = std::fs::metadata(path).map_err(ExtractionError::io)?;
     limits.validate_source_size(metadata.len())?;
@@ -365,28 +496,48 @@ pub fn extract_text(path: &Path, limits: &ResourceLimits, cancel: &CancellationT
     loop {
         cancel.check()?;
         let read = reader.read(&mut buffer).map_err(ExtractionError::io)?;
-        if read == 0 { break; }
+        if read == 0 {
+            break;
+        }
         bytes.extend_from_slice(&buffer[..read]);
     }
     limits.validate_source_size(bytes.len() as u64)?;
-    let text = String::from_utf8(bytes).map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    let text = String::from_utf8(bytes)
+        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
     cancel.check()?;
     Ok(ExtractedDocument {
-        pages: vec![ExtractedPage { page_number: 1, text, source: PageSource::Text, ocr_confidence: None, vision_escalated: false }],
-        warnings: vec![], truncated: false, optional_image: None,
+        pages: vec![ExtractedPage {
+            page_number: 1,
+            text,
+            source: PageSource::Text,
+            ocr_confidence: None,
+            vision_escalated: false,
+        }],
+        warnings: vec![],
+        truncated: false,
+        optional_image: None,
     })
 }
 
-pub fn load_oriented_image(path: &Path, limits: &ResourceLimits) -> Result<DynamicImage, ExtractionError> {
+pub fn load_oriented_image(
+    path: &Path,
+    limits: &ResourceLimits,
+) -> Result<DynamicImage, ExtractionError> {
     let metadata = std::fs::metadata(path).map_err(ExtractionError::io)?;
     limits.validate_source_size(metadata.len())?;
-    let mut decoder = ImageReader::open(path).map_err(ExtractionError::io)?
-        .with_guessed_format().map_err(|error| ExtractionError::parse_failed(error.to_string()))?
-        .into_decoder().map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    let mut decoder = ImageReader::open(path)
+        .map_err(ExtractionError::io)?
+        .with_guessed_format()
+        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?
+        .into_decoder()
+        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
     let (encoded_width, encoded_height) = decoder.dimensions();
     limits.validate_page_pixels(encoded_width, encoded_height)?;
-    let orientation = decoder.orientation().map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
-    let mut image = DynamicImage::from_decoder(decoder).map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    let orientation = decoder
+        .orientation()
+        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    let mut image = DynamicImage::from_decoder(decoder)
+        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
     image.apply_orientation(orientation);
     limits.validate_page_pixels(image.width(), image.height())?;
     Ok(image.into_rgb8().into())
@@ -431,12 +582,8 @@ where
         Some(extension) if !extension.is_empty() => format!("source.{extension}"),
         _ => "source".to_owned(),
     };
-    let path = workspace.write_from_reader(
-        relative,
-        &mut input,
-        limits.max_source_bytes,
-        cancel,
-    )?;
+    let path =
+        workspace.write_from_reader(relative, &mut input, limits.max_source_bytes, cancel)?;
     let after = input.metadata().map_err(ExtractionError::io)?;
     if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
         return Err(ExtractionError::parse_failed(
@@ -444,7 +591,10 @@ where
         ));
     }
     cancel.check()?;
-    Ok(SourceSnapshot { _workspace: workspace, path })
+    Ok(SourceSnapshot {
+        _workspace: workspace,
+        path,
+    })
 }
 
 #[cfg(test)]

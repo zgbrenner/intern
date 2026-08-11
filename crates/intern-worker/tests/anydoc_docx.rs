@@ -29,9 +29,13 @@ fn generated_docx_is_converted_by_anydoc_0_1_8() {
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>"#).unwrap();
 
-    zip.start_file("word/_rels/document.xml.rels", options).unwrap();
-    zip.write_all(br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#).unwrap();
+    zip.start_file("word/_rels/document.xml.rels", options)
+        .unwrap();
+    zip.write_all(
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#,
+    )
+    .unwrap();
 
     zip.start_file("word/styles.xml", options).unwrap();
     zip.write_all(br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -55,12 +59,8 @@ fn generated_docx_is_converted_by_anydoc_0_1_8() {
 </w:document>"#).unwrap();
     zip.finish().unwrap();
 
-    let extracted = extract_anydoc(
-        &path,
-        &ResourceLimits::default(),
-        &CancellationToken::new(),
-    )
-    .unwrap();
+    let extracted =
+        extract_anydoc(&path, &ResourceLimits::default(), &CancellationToken::new()).unwrap();
     let markdown = &extracted.pages[0].text;
 
     assert!(markdown.contains("# Employment Agreement"), "{markdown}");

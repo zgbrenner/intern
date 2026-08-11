@@ -1,11 +1,10 @@
 use std::time::Duration;
 
-use intern_worker::limits::{
-    MAX_DECOMPRESSED_OFFICE_BYTES, MAX_EXTRACTION_DURATION, MAX_PAGE_COUNT,
-    MAX_PAGE_MEGAPIXELS, MAX_RESIDENT_RENDERED_PAGES, MAX_SOURCE_BYTES, MAX_TEMP_BYTES,
-    ResourceLimits,
-};
 use intern_worker::extract::load_oriented_image;
+use intern_worker::limits::{
+    MAX_DECOMPRESSED_OFFICE_BYTES, MAX_EXTRACTION_DURATION, MAX_PAGE_COUNT, MAX_PAGE_MEGAPIXELS,
+    MAX_RESIDENT_RENDERED_PAGES, MAX_SOURCE_BYTES, MAX_TEMP_BYTES, ResourceLimits,
+};
 use intern_worker::temp::TempWorkspace;
 
 #[test]
@@ -23,17 +22,26 @@ fn default_limits_enforce_the_worker_resource_contract() {
     assert_eq!(limits.max_page_count, MAX_PAGE_COUNT);
     assert!(limits.validate_source_size(MAX_SOURCE_BYTES).is_ok());
     assert_eq!(
-        limits.validate_source_size(MAX_SOURCE_BYTES + 1).unwrap_err().code(),
+        limits
+            .validate_source_size(MAX_SOURCE_BYTES + 1)
+            .unwrap_err()
+            .code(),
         "RESOURCE_LIMIT_EXCEEDED"
     );
     assert!(limits.validate_page_count(MAX_PAGE_COUNT).is_ok());
     assert_eq!(
-        limits.validate_page_count(MAX_PAGE_COUNT + 1).unwrap_err().code(),
+        limits
+            .validate_page_count(MAX_PAGE_COUNT + 1)
+            .unwrap_err()
+            .code(),
         "RESOURCE_LIMIT_EXCEEDED"
     );
     assert!(limits.validate_page_pixels(5_000, 5_000).is_ok());
     assert_eq!(
-        limits.validate_page_pixels(5_001, 5_000).unwrap_err().code(),
+        limits
+            .validate_page_pixels(5_001, 5_000)
+            .unwrap_err()
+            .code(),
         "RESOURCE_LIMIT_EXCEEDED"
     );
 }
@@ -76,7 +84,11 @@ fn temporary_workspace_accepts_only_normal_relative_components() {
         r"C:relative.bin",
         r"\\server\share\file.bin",
     ] {
-        assert_eq!(workspace.write(path, b"no").unwrap_err().code(), "PARSE_FAILED", "{path}");
+        assert_eq!(
+            workspace.write(path, b"no").unwrap_err().code(),
+            "PARSE_FAILED",
+            "{path}"
+        );
     }
 }
 

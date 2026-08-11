@@ -57,7 +57,10 @@ impl ModelManifest {
                 || !file.url.starts_with("https://")
                 || !names.insert(file.name.as_str())
                 || file.sha256.len() != 64
-                || !file.sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                || !file
+                    .sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
             {
                 return Err(invalid_manifest());
             }
@@ -98,5 +101,8 @@ fn matches_file(file: &ModelFile, name: &str, url: &str, size: u64, sha256: &str
 }
 
 const fn invalid_manifest() -> ModelError {
-    ModelError::new(ModelErrorCode::ManifestInvalid, "embedded model manifest failed validation")
+    ModelError::new(
+        ModelErrorCode::ManifestInvalid,
+        "embedded model manifest failed validation",
+    )
 }

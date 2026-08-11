@@ -153,8 +153,14 @@ impl QueueStatus {
         matches!(
             (self, next),
             (Self::Queued, Self::Canceled)
-                | (Self::Extracting, Self::Analyzing | Self::Queued | Self::Failed | Self::Canceled)
-                | (Self::Analyzing, Self::Ready | Self::NeedsReview | Self::Queued | Self::Failed | Self::Canceled)
+                | (
+                    Self::Extracting,
+                    Self::Analyzing | Self::Queued | Self::Failed | Self::Canceled
+                )
+                | (
+                    Self::Analyzing,
+                    Self::Ready | Self::NeedsReview | Self::Queued | Self::Failed | Self::Canceled
+                )
                 | (Self::Ready, Self::Canceled)
                 | (Self::NeedsReview, Self::Ready | Self::Canceled)
         )

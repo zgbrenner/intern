@@ -18,8 +18,7 @@ fn fixture(name: &str) -> Option<PathBuf> {
 
 #[test]
 fn clean_room_docx_and_markdown_expose_literal_gold_facts() {
-    let (Some(docx), Some(markdown)) = (fixture("nda.docx"), fixture("meeting-minutes.md"))
-    else {
+    let (Some(docx), Some(markdown)) = (fixture("nda.docx"), fixture("meeting-minutes.md")) else {
         return;
     };
     let limits = ResourceLimits::default();
@@ -27,7 +26,10 @@ fn clean_room_docx_and_markdown_expose_literal_gold_facts() {
 
     let nda = extract_anydoc(&docx, &limits, &cancel).unwrap();
     let nda_text = &nda.pages[0].text;
-    assert!(nda_text.contains("Mutual Non-Disclosure Agreement"), "{nda_text}");
+    assert!(
+        nda_text.contains("Mutual Non-Disclosure Agreement"),
+        "{nda_text}"
+    );
     assert!(nda_text.contains("Fable Harbor Labs LLC"), "{nda_text}");
     assert!(nda_text.contains("Copper Wren Design Inc."), "{nda_text}");
     assert!(nda_text.contains("Project Marigold"), "{nda_text}");

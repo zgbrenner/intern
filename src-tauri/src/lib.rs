@@ -2,8 +2,8 @@
 
 use tauri::Manager;
 
-pub mod model;
 pub mod commands;
+pub mod model;
 pub mod paths;
 pub mod pipeline;
 pub mod settings;
@@ -13,8 +13,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let state = commands::AppState::initialize(app.handle())
-                .map_err(|error| std::io::Error::other(format!("{}: {}", error.code, error.message)))?;
+            let state = commands::AppState::initialize(app.handle()).map_err(|error| {
+                std::io::Error::other(format!("{}: {}", error.code, error.message))
+            })?;
             app.manage(state);
             Ok(())
         })

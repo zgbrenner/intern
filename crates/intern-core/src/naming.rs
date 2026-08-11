@@ -23,7 +23,11 @@ pub fn compose_filename(
             segments.push(value);
         }
     }
-    let base = if segments.is_empty() { "Document".to_owned() } else { segments.join(" - ") };
+    let base = if segments.is_empty() {
+        "Document".to_owned()
+    } else {
+        segments.join(" - ")
+    };
     let existing = existing_names
         .iter()
         .map(|value| windows_name_key(value))
@@ -31,17 +35,27 @@ pub fn compose_filename(
 
     let mut collision_index = 1;
     loop {
-        let suffix = if collision_index == 1 { String::new() } else { format!(" ({collision_index})") };
+        let suffix = if collision_index == 1 {
+            String::new()
+        } else {
+            format!(" ({collision_index})")
+        };
         let value = fit_filename(&base, &suffix, &extension);
         if !existing.contains(&windows_name_key(&value)) {
-            return ComposedName { value, collision_index };
+            return ComposedName {
+                value,
+                collision_index,
+            };
         }
         collision_index += 1;
     }
 }
 
 fn sanitize_extension(value: &str) -> String {
-    value.trim().trim_start_matches('.').chars()
+    value
+        .trim()
+        .trim_start_matches('.')
+        .chars()
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .take(MAX_FILENAME_CHARS.saturating_sub(2))
@@ -83,7 +97,10 @@ fn sanitize_segment(value: &str) -> Option<String> {
         }
         if character.is_control()
             || is_bidi_control(character)
-            || matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            || matches!(
+                character,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+            )
         {
             continue;
         }
@@ -110,7 +127,12 @@ fn is_bidi_control(character: char) -> bool {
 }
 
 fn is_reserved_device_name(value: &str) -> bool {
-    let stem = value.split('.').next().unwrap_or(value).trim().to_ascii_uppercase();
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or(value)
+        .trim()
+        .to_ascii_uppercase();
     matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || stem.strip_prefix("COM").is_some_and(is_reserved_number)
         || stem.strip_prefix("LPT").is_some_and(is_reserved_number)
@@ -122,8 +144,15 @@ fn is_reserved_number(value: &str) -> bool {
 
 fn fit_filename(base: &str, suffix: &str, extension: &str) -> String {
     let maximum_extension = MAX_FILENAME_CHARS.saturating_sub(suffix.chars().count() + 2);
-    let extension = extension.chars().take(maximum_extension).collect::<String>();
-    let extension_part = if extension.is_empty() { String::new() } else { format!(".{extension}") };
+    let extension = extension
+        .chars()
+        .take(maximum_extension)
+        .collect::<String>();
+    let extension_part = if extension.is_empty() {
+        String::new()
+    } else {
+        format!(".{extension}")
+    };
     let reserved = suffix.chars().count() + extension_part.chars().count();
     let available = MAX_FILENAME_CHARS.saturating_sub(reserved);
     let mut truncated = base.chars().take(available).collect::<String>();
@@ -134,5 +163,7 @@ fn fit_filename(base: &str, suffix: &str, extension: &str) -> String {
 }
 
 fn windows_name_key(value: &str) -> String {
-    value.trim_end_matches(|character| matches!(character, ' ' | '.')).to_lowercase()
+    value
+        .trim_end_matches(|character| matches!(character, ' ' | '.'))
+        .to_lowercase()
 }

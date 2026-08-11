@@ -3,14 +3,15 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use intern_worker::extract::ExtractedDocument;
-use intern_worker::protocol::{MAX_PROTOCOL_LINE_BYTES, handle_line, run_concurrent_worker, run_control_loop};
+use intern_worker::protocol::{
+    MAX_PROTOCOL_LINE_BYTES, handle_line, run_concurrent_worker, run_control_loop,
+};
 
 #[test]
 fn hello_reports_exact_protocol_version() {
-    let response = handle_line(
-        r#"{"protocol_version":1,"request_id":"r1","command":{"type":"hello"}}"#,
-    )
-    .unwrap();
+    let response =
+        handle_line(r#"{"protocol_version":1,"request_id":"r1","command":{"type":"hello"}}"#)
+            .unwrap();
 
     assert_eq!(
         response,
@@ -32,10 +33,7 @@ fn malformed_json_is_an_error_event_and_the_next_request_is_processed() {
     )
     .unwrap();
 
-    let lines: Vec<&str> = std::str::from_utf8(&output)
-        .unwrap()
-        .lines()
-        .collect();
+    let lines: Vec<&str> = std::str::from_utf8(&output).unwrap().lines().collect();
     assert_eq!(lines.len(), 2);
     let error: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(error["event"]["type"], "error");
@@ -45,9 +43,11 @@ fn malformed_json_is_an_error_event_and_the_next_request_is_processed() {
         lines[1],
         r#"{"protocol_version":1,"request_id":"r2","event":{"type":"hello","worker_version":"0.1.0-alpha.1"}}"#
     );
-    assert!(std::str::from_utf8(&diagnostics)
-        .unwrap()
-        .contains("PARSE_FAILED"));
+    assert!(
+        std::str::from_utf8(&diagnostics)
+            .unwrap()
+            .contains("PARSE_FAILED")
+    );
 }
 
 #[test]
@@ -101,10 +101,9 @@ fn oversized_line_is_drained_and_the_next_request_is_processed() {
 
 #[test]
 fn unsupported_protocol_version_returns_stable_version_error() {
-    let response = handle_line(
-        r#"{"protocol_version":2,"request_id":"r3","command":{"type":"hello"}}"#,
-    )
-    .unwrap();
+    let response =
+        handle_line(r#"{"protocol_version":2,"request_id":"r3","command":{"type":"hello"}}"#)
+            .unwrap();
     let event: serde_json::Value = serde_json::from_str(&response).unwrap();
 
     assert_eq!(event["protocol_version"], 1);
@@ -149,10 +148,12 @@ fn stdout_contains_only_flushed_json_lines() {
     .unwrap();
 
     assert_eq!(output.flushes, 1);
-    assert!(std::str::from_utf8(&output.bytes)
-        .unwrap()
-        .lines()
-        .all(|line| serde_json::from_str::<serde_json::Value>(line).is_ok()));
+    assert!(
+        std::str::from_utf8(&output.bytes)
+            .unwrap()
+            .lines()
+            .all(|line| serde_json::from_str::<serde_json::Value>(line).is_ok())
+    );
     assert!(diagnostics.is_empty());
 }
 
@@ -167,7 +168,9 @@ fn cancel_interrupts_the_active_request_and_shutdown_joins_it() {
             Ok(bytes.len())
         }
 
-        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     let input = br#"{"protocol_version":1,"request_id":"parse-1","command":{"type":"parse","path":"scan.pdf"}}
@@ -178,12 +181,17 @@ fn cancel_interrupts_the_active_request_and_shutdown_joins_it() {
     let captured = output.clone();
     let mut diagnostics = Vec::new();
 
-    run_concurrent_worker(Cursor::new(input), output, &mut diagnostics, |_path, cancel| {
-        loop {
-            cancel.check()?;
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    })
+    run_concurrent_worker(
+        Cursor::new(input),
+        output,
+        &mut diagnostics,
+        |_path, cancel| {
+            loop {
+                cancel.check()?;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        },
+    )
     .unwrap();
 
     let bytes = captured.0.lock().unwrap().clone();
@@ -192,8 +200,16 @@ fn cancel_interrupts_the_active_request_and_shutdown_joins_it() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert!(events.iter().any(|event| event["event"]["stage"] == "cancel_requested"));
-    assert!(events.iter().any(|event| event["event"]["code"] == "CANCELED"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"]["stage"] == "cancel_requested")
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"]["code"] == "CANCELED")
+    );
     assert!(diagnostics.is_empty());
 }
 
@@ -208,7 +224,9 @@ impl Write for SignalingWriter {
         Ok(bytes.len())
     }
 
-    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 struct TerminalGatedReader {
@@ -226,7 +244,10 @@ impl std::io::Read for TerminalGatedReader {
         if self.next == 1 {
             let (bytes, changed) = &*self.output.0;
             let mut bytes = bytes.lock().unwrap();
-            while !bytes.windows(self.first_terminal.len()).any(|window| window == self.first_terminal) {
+            while !bytes
+                .windows(self.first_terminal.len())
+                .any(|window| window == self.first_terminal)
+            {
                 bytes = changed.wait(bytes).unwrap();
             }
         }
@@ -270,7 +291,8 @@ fn hello_line(request_id: &str) -> Vec<u8> {
 }
 
 fn shutdown_line() -> Vec<u8> {
-    let mut line = br#"{"protocol_version":1,"request_id":"done","command":{"type":"shutdown"}}"#.to_vec();
+    let mut line =
+        br#"{"protocol_version":1,"request_id":"done","command":{"type":"shutdown"}}"#.to_vec();
     line.push(b'\n');
     line
 }
@@ -321,12 +343,17 @@ fn extractor_panic_is_terminal_and_does_not_leak_the_active_slot() {
     };
     let calls = Arc::new(AtomicUsize::new(0));
 
-    run_concurrent_worker(reader, captured.clone(), Vec::new(), move |_path, _cancel| {
-        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            panic!("fixture panic");
-        }
-        Ok(empty_document())
-    })
+    run_concurrent_worker(
+        reader,
+        captured.clone(),
+        Vec::new(),
+        move |_path, _cancel| {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                panic!("fixture panic");
+            }
+            Ok(empty_document())
+        },
+    )
     .unwrap();
     let (bytes, _) = &*captured.0;
     let bytes = bytes.lock().unwrap().clone();

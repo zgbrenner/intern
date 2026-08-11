@@ -61,7 +61,11 @@ pub struct InternError {
 
 impl InternError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), receipt: None }
+        Self {
+            code,
+            message: message.into(),
+            receipt: None,
+        }
     }
 
     pub const fn code(&self) -> ErrorCode {

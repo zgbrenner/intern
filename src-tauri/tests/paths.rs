@@ -32,7 +32,13 @@ fn folder_expansion_is_recursive_deterministic_and_skips_hidden_lock_zero_byte_a
     let root = canonical_folder(temp.path()).unwrap();
     let files = collect_supported_files(&root).unwrap();
 
-    assert_eq!(files, vec![temp.path().join("b.txt").canonicalize().unwrap(), nested.join("a.md").canonicalize().unwrap()]);
+    assert_eq!(
+        files,
+        vec![
+            temp.path().join("b.txt").canonicalize().unwrap(),
+            nested.join("a.md").canonicalize().unwrap()
+        ]
+    );
 }
 
 #[test]

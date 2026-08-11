@@ -2,7 +2,9 @@ use std::path::Path;
 #[cfg(feature = "native-pdfium")]
 use std::path::PathBuf;
 
-use crate::extract::{CancellationToken, ExtractionError, PdfBackend, PdfPageInspection, RenderedPage};
+use crate::extract::{
+    CancellationToken, ExtractionError, PdfBackend, PdfPageInspection, RenderedPage,
+};
 #[cfg(feature = "native-pdfium")]
 use crate::limits::MAX_PAGE_COUNT;
 
@@ -27,7 +29,10 @@ impl PdfiumBackend {
         }
         Pdfium::bind_to_library(&library_path)
             .map_err(|error| ExtractionError::native_assets_missing(error.to_string()))?;
-        Ok(Self { library_path, render_dpi: 300.0 })
+        Ok(Self {
+            library_path,
+            render_dpi: 300.0,
+        })
     }
 
     fn pdfium(&self) -> Result<Pdfium, ExtractionError> {
@@ -79,14 +84,20 @@ fn rendered_image_area(object: &PdfPageObject<'_>) -> f32 {
 
 #[cfg(feature = "native-pdfium")]
 impl PdfBackend for PdfiumBackend {
-    fn inspect(&self, path: &Path, cancel: &CancellationToken) -> Result<Vec<PdfPageInspection>, ExtractionError> {
+    fn inspect(
+        &self,
+        path: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<PdfPageInspection>, ExtractionError> {
         cancel.check()?;
         let pdfium = self.pdfium()?;
         let document = pdfium
             .load_pdf_from_file(path, None)
             .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
         if document.pages().len() as usize > MAX_PAGE_COUNT {
-            return Err(ExtractionError::resource_limit("document exceeds 500 pages"));
+            return Err(ExtractionError::resource_limit(
+                "document exceeds 500 pages",
+            ));
         }
         let mut inspections = Vec::with_capacity(document.pages().len() as usize);
         for (page_index, page) in document.pages().iter().enumerate() {
@@ -119,7 +130,12 @@ impl PdfBackend for PdfiumBackend {
         Ok(inspections)
     }
 
-    fn render(&self, path: &Path, page_index: usize, cancel: &CancellationToken) -> Result<RenderedPage, ExtractionError> {
+    fn render(
+        &self,
+        path: &Path,
+        page_index: usize,
+        cancel: &CancellationToken,
+    ) -> Result<RenderedPage, ExtractionError> {
         cancel.check()?;
         let pdfium = self.pdfium()?;
         let document = pdfium
@@ -159,11 +175,24 @@ impl PdfiumBackend {
 
 #[cfg(not(feature = "native-pdfium"))]
 impl PdfBackend for PdfiumBackend {
-    fn inspect(&self, _path: &Path, _cancel: &CancellationToken) -> Result<Vec<PdfPageInspection>, ExtractionError> {
-        Err(ExtractionError::native_assets_missing("PDFium support is unavailable"))
+    fn inspect(
+        &self,
+        _path: &Path,
+        _cancel: &CancellationToken,
+    ) -> Result<Vec<PdfPageInspection>, ExtractionError> {
+        Err(ExtractionError::native_assets_missing(
+            "PDFium support is unavailable",
+        ))
     }
 
-    fn render(&self, _path: &Path, _page_index: usize, _cancel: &CancellationToken) -> Result<RenderedPage, ExtractionError> {
-        Err(ExtractionError::native_assets_missing("PDFium support is unavailable"))
+    fn render(
+        &self,
+        _path: &Path,
+        _page_index: usize,
+        _cancel: &CancellationToken,
+    ) -> Result<RenderedPage, ExtractionError> {
+        Err(ExtractionError::native_assets_missing(
+            "PDFium support is unavailable",
+        ))
     }
 }

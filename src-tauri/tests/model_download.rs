@@ -58,7 +58,9 @@ impl HeaderCancelServer {
         let join = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let _ = read_request(&mut stream);
-            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
             let mut byte = [0_u8; 1];
             loop {
                 match std::io::Read::read(&mut stream, &mut byte) {
@@ -70,11 +72,17 @@ impl HeaderCancelServer {
                 }
             }
         });
-        Self { url: format!("http://{address}/model.gguf"), disconnected, join: Some(join) }
+        Self {
+            url: format!("http://{address}/model.gguf"),
+            disconnected,
+            join: Some(join),
+        }
     }
 
     fn wait_for_disconnect(&self) {
-        self.disconnected.recv_timeout(Duration::from_secs(1)).unwrap();
+        self.disconnected
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
     }
 }
 
@@ -104,7 +112,10 @@ impl StallingServer {
             }
             thread::sleep(Duration::from_millis(350));
         });
-        Self { url: format!("http://{address}/model.gguf"), join: Some(join) }
+        Self {
+            url: format!("http://{address}/model.gguf"),
+            join: Some(join),
+        }
     }
 }
 
@@ -129,7 +140,11 @@ impl FakeServer {
                 stream.write_all(&response).unwrap();
             }
         });
-        Self { url: format!("http://{address}/model.gguf"), requests, join: Some(join) }
+        Self {
+            url: format!("http://{address}/model.gguf"),
+            requests,
+            join: Some(join),
+        }
     }
 }
 
@@ -166,10 +181,9 @@ fn response(status: &str, headers: &[(&str, String)], body: &[u8]) -> Vec<u8> {
 }
 
 fn interrupted_response(total_length: usize, received_body: &[u8]) -> Vec<u8> {
-    let mut bytes = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {total_length}\r\nConnection: close\r\n\r\n"
-    )
-    .into_bytes();
+    let mut bytes =
+        format!("HTTP/1.1 200 OK\r\nContent-Length: {total_length}\r\nConnection: close\r\n\r\n")
+            .into_bytes();
     bytes.extend_from_slice(received_body);
     bytes
 }
@@ -209,7 +223,12 @@ fn fresh_download_is_verified_then_published() {
     let server = FakeServer::sequence(vec![response("200 OK", &[], bytes)]);
     let directory = tempdir().unwrap();
     let result = downloader(u64::MAX)
-        .download(&file(&server.url, bytes), directory.path(), &CancellationToken::new(), |_| {})
+        .download(
+            &file(&server.url, bytes),
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
         .unwrap();
 
     assert_eq!(fs::read(result).unwrap(), bytes);
@@ -225,20 +244,36 @@ fn confirmed_range_resumes_a_partial_download() {
         interrupted_response(bytes.len(), &bytes[..split]),
         response(
             "206 Partial Content",
-            &[("Content-Range", format!("bytes {split}-{}/{}", bytes.len() - 1, bytes.len()))],
+            &[(
+                "Content-Range",
+                format!("bytes {split}-{}/{}", bytes.len() - 1, bytes.len()),
+            )],
             &bytes[split..],
         ),
     ]);
 
     let expected = file(&server.url, bytes);
     let first_error = downloader(u64::MAX)
-        .download(&expected, directory.path(), &CancellationToken::new(), |_| {})
+        .download(
+            &expected,
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
         .unwrap_err();
     assert_eq!(first_error.code(), ModelErrorCode::DownloadInterrupted);
-    assert_eq!(fs::read(directory.path().join("model.gguf.partial")).unwrap(), &bytes[..split]);
+    assert_eq!(
+        fs::read(directory.path().join("model.gguf.partial")).unwrap(),
+        &bytes[..split]
+    );
 
     downloader(u64::MAX)
-        .download(&expected, directory.path(), &CancellationToken::new(), |_| {})
+        .download(
+            &expected,
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
         .unwrap();
 
     assert!(
@@ -246,7 +281,10 @@ fn confirmed_range_resumes_a_partial_download() {
             .to_ascii_lowercase()
             .contains(&format!("range: bytes={split}-"))
     );
-    assert_eq!(fs::read(directory.path().join("model.gguf")).unwrap(), bytes);
+    assert_eq!(
+        fs::read(directory.path().join("model.gguf")).unwrap(),
+        bytes
+    );
 }
 
 #[test]
@@ -257,11 +295,23 @@ fn server_ignoring_range_restarts_instead_of_appending() {
     let server = FakeServer::sequence(vec![response("200 OK", &[], bytes)]);
 
     downloader(u64::MAX)
-        .download(&file(&server.url, bytes), directory.path(), &CancellationToken::new(), |_| {})
+        .download(
+            &file(&server.url, bytes),
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
         .unwrap();
 
-    assert!(server.requests.lock().unwrap()[0].to_ascii_lowercase().contains("range: bytes=5-"));
-    assert_eq!(fs::read(directory.path().join("model.gguf")).unwrap(), bytes);
+    assert!(
+        server.requests.lock().unwrap()[0]
+            .to_ascii_lowercase()
+            .contains("range: bytes=5-")
+    );
+    assert_eq!(
+        fs::read(directory.path().join("model.gguf")).unwrap(),
+        bytes
+    );
 }
 
 #[test]
@@ -271,7 +321,12 @@ fn wrong_digest_keeps_partial_and_never_publishes() {
     let server = FakeServer::sequence(vec![response("200 OK", &[], bytes)]);
     let directory = tempdir().unwrap();
     let error = downloader(u64::MAX)
-        .download(&file(&server.url, expected), directory.path(), &CancellationToken::new(), |_| {})
+        .download(
+            &file(&server.url, expected),
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
         .unwrap_err();
 
     assert_eq!(error.code(), ModelErrorCode::ModelFileInvalid);
@@ -284,7 +339,12 @@ fn insufficient_disk_is_rejected_before_request() {
     let bytes = b"model";
     let directory = tempdir().unwrap();
     let error = downloader(512 * 1024 * 1024 + bytes.len() as u64 - 1)
-        .download(&file("http://127.0.0.1:1/model", bytes), directory.path(), &CancellationToken::new(), |_| {})
+        .download(
+            &file("http://127.0.0.1:1/model", bytes),
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
         .unwrap_err();
 
     assert_eq!(error.code(), ModelErrorCode::InsufficientDisk);
@@ -300,7 +360,12 @@ fn cancellation_retains_reusable_partial_file() {
     cancellation.cancel();
 
     let error = downloader(u64::MAX)
-        .download(&file("http://127.0.0.1:1/model", bytes), directory.path(), &cancellation, |_| {})
+        .download(
+            &file("http://127.0.0.1:1/model", bytes),
+            directory.path(),
+            &cancellation,
+            |_| {},
+        )
         .unwrap_err();
 
     assert_eq!(error.code(), ModelErrorCode::DownloadCanceled);
@@ -314,7 +379,12 @@ fn stalled_response_headers_time_out_without_hanging() {
     let directory = tempdir().unwrap();
     let started = Instant::now();
     let error = short_timeout_downloader(u64::MAX)
-        .download(&file(&server.url, bytes), directory.path(), &CancellationToken::new(), |_| {})
+        .download(
+            &file(&server.url, bytes),
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
         .unwrap_err();
 
     assert_eq!(error.code(), ModelErrorCode::DownloadInterrupted);
@@ -325,7 +395,10 @@ fn stalled_response_headers_time_out_without_hanging() {
 fn cancellation_during_a_stalled_body_preserves_received_partial() {
     let bytes = b"prefix then a stalled response";
     let prefix = bytes[..7].to_vec();
-    let server = StallingServer::new(StallPoint::DuringBody { total: bytes.len(), prefix: prefix.clone() });
+    let server = StallingServer::new(StallPoint::DuringBody {
+        total: bytes.len(),
+        prefix: prefix.clone(),
+    });
     let directory = tempdir().unwrap();
     let cancellation = CancellationToken::new();
     let cancel_from_thread = cancellation.clone();
@@ -335,12 +408,20 @@ fn cancellation_during_a_stalled_body_preserves_received_partial() {
     });
 
     let error = short_timeout_downloader(u64::MAX)
-        .download(&file(&server.url, bytes), directory.path(), &cancellation, |_| {})
+        .download(
+            &file(&server.url, bytes),
+            directory.path(),
+            &cancellation,
+            |_| {},
+        )
         .unwrap_err();
     cancel_thread.join().unwrap();
 
     assert_eq!(error.code(), ModelErrorCode::DownloadCanceled);
-    assert_eq!(fs::read(directory.path().join("model.gguf.partial")).unwrap(), prefix);
+    assert_eq!(
+        fs::read(directory.path().join("model.gguf.partial")).unwrap(),
+        prefix
+    );
 }
 
 #[test]
@@ -357,7 +438,12 @@ fn default_policy_cancels_header_acquisition_and_joins_network_work() {
     let started = Instant::now();
 
     let error = downloader(u64::MAX)
-        .download(&file(&server.url, bytes), directory.path(), &cancellation, |_| {})
+        .download(
+            &file(&server.url, bytes),
+            directory.path(),
+            &cancellation,
+            |_| {},
+        )
         .unwrap_err();
     cancel_thread.join().unwrap();
 
@@ -403,7 +489,9 @@ fn selected_existing_file_uses_identical_size_and_digest_validation() {
 
     fs::write(&selected, b"wrong contents!").unwrap();
     assert_eq!(
-        validate_selected_file(&selected, &expected).unwrap_err().code(),
+        validate_selected_file(&selected, &expected)
+            .unwrap_err()
+            .code(),
         ModelErrorCode::ModelFileInvalid,
     );
 }

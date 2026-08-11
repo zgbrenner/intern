@@ -30,7 +30,11 @@ impl TempWorkspace {
         let path = std::env::temp_dir().join(format!(
             "intern-worker-{}-{}-{timestamp}-{nonce}",
             std::process::id(),
-            if safe_label.is_empty() { "request" } else { &safe_label }
+            if safe_label.is_empty() {
+                "request"
+            } else {
+                &safe_label
+            }
         ));
         fs::create_dir(&path).map_err(ExtractionError::io)?;
         Ok(Self {
@@ -44,7 +48,11 @@ impl TempWorkspace {
         &self.path
     }
 
-    pub fn write(&self, relative: impl AsRef<Path>, bytes: &[u8]) -> Result<PathBuf, ExtractionError> {
+    pub fn write(
+        &self,
+        relative: impl AsRef<Path>,
+        bytes: &[u8],
+    ) -> Result<PathBuf, ExtractionError> {
         let relative = relative.as_ref();
         if !safe_relative_path(relative) {
             return Err(ExtractionError::parse_failed("unsafe temporary path"));
@@ -54,7 +62,9 @@ impl TempWorkspace {
         let previous = self
             .written
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-                current.checked_add(length).filter(|next| *next <= self.budget)
+                current
+                    .checked_add(length)
+                    .filter(|next| *next <= self.budget)
             })
             .map_err(|_| ExtractionError::resource_limit("temporary data exceeds 2 GiB"))?;
         let path = self.path.join(relative);
@@ -116,11 +126,15 @@ impl TempWorkspace {
                 }
                 self.written
                     .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-                        current.checked_add(length).filter(|next| *next <= self.budget)
+                        current
+                            .checked_add(length)
+                            .filter(|next| *next <= self.budget)
                     })
                     .map_err(|_| ExtractionError::resource_limit("temporary data exceeds 2 GiB"))?;
                 reserved = next_reserved;
-                output.write_all(&buffer[..read]).map_err(ExtractionError::io)?;
+                output
+                    .write_all(&buffer[..read])
+                    .map_err(ExtractionError::io)?;
             }
             output.sync_all().map_err(ExtractionError::io)?;
             Ok(path.clone())
@@ -134,12 +148,16 @@ impl TempWorkspace {
 
     pub fn register_existing(&self, path: &Path) -> Result<(), ExtractionError> {
         if !path.starts_with(&self.path) {
-            return Err(ExtractionError::parse_failed("temporary file is outside its workspace"));
+            return Err(ExtractionError::parse_failed(
+                "temporary file is outside its workspace",
+            ));
         }
         let length = fs::metadata(path).map_err(ExtractionError::io)?.len();
         self.written
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-                current.checked_add(length).filter(|next| *next <= self.budget)
+                current
+                    .checked_add(length)
+                    .filter(|next| *next <= self.budget)
             })
             .map(|_| ())
             .map_err(|_| ExtractionError::resource_limit("temporary data exceeds 2 GiB"))
@@ -152,13 +170,12 @@ fn safe_relative_path(path: &Path) -> bool {
     if raw.is_empty()
         || raw.starts_with('/')
         || raw.starts_with('\\')
-        || (bytes.len() >= 2
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
     {
         return false;
     }
-    path.components().all(|component| matches!(component, Component::Normal(_)))
+    path.components()
+        .all(|component| matches!(component, Component::Normal(_)))
 }
 
 impl Drop for TempWorkspace {

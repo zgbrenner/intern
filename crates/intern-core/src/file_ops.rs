@@ -2,7 +2,10 @@ use std::{
     fs::{self, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    sync::{Arc, atomic::{AtomicU64, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -22,11 +25,18 @@ pub enum OperationKind {
 
 impl OperationKind {
     pub(crate) fn as_db(self) -> &'static str {
-        match self { Self::Rename => "rename", Self::VerifiedCopy => "verified_copy" }
+        match self {
+            Self::Rename => "rename",
+            Self::VerifiedCopy => "verified_copy",
+        }
     }
 
     pub(crate) fn from_db(value: &str) -> Option<Self> {
-        match value { "rename" => Some(Self::Rename), "verified_copy" => Some(Self::VerifiedCopy), _ => None }
+        match value {
+            "rename" => Some(Self::Rename),
+            "verified_copy" => Some(Self::VerifiedCopy),
+            _ => None,
+        }
     }
 }
 
@@ -39,11 +49,18 @@ pub enum OperationDirection {
 
 impl OperationDirection {
     pub(crate) fn as_db(self) -> &'static str {
-        match self { Self::Apply => "apply", Self::Undo => "undo" }
+        match self {
+            Self::Apply => "apply",
+            Self::Undo => "undo",
+        }
     }
 
     pub(crate) fn from_db(value: &str) -> Option<Self> {
-        match value { "apply" => Some(Self::Apply), "undo" => Some(Self::Undo), _ => None }
+        match value {
+            "apply" => Some(Self::Apply),
+            "undo" => Some(Self::Undo),
+            _ => None,
+        }
     }
 }
 
@@ -86,14 +103,17 @@ impl OperationStage {
     }
 
     pub(crate) fn can_advance_to(self, next: Self) -> bool {
-        self == next || matches!(
-            (self, next),
-            (Self::Planned, Self::Copied | Self::Published | Self::RollbackRequired | Self::RolledBack)
-                | (Self::Copied, Self::Verified | Self::RollbackRequired)
-                | (Self::Verified, Self::Published | Self::RollbackRequired)
-                | (Self::Published, Self::Complete | Self::RollbackRequired)
-                | (Self::RollbackRequired, Self::RolledBack)
-        )
+        self == next
+            || matches!(
+                (self, next),
+                (
+                    Self::Planned,
+                    Self::Copied | Self::Published | Self::RollbackRequired | Self::RolledBack
+                ) | (Self::Copied, Self::Verified | Self::RollbackRequired)
+                    | (Self::Verified, Self::Published | Self::RollbackRequired)
+                    | (Self::Published, Self::Complete | Self::RollbackRequired)
+                    | (Self::RollbackRequired, Self::RolledBack)
+            )
     }
 }
 
@@ -131,7 +151,8 @@ pub trait FileSystem: Send + Sync {
     fn hash(&self, path: &Path) -> io::Result<String>;
     fn same_volume(&self, source: &Path, destination: &Path) -> io::Result<bool>;
     fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()>;
-    fn copy_new_locked(&self, source: &Path, destination: &Path) -> io::Result<Box<dyn LockedFile>>;
+    fn copy_new_locked(&self, source: &Path, destination: &Path)
+    -> io::Result<Box<dyn LockedFile>>;
     fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>>;
 }
 
@@ -155,7 +176,11 @@ impl FileSystem for StdFileSystem {
         rename_no_replace(source, destination)
     }
 
-    fn copy_new_locked(&self, source: &Path, destination: &Path) -> io::Result<Box<dyn LockedFile>> {
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
         copy_new_locked(source, destination)
     }
 
@@ -179,9 +204,9 @@ impl FileApplier {
     }
 
     pub fn fingerprint(&self, path: &Path) -> InternResult<String> {
-        self.filesystem.hash(path).map_err(|_| {
-            InternError::new(ErrorCode::IoError, "could not fingerprint source file")
-        })
+        self.filesystem
+            .hash(path)
+            .map_err(|_| InternError::new(ErrorCode::IoError, "could not fingerprint source file"))
     }
 
     pub fn apply(
@@ -201,9 +226,16 @@ impl FileApplier {
         )
     }
 
-    pub fn undo(&self, queue_item_id: i64, applied: &OperationReceipt) -> InternResult<OperationReceipt> {
+    pub fn undo(
+        &self,
+        queue_item_id: i64,
+        applied: &OperationReceipt,
+    ) -> InternResult<OperationReceipt> {
         let durable = self.store.load_receipt(queue_item_id)?.ok_or_else(|| {
-            InternError::new(ErrorCode::StateConflict, "undo requires a durable apply receipt")
+            InternError::new(
+                ErrorCode::StateConflict,
+                "undo requires a durable apply receipt",
+            )
         })?;
         if durable != *applied
             || applied.queue_item_id != queue_item_id
@@ -216,10 +248,16 @@ impl FileApplier {
             ));
         }
         if self.filesystem.exists(&applied.source) {
-            return Err(InternError::new(ErrorCode::DestinationUnavailable, "original source path is occupied"));
+            return Err(InternError::new(
+                ErrorCode::DestinationUnavailable,
+                "original source path is occupied",
+            ));
         }
         let expected = applied.post_operation_hash.as_deref().ok_or_else(|| {
-            InternError::new(ErrorCode::InvalidData, "completed receipt has no destination hash")
+            InternError::new(
+                ErrorCode::InvalidData,
+                "completed receipt has no destination hash",
+            )
         })?;
         self.transfer(
             queue_item_id,
@@ -268,7 +306,8 @@ impl FileApplier {
         Err(InternError::new(
             ErrorCode::StateConflict,
             "incomplete receipt paths require manual reconciliation",
-        ).with_receipt(receipt))
+        )
+        .with_receipt(receipt))
     }
 
     fn cleanup_reconciled_temporary(&self, receipt: &OperationReceipt) -> InternResult<()> {
@@ -280,55 +319,64 @@ impl FileApplier {
                 return Err(InternError::new(
                     ErrorCode::StateConflict,
                     "recorded temporary file absence cannot be proven",
-                ).with_receipt(receipt.clone()));
+                )
+                .with_receipt(receipt.clone()));
             }
             return Ok(());
         }
-        let mut temporary = self.filesystem.lock_for_delete(temporary_path).map_err(|_| {
-            InternError::new(
-                ErrorCode::MoveVerificationFailed,
-                "temporary file cannot be locked for reconciliation",
-            ).with_receipt(receipt.clone())
-        })?;
+        let mut temporary = self
+            .filesystem
+            .lock_for_delete(temporary_path)
+            .map_err(|_| {
+                InternError::new(
+                    ErrorCode::MoveVerificationFailed,
+                    "temporary file cannot be locked for reconciliation",
+                )
+                .with_receipt(receipt.clone())
+            })?;
         let identity = temporary.identity().map_err(|_| {
             InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "temporary file identity is unavailable",
-            ).with_receipt(receipt.clone())
+            )
+            .with_receipt(receipt.clone())
         })?;
         let hash = temporary.hash().map_err(|_| {
             InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "temporary file hash is unavailable",
-            ).with_receipt(receipt.clone())
+            )
+            .with_receipt(receipt.clone())
         })?;
         let identity_after = temporary.identity().map_err(|_| {
             InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "temporary file identity became unavailable",
-            ).with_receipt(receipt.clone())
+            )
+            .with_receipt(receipt.clone())
         })?;
         if hash != receipt.pre_operation_hash || identity_after != identity {
             return Err(InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "temporary file does not match its receipt",
-            ).with_receipt(receipt.clone()));
+            )
+            .with_receipt(receipt.clone()));
         }
-        self.store.renew_operation_lease(
-            receipt.queue_item_id,
-            receipt.id,
-            receipt.stage,
-        ).map_err(|_| {
-            InternError::new(
-                ErrorCode::StateConflict,
-                "temporary cleanup ownership was lost",
-            ).with_receipt(receipt.clone())
-        })?;
+        self.store
+            .renew_operation_lease(receipt.queue_item_id, receipt.id, receipt.stage)
+            .map_err(|_| {
+                InternError::new(
+                    ErrorCode::StateConflict,
+                    "temporary cleanup ownership was lost",
+                )
+                .with_receipt(receipt.clone())
+            })?;
         temporary.delete().map_err(|_| {
             InternError::new(
                 ErrorCode::SourceDeleteFailed,
                 "temporary reconciliation deletion failed",
-            ).with_receipt(receipt.clone())
+            )
+            .with_receipt(receipt.clone())
         })
     }
 
@@ -337,7 +385,8 @@ impl FileApplier {
             return Err(InternError::new(
                 ErrorCode::StateConflict,
                 "rolled-back destination path is occupied",
-            ).with_receipt(receipt));
+            )
+            .with_receipt(receipt));
         }
         let _source = self.verify_reconciled_source(&receipt)?;
         self.cleanup_reconciled_temporary(&receipt)?;
@@ -352,27 +401,43 @@ impl FileApplier {
         &self,
         receipt: &OperationReceipt,
     ) -> InternResult<Box<dyn LockedFile>> {
-        let mut source = self.filesystem.lock_for_delete(&receipt.source).map_err(|_| {
-            InternError::new(ErrorCode::FileChanged, "rolled-back source cannot be verified")
+        let mut source = self
+            .filesystem
+            .lock_for_delete(&receipt.source)
+            .map_err(|_| {
+                InternError::new(
+                    ErrorCode::FileChanged,
+                    "rolled-back source cannot be verified",
+                )
                 .with_receipt(receipt.clone())
-        })?;
+            })?;
         let identity = source.identity().map_err(|_| {
-            InternError::new(ErrorCode::FileChanged, "rolled-back source identity is unavailable")
-                .with_receipt(receipt.clone())
+            InternError::new(
+                ErrorCode::FileChanged,
+                "rolled-back source identity is unavailable",
+            )
+            .with_receipt(receipt.clone())
         })?;
         let hash = source.hash().map_err(|_| {
-            InternError::new(ErrorCode::FileChanged, "rolled-back source hash is unavailable")
-                .with_receipt(receipt.clone())
+            InternError::new(
+                ErrorCode::FileChanged,
+                "rolled-back source hash is unavailable",
+            )
+            .with_receipt(receipt.clone())
         })?;
         let identity_after = source.identity().map_err(|_| {
-            InternError::new(ErrorCode::FileChanged, "rolled-back source identity became unavailable")
-                .with_receipt(receipt.clone())
+            InternError::new(
+                ErrorCode::FileChanged,
+                "rolled-back source identity became unavailable",
+            )
+            .with_receipt(receipt.clone())
         })?;
         if hash != receipt.pre_operation_hash || identity_after != identity {
             return Err(InternError::new(
                 ErrorCode::FileChanged,
                 "rolled-back source does not match its receipt",
-            ).with_receipt(receipt.clone()));
+            )
+            .with_receipt(receipt.clone()));
         }
         Ok(source)
     }
@@ -382,7 +447,8 @@ impl FileApplier {
             return Err(InternError::new(
                 ErrorCode::StateConflict,
                 "completed receipt still has a source path",
-            ).with_receipt(receipt));
+            )
+            .with_receipt(receipt));
         }
         let destination = self.verify_reconciled_destination(&receipt)?;
         let resolved = self.store.resolve_verified_operation(
@@ -397,29 +463,47 @@ impl FileApplier {
     fn reconcile_published(&self, receipt: OperationReceipt) -> InternResult<QueueItem> {
         let mut destination = self.verify_reconciled_destination(&receipt)?;
         let destination_identity = destination.identity().map_err(|_| {
-            InternError::new(ErrorCode::MoveVerificationFailed, "published destination identity is unavailable")
-                .with_receipt(receipt.clone())
+            InternError::new(
+                ErrorCode::MoveVerificationFailed,
+                "published destination identity is unavailable",
+            )
+            .with_receipt(receipt.clone())
         })?;
         if self.filesystem.exists(&receipt.source) {
-            let mut source = self.filesystem.lock_for_delete(&receipt.source).map_err(|_| {
-                InternError::new(ErrorCode::FileChanged, "published source cannot be locked")
-                    .with_receipt(receipt.clone())
-            })?;
+            let mut source = self
+                .filesystem
+                .lock_for_delete(&receipt.source)
+                .map_err(|_| {
+                    InternError::new(ErrorCode::FileChanged, "published source cannot be locked")
+                        .with_receipt(receipt.clone())
+                })?;
             let source_identity = source.identity().map_err(|_| {
-                InternError::new(ErrorCode::FileChanged, "published source identity is unavailable")
-                    .with_receipt(receipt.clone())
+                InternError::new(
+                    ErrorCode::FileChanged,
+                    "published source identity is unavailable",
+                )
+                .with_receipt(receipt.clone())
             })?;
             let source_hash = source.hash().map_err(|_| {
-                InternError::new(ErrorCode::FileChanged, "published source hash is unavailable")
-                    .with_receipt(receipt.clone())
+                InternError::new(
+                    ErrorCode::FileChanged,
+                    "published source hash is unavailable",
+                )
+                .with_receipt(receipt.clone())
             })?;
             let source_identity_after = source.identity().map_err(|_| {
-                InternError::new(ErrorCode::FileChanged, "published source identity became unavailable")
-                    .with_receipt(receipt.clone())
+                InternError::new(
+                    ErrorCode::FileChanged,
+                    "published source identity became unavailable",
+                )
+                .with_receipt(receipt.clone())
             })?;
             let destination_identity_after = destination.identity().map_err(|_| {
-                InternError::new(ErrorCode::MoveVerificationFailed, "published destination identity became unavailable")
-                    .with_receipt(receipt.clone())
+                InternError::new(
+                    ErrorCode::MoveVerificationFailed,
+                    "published destination identity became unavailable",
+                )
+                .with_receipt(receipt.clone())
             })?;
             if source_hash != receipt.pre_operation_hash
                 || source_identity_after != source_identity
@@ -428,19 +512,24 @@ impl FileApplier {
                 return Err(InternError::new(
                     ErrorCode::FileChanged,
                     "published paths changed during reconciliation",
-                ).with_receipt(receipt));
+                )
+                .with_receipt(receipt));
             }
-            self.store.renew_operation_lease(
-                receipt.queue_item_id,
-                receipt.id,
-                OperationStage::Published,
-            ).map_err(|_| {
-                InternError::new(ErrorCode::StateConflict, "reconciliation deletion ownership was lost")
+            self.store
+                .renew_operation_lease(receipt.queue_item_id, receipt.id, OperationStage::Published)
+                .map_err(|_| {
+                    InternError::new(
+                        ErrorCode::StateConflict,
+                        "reconciliation deletion ownership was lost",
+                    )
                     .with_receipt(receipt.clone())
-            })?;
+                })?;
             source.delete().map_err(|_| {
-                InternError::new(ErrorCode::SourceDeleteFailed, "reconciled source deletion failed")
-                    .with_receipt(receipt.clone())
+                InternError::new(
+                    ErrorCode::SourceDeleteFailed,
+                    "reconciled source deletion failed",
+                )
+                .with_receipt(receipt.clone())
             })?;
         }
         let resolved = self.store.resolve_verified_operation(
@@ -456,41 +545,54 @@ impl FileApplier {
         &self,
         receipt: &OperationReceipt,
     ) -> InternResult<Box<dyn LockedFile>> {
-        if receipt.post_operation_hash.as_deref().is_some_and(|hash| hash != receipt.pre_operation_hash.as_str()) {
+        if receipt
+            .post_operation_hash
+            .as_deref()
+            .is_some_and(|hash| hash != receipt.pre_operation_hash.as_str())
+        {
             return Err(InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "receipt does not contain an equal verified destination hash",
-            ).with_receipt(receipt.clone()));
+            )
+            .with_receipt(receipt.clone()));
         }
-        let mut destination = self.filesystem.lock_for_delete(&receipt.destination).map_err(|_| {
-            InternError::new(
-                ErrorCode::MoveVerificationFailed,
-                "reconciled destination cannot be locked",
-            ).with_receipt(receipt.clone())
-        })?;
+        let mut destination = self
+            .filesystem
+            .lock_for_delete(&receipt.destination)
+            .map_err(|_| {
+                InternError::new(
+                    ErrorCode::MoveVerificationFailed,
+                    "reconciled destination cannot be locked",
+                )
+                .with_receipt(receipt.clone())
+            })?;
         let identity = destination.identity().map_err(|_| {
             InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "reconciled destination identity is unavailable",
-            ).with_receipt(receipt.clone())
+            )
+            .with_receipt(receipt.clone())
         })?;
         let hash = destination.hash().map_err(|_| {
             InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "reconciled destination hash is unavailable",
-            ).with_receipt(receipt.clone())
+            )
+            .with_receipt(receipt.clone())
         })?;
         let identity_after = destination.identity().map_err(|_| {
             InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "reconciled destination identity became unavailable",
-            ).with_receipt(receipt.clone())
+            )
+            .with_receipt(receipt.clone())
         })?;
         if hash != receipt.pre_operation_hash || identity_after != identity {
             return Err(InternError::new(
                 ErrorCode::MoveVerificationFailed,
                 "reconciled destination does not match its receipt",
-            ).with_receipt(receipt.clone()));
+            )
+            .with_receipt(receipt.clone()));
         }
         Ok(destination)
     }
@@ -504,17 +606,29 @@ impl FileApplier {
         expected_fingerprint: &str,
     ) -> InternResult<OperationReceipt> {
         if self.filesystem.exists(destination) {
-            return Err(InternError::new(ErrorCode::DestinationUnavailable, "destination is occupied"));
+            return Err(InternError::new(
+                ErrorCode::DestinationUnavailable,
+                "destination is occupied",
+            ));
         }
-        let same_volume = self.filesystem.same_volume(source, destination).map_err(|_| {
-            InternError::new(ErrorCode::DestinationUnavailable, "destination volume is unavailable")
-        })?;
+        let same_volume = self
+            .filesystem
+            .same_volume(source, destination)
+            .map_err(|_| {
+                InternError::new(
+                    ErrorCode::DestinationUnavailable,
+                    "destination volume is unavailable",
+                )
+            })?;
         if same_volume {
             let pre_hash = self.filesystem.hash(source).map_err(|_| {
                 InternError::new(ErrorCode::FileChanged, "source is unavailable or changed")
             })?;
             if pre_hash != expected_fingerprint {
-                return Err(InternError::new(ErrorCode::FileChanged, "source fingerprint changed"));
+                return Err(InternError::new(
+                    ErrorCode::FileChanged,
+                    "source fingerprint changed",
+                ));
             }
             let receipt = self.planned_receipt(
                 queue_item_id,
@@ -529,16 +643,22 @@ impl FileApplier {
         }
 
         let mut locked = self.filesystem.lock_for_delete(source).map_err(|_| {
-            InternError::new(ErrorCode::FileChanged, "source cannot be exclusively verified")
+            InternError::new(
+                ErrorCode::FileChanged,
+                "source cannot be exclusively verified",
+            )
         })?;
         let identity = locked.identity().map_err(|_| {
             InternError::new(ErrorCode::FileChanged, "source identity is unavailable")
         })?;
-        let pre_hash = locked.hash().map_err(|_| {
-            InternError::new(ErrorCode::FileChanged, "source cannot be verified")
-        })?;
+        let pre_hash = locked
+            .hash()
+            .map_err(|_| InternError::new(ErrorCode::FileChanged, "source cannot be verified"))?;
         if pre_hash != expected_fingerprint {
-            return Err(InternError::new(ErrorCode::FileChanged, "source fingerprint changed"));
+            return Err(InternError::new(
+                ErrorCode::FileChanged,
+                "source fingerprint changed",
+            ));
         }
         let temporary = temporary_path(destination);
         let receipt = self.planned_receipt(
@@ -563,39 +683,54 @@ impl FileApplier {
         pre_operation_hash: String,
         kind: OperationKind,
     ) -> InternResult<OperationReceipt> {
-        self.store.create_receipt(queue_item_id, OperationReceipt {
-            id: 0,
+        self.store.create_receipt(
             queue_item_id,
-            direction,
-            source: source.to_owned(),
-            destination: destination.to_owned(),
-            temporary_path,
-            pre_operation_hash,
-            post_operation_hash: None,
-            kind,
-            stage: OperationStage::Planned,
-            source_exists: true,
-            destination_exists: false,
-            temporary_exists: false,
-        })
+            OperationReceipt {
+                id: 0,
+                queue_item_id,
+                direction,
+                source: source.to_owned(),
+                destination: destination.to_owned(),
+                temporary_path,
+                pre_operation_hash,
+                post_operation_hash: None,
+                kind,
+                stage: OperationStage::Planned,
+                source_exists: true,
+                destination_exists: false,
+                temporary_exists: false,
+            },
+        )
     }
 
-    fn same_volume_transfer(&self, mut receipt: OperationReceipt) -> InternResult<OperationReceipt> {
-        self.filesystem.rename_no_replace(&receipt.source, &receipt.destination).map_err(|error| {
-            let code = if error.kind() == io::ErrorKind::AlreadyExists {
-                ErrorCode::DestinationUnavailable
-            } else {
-                ErrorCode::IoError
-            };
-            self.reconciliation_error(receipt.clone(), code, "atomic no-replace rename failed")
-        })?;
+    fn same_volume_transfer(
+        &self,
+        mut receipt: OperationReceipt,
+    ) -> InternResult<OperationReceipt> {
+        self.filesystem
+            .rename_no_replace(&receipt.source, &receipt.destination)
+            .map_err(|error| {
+                let code = if error.kind() == io::ErrorKind::AlreadyExists {
+                    ErrorCode::DestinationUnavailable
+                } else {
+                    ErrorCode::IoError
+                };
+                self.reconciliation_error(receipt.clone(), code, "atomic no-replace rename failed")
+            })?;
 
         receipt.source_exists = false;
         receipt.destination_exists = true;
         receipt.stage = OperationStage::Published;
-        receipt = self.store.update_receipt(OperationStage::Planned, &receipt).map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::StateConflict, "rename completed but receipt publication failed")
-        })?;
+        receipt = self
+            .store
+            .update_receipt(OperationStage::Planned, &receipt)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt.clone(),
+                    ErrorCode::StateConflict,
+                    "rename completed but receipt publication failed",
+                )
+            })?;
 
         let mut published_locked = match self.filesystem.lock_for_delete(&receipt.destination) {
             Ok(locked) => locked,
@@ -621,7 +756,8 @@ impl FileApplier {
             Ok(hash) => hash,
             Err(_) => {
                 drop(published_locked);
-                return self.rollback_after_rename(receipt, "renamed destination could not be verified");
+                return self
+                    .rollback_after_rename(receipt, "renamed destination could not be verified");
             }
         };
         if post_hash != receipt.pre_operation_hash {
@@ -635,7 +771,8 @@ impl FileApplier {
                 ErrorCode::MoveVerificationFailed,
                 "renamed destination identity became unavailable",
             )
-        })? != published_identity {
+        })? != published_identity
+        {
             return Err(self.reconciliation_error(
                 receipt,
                 ErrorCode::MoveVerificationFailed,
@@ -644,25 +781,53 @@ impl FileApplier {
         }
         receipt.post_operation_hash = Some(post_hash);
         receipt.stage = OperationStage::Complete;
-        let complete = self.store.update_receipt(OperationStage::Published, &receipt).map_err(|_| {
-            self.reconciliation_error(receipt, ErrorCode::StateConflict, "rename completed but completion journal failed")
-        })?;
+        let complete = self
+            .store
+            .update_receipt(OperationStage::Published, &receipt)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt,
+                    ErrorCode::StateConflict,
+                    "rename completed but completion journal failed",
+                )
+            })?;
         drop(published_locked);
         Ok(complete)
     }
 
-    fn rollback_after_rename(&self, mut receipt: OperationReceipt, message: &str) -> InternResult<OperationReceipt> {
+    fn rollback_after_rename(
+        &self,
+        mut receipt: OperationReceipt,
+        message: &str,
+    ) -> InternResult<OperationReceipt> {
         receipt.stage = OperationStage::RollbackRequired;
-        receipt = self.store.update_receipt(OperationStage::Published, &receipt).map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::StateConflict, "rollback intent could not be journaled")
-        })?;
-        match self.filesystem.rename_no_replace(&receipt.destination, &receipt.source) {
+        receipt = self
+            .store
+            .update_receipt(OperationStage::Published, &receipt)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt.clone(),
+                    ErrorCode::StateConflict,
+                    "rollback intent could not be journaled",
+                )
+            })?;
+        match self
+            .filesystem
+            .rename_no_replace(&receipt.destination, &receipt.source)
+        {
             Ok(()) => {
                 receipt.source_exists = true;
                 receipt.destination_exists = false;
                 receipt.stage = OperationStage::RolledBack;
-                match self.store.update_receipt(OperationStage::RollbackRequired, &receipt) {
-                    Ok(journaled) => Err(self.reconciliation_error(journaled, ErrorCode::MoveVerificationFailed, message)),
+                match self
+                    .store
+                    .update_receipt(OperationStage::RollbackRequired, &receipt)
+                {
+                    Ok(journaled) => Err(self.reconciliation_error(
+                        journaled,
+                        ErrorCode::MoveVerificationFailed,
+                        message,
+                    )),
                     Err(_) => Err(self.reconciliation_error(
                         receipt,
                         ErrorCode::StateConflict,
@@ -673,7 +838,10 @@ impl FileApplier {
             Err(_) => {
                 receipt.source_exists = self.filesystem.exists(&receipt.source);
                 receipt.destination_exists = self.filesystem.exists(&receipt.destination);
-                match self.store.update_receipt(OperationStage::RollbackRequired, &receipt) {
+                match self
+                    .store
+                    .update_receipt(OperationStage::RollbackRequired, &receipt)
+                {
                     Ok(actual) => Err(self.reconciliation_error(
                         actual,
                         ErrorCode::MoveVerificationFailed,
@@ -702,11 +870,12 @@ impl FileApplier {
                 "cross-volume receipt is missing its temporary path",
             )
         })?;
-        let mut temporary_locked = match self.filesystem.copy_new_locked(&receipt.source, &temporary) {
-            Ok(locked) => locked,
-            Err(_) => {
-                receipt.temporary_exists = self.filesystem.exists(&temporary);
-                return match self.store.update_receipt(OperationStage::Planned, &receipt) {
+        let mut temporary_locked =
+            match self.filesystem.copy_new_locked(&receipt.source, &temporary) {
+                Ok(locked) => locked,
+                Err(_) => {
+                    receipt.temporary_exists = self.filesystem.exists(&temporary);
+                    return match self.store.update_receipt(OperationStage::Planned, &receipt) {
                     Ok(actual) => Err(self.reconciliation_error(
                         actual,
                         ErrorCode::DestinationUnavailable,
@@ -718,13 +887,20 @@ impl FileApplier {
                         "temporary copy failed and its surviving path could not be durably updated",
                     )),
                 };
-            }
-        };
+                }
+            };
         receipt.temporary_exists = true;
         receipt.stage = OperationStage::Copied;
-        receipt = self.store.update_receipt(OperationStage::Planned, &receipt).map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::StateConflict, "copied stage could not be journaled")
-        })?;
+        receipt = self
+            .store
+            .update_receipt(OperationStage::Planned, &receipt)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt.clone(),
+                    ErrorCode::StateConflict,
+                    "copied stage could not be journaled",
+                )
+            })?;
 
         let copied_identity = temporary_locked.identity().map_err(|_| {
             self.reconciliation_error(
@@ -754,9 +930,16 @@ impl FileApplier {
         }
         receipt.post_operation_hash = Some(copied_hash);
         receipt.stage = OperationStage::Verified;
-        receipt = self.store.update_receipt(OperationStage::Copied, &receipt).map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::StateConflict, "verified stage could not be journaled")
-        })?;
+        receipt = self
+            .store
+            .update_receipt(OperationStage::Copied, &receipt)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt.clone(),
+                    ErrorCode::StateConflict,
+                    "verified stage could not be journaled",
+                )
+            })?;
 
         if temporary_locked.identity().map_err(|_| {
             self.reconciliation_error(
@@ -764,7 +947,8 @@ impl FileApplier {
                 ErrorCode::MoveVerificationFailed,
                 "verified temporary identity became unavailable",
             )
-        })? != copied_identity {
+        })? != copied_identity
+        {
             return Err(self.temp_failure(
                 receipt,
                 temporary_locked,
@@ -774,11 +958,21 @@ impl FileApplier {
         }
         drop(temporary_locked);
 
-        if let Err(_publish_error) = self.filesystem.rename_no_replace(&temporary, &receipt.destination) {
+        if let Err(_publish_error) = self
+            .filesystem
+            .rename_no_replace(&temporary, &receipt.destination)
+        {
             receipt.temporary_exists = self.filesystem.exists(&temporary);
             receipt.destination_exists = self.filesystem.exists(&receipt.destination);
-            return match self.store.update_receipt(OperationStage::Verified, &receipt) {
-                Ok(actual) => Err(self.reconciliation_error(actual, ErrorCode::DestinationUnavailable, "verified copy could not be atomically published")),
+            return match self
+                .store
+                .update_receipt(OperationStage::Verified, &receipt)
+            {
+                Ok(actual) => Err(self.reconciliation_error(
+                    actual,
+                    ErrorCode::DestinationUnavailable,
+                    "verified copy could not be atomically published",
+                )),
                 Err(_) => Err(self.reconciliation_error(
                     receipt,
                     ErrorCode::StateConflict,
@@ -789,17 +983,27 @@ impl FileApplier {
         receipt.temporary_exists = false;
         receipt.destination_exists = true;
         receipt.stage = OperationStage::Published;
-        receipt = self.store.update_receipt(OperationStage::Verified, &receipt).map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::StateConflict, "published stage could not be journaled")
-        })?;
+        receipt = self
+            .store
+            .update_receipt(OperationStage::Verified, &receipt)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt.clone(),
+                    ErrorCode::StateConflict,
+                    "published stage could not be journaled",
+                )
+            })?;
 
-        let mut published_locked = self.filesystem.lock_for_delete(&receipt.destination).map_err(|_| {
-            self.reconciliation_error(
-                receipt.clone(),
-                ErrorCode::MoveVerificationFailed,
-                "published destination could not be locked for final verification",
-            )
-        })?;
+        let mut published_locked = self
+            .filesystem
+            .lock_for_delete(&receipt.destination)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt.clone(),
+                    ErrorCode::MoveVerificationFailed,
+                    "published destination could not be locked for final verification",
+                )
+            })?;
         let published_identity = published_locked.identity().map_err(|_| {
             self.reconciliation_error(
                 receipt.clone(),
@@ -808,12 +1012,23 @@ impl FileApplier {
             )
         })?;
         let published_hash = published_locked.hash().map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::MoveVerificationFailed, "published destination could not be verified")
+            self.reconciliation_error(
+                receipt.clone(),
+                ErrorCode::MoveVerificationFailed,
+                "published destination could not be verified",
+            )
         })?;
         if published_hash != receipt.pre_operation_hash {
             receipt.post_operation_hash = Some(published_hash);
-            return match self.store.update_receipt(OperationStage::Published, &receipt) {
-                Ok(actual) => Err(self.reconciliation_error(actual, ErrorCode::MoveVerificationFailed, "published destination hash differs")),
+            return match self
+                .store
+                .update_receipt(OperationStage::Published, &receipt)
+            {
+                Ok(actual) => Err(self.reconciliation_error(
+                    actual,
+                    ErrorCode::MoveVerificationFailed,
+                    "published destination hash differs",
+                )),
                 Err(_) => Err(self.reconciliation_error(
                     receipt,
                     ErrorCode::StateConflict,
@@ -822,21 +1037,44 @@ impl FileApplier {
             };
         }
         receipt.post_operation_hash = Some(published_hash);
-        receipt = self.store.update_receipt(OperationStage::Published, &receipt).map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::StateConflict, "published hash could not be journaled")
-        })?;
+        receipt = self
+            .store
+            .update_receipt(OperationStage::Published, &receipt)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt.clone(),
+                    ErrorCode::StateConflict,
+                    "published hash could not be journaled",
+                )
+            })?;
 
         let identity_before_delete = locked.identity().map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::FileChanged, "locked source identity became unavailable")
+            self.reconciliation_error(
+                receipt.clone(),
+                ErrorCode::FileChanged,
+                "locked source identity became unavailable",
+            )
         })?;
         if identity_before_delete != identity {
-            return Err(self.reconciliation_error(receipt, ErrorCode::FileChanged, "locked source identity changed"));
+            return Err(self.reconciliation_error(
+                receipt,
+                ErrorCode::FileChanged,
+                "locked source identity changed",
+            ));
         }
         let source_hash = locked.hash().map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::FileChanged, "locked source could not be reverified")
+            self.reconciliation_error(
+                receipt.clone(),
+                ErrorCode::FileChanged,
+                "locked source could not be reverified",
+            )
         })?;
         if source_hash != receipt.pre_operation_hash {
-            return Err(self.reconciliation_error(receipt, ErrorCode::FileChanged, "locked source hash changed"));
+            return Err(self.reconciliation_error(
+                receipt,
+                ErrorCode::FileChanged,
+                "locked source hash changed",
+            ));
         }
         if published_locked.identity().map_err(|_| {
             self.reconciliation_error(
@@ -844,34 +1082,43 @@ impl FileApplier {
                 ErrorCode::MoveVerificationFailed,
                 "published destination identity became unavailable",
             )
-        })? != published_identity {
+        })? != published_identity
+        {
             return Err(self.reconciliation_error(
                 receipt,
                 ErrorCode::MoveVerificationFailed,
                 "published destination identity changed before source deletion",
             ));
         }
-        self.store.renew_operation_lease(
-            receipt.queue_item_id,
-            receipt.id,
-            OperationStage::Published,
-        ).map_err(|_| {
+        self.store
+            .renew_operation_lease(receipt.queue_item_id, receipt.id, OperationStage::Published)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt.clone(),
+                    ErrorCode::StateConflict,
+                    "source deletion ownership could not be renewed",
+                )
+            })?;
+        locked.delete().map_err(|_| {
             self.reconciliation_error(
                 receipt.clone(),
-                ErrorCode::StateConflict,
-                "source deletion ownership could not be renewed",
+                ErrorCode::SourceDeleteFailed,
+                "locked source deletion failed",
             )
-        })?;
-        locked.delete().map_err(|_| {
-            self.reconciliation_error(receipt.clone(), ErrorCode::SourceDeleteFailed, "locked source deletion failed")
         })?;
         drop(published_locked);
 
         receipt.source_exists = false;
         receipt.stage = OperationStage::Complete;
-        self.store.update_receipt(OperationStage::Published, &receipt).map_err(|_| {
-            self.reconciliation_error(receipt, ErrorCode::StateConflict, "source deleted but completion journal failed")
-        })
+        self.store
+            .update_receipt(OperationStage::Published, &receipt)
+            .map_err(|_| {
+                self.reconciliation_error(
+                    receipt,
+                    ErrorCode::StateConflict,
+                    "source deleted but completion journal failed",
+                )
+            })
     }
 
     fn temp_failure(
@@ -881,11 +1128,11 @@ impl FileApplier {
         code: ErrorCode,
         message: &str,
     ) -> InternError {
-        if self.store.renew_operation_lease(
-            receipt.queue_item_id,
-            receipt.id,
-            receipt.stage,
-        ).is_err() {
+        if self
+            .store
+            .renew_operation_lease(receipt.queue_item_id, receipt.id, receipt.stage)
+            .is_err()
+        {
             receipt.temporary_exists = true;
             return self.reconciliation_error(
                 receipt,
@@ -904,29 +1151,53 @@ impl FileApplier {
         }
     }
 
-    fn reconciliation_error(&self, receipt: OperationReceipt, code: ErrorCode, message: &str) -> InternError {
-        match self.store.record_applying_rollback(receipt.queue_item_id, receipt.id, code) {
+    fn reconciliation_error(
+        &self,
+        receipt: OperationReceipt,
+        code: ErrorCode,
+        message: &str,
+    ) -> InternError {
+        match self
+            .store
+            .record_applying_rollback(receipt.queue_item_id, receipt.id, code)
+        {
             Ok(_) => InternError::new(code, message).with_receipt(receipt),
             Err(_) => InternError::new(
                 ErrorCode::StateConflict,
                 "operation state is uncertain and applying ownership could not be journaled",
-            ).with_receipt(receipt),
+            )
+            .with_receipt(receipt),
         }
     }
 
     fn available_destination(&self, requested: &Path) -> InternResult<PathBuf> {
         let parent = requested.parent().ok_or_else(|| {
-            InternError::new(ErrorCode::DestinationUnavailable, "destination has no parent")
+            InternError::new(
+                ErrorCode::DestinationUnavailable,
+                "destination has no parent",
+            )
         })?;
-        let stem = requested.file_stem().and_then(|value| value.to_str()).ok_or_else(|| {
-            InternError::new(ErrorCode::DestinationUnavailable, "destination name is invalid")
-        })?;
+        let stem = requested
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| {
+                InternError::new(
+                    ErrorCode::DestinationUnavailable,
+                    "destination name is invalid",
+                )
+            })?;
         let extension = requested.extension().and_then(|value| value.to_str());
         for index in 1_u32.. {
             let name = if index == 1 {
-                requested.file_name().ok_or_else(|| {
-                    InternError::new(ErrorCode::DestinationUnavailable, "destination name is missing")
-                })?.to_owned()
+                requested
+                    .file_name()
+                    .ok_or_else(|| {
+                        InternError::new(
+                            ErrorCode::DestinationUnavailable,
+                            "destination name is missing",
+                        )
+                    })?
+                    .to_owned()
             } else {
                 match extension {
                     Some(value) => format!("{stem} ({index}).{value}").into(),
@@ -948,7 +1219,9 @@ fn hash_reader(mut file: fs::File) -> io::Result<String> {
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let read = file.read(&mut buffer)?;
-        if read == 0 { break; }
+        if read == 0 {
+            break;
+        }
         hasher.update(&buffer[..read]);
     }
     Ok(format!("{:x}", hasher.finalize()))
@@ -956,9 +1229,15 @@ fn hash_reader(mut file: fs::File) -> io::Result<String> {
 
 fn temporary_path(destination: &Path) -> PathBuf {
     let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
     let process = std::process::id();
-    let name = destination.file_name().and_then(|value| value.to_str()).unwrap_or("destination");
+    let name = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("destination");
     destination.with_file_name(format!(".{name}.{process}.{nanos}.{sequence}.intern-tmp"))
 }
 
@@ -970,7 +1249,7 @@ mod windows_file {
         ffi::OsStr,
         fs::{self, OpenOptions},
         io::{self, Read, Seek, SeekFrom, Write},
-        mem::{size_of, MaybeUninit},
+        mem::{MaybeUninit, size_of},
         os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle},
         path::Path,
     };
@@ -1000,7 +1279,9 @@ mod windows_file {
             let mut buffer = [0_u8; 64 * 1024];
             loop {
                 let read = self.file.read(&mut buffer)?;
-                if read == 0 { break; }
+                if read == 0 {
+                    break;
+                }
                 hasher.update(&buffer[..read]);
             }
             Ok(format!("{:x}", hasher.finalize()))
@@ -1012,7 +1293,10 @@ mod windows_file {
 
         fn delete(self: Box<Self>) -> io::Result<()> {
             if file_identity(&self.file)? != self.identity {
-                return Err(io::Error::new(io::ErrorKind::Other, "locked file identity changed"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "locked file identity changed",
+                ));
             }
             let disposition = FILE_DISPOSITION_INFO { DeleteFile: 1 };
             // SAFETY: `self.file` owns a live handle opened with DELETE access, and
@@ -1025,7 +1309,9 @@ mod windows_file {
                     size_of::<FILE_DISPOSITION_INFO>() as u32,
                 )
             };
-            if success == 0 { return Err(io::Error::last_os_error()); }
+            if success == 0 {
+                return Err(io::Error::last_os_error());
+            }
             drop(self);
             Ok(())
         }
@@ -1042,7 +1328,10 @@ mod windows_file {
             .create_new(true)
             .open(destination)?;
         let identity = file_identity(&output)?;
-        let mut locked = WindowsLockedFile { file: output, identity };
+        let mut locked = WindowsLockedFile {
+            file: output,
+            identity,
+        };
         let copied = io::copy(&mut input, &mut locked.file)
             .and_then(|_| locked.file.flush())
             .and_then(|_| locked.file.sync_all());
@@ -1075,8 +1364,18 @@ mod windows_file {
         // SAFETY: both vectors are NUL-terminated UTF-16 paths and remain alive
         // for the duration of the call. Omitting MOVEFILE_REPLACE_EXISTING makes
         // this an atomic fail-if-destination-exists rename.
-        let success = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_WRITE_THROUGH) };
-        if success == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+        let success = unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if success == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
     }
 
     pub(super) fn same_volume(source: &Path, destination: &Path) -> io::Result<bool> {
@@ -1100,7 +1399,9 @@ mod windows_file {
         let success = unsafe {
             GetFileInformationByHandle(file.as_raw_handle() as HANDLE, information.as_mut_ptr())
         };
-        if success == 0 { return Err(io::Error::last_os_error()); }
+        if success == 0 {
+            return Err(io::Error::last_os_error());
+        }
         // SAFETY: a nonzero return guarantees the API initialized the structure.
         let information = unsafe { information.assume_init() };
         Ok(FileIdentity {
@@ -1164,7 +1465,9 @@ fn rename_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
             Err(rollback_error) => {
                 return Err(io::Error::new(
                     rollback_error.kind(),
-                    format!("source unlink failed ({error}); destination rollback failed ({rollback_error})"),
+                    format!(
+                        "source unlink failed ({error}); destination rollback failed ({rollback_error})"
+                    ),
                 ));
             }
         }
@@ -1211,7 +1514,11 @@ impl PortableLockedFile {
     fn open(path: &Path) -> io::Result<Self> {
         let file = fs::File::open(path)?;
         let identity = portable_identity(&file.metadata()?);
-        Ok(Self { file, path: path.to_owned(), identity })
+        Ok(Self {
+            file,
+            path: path.to_owned(),
+            identity,
+        })
     }
 }
 
@@ -1223,7 +1530,9 @@ impl LockedFile for PortableLockedFile {
         let mut buffer = [0_u8; 64 * 1024];
         loop {
             let read = self.file.read(&mut buffer)?;
-            if read == 0 { break; }
+            if read == 0 {
+                break;
+            }
             hasher.update(&buffer[..read]);
         }
         Ok(format!("{:x}", hasher.finalize()))
@@ -1235,7 +1544,10 @@ impl LockedFile for PortableLockedFile {
 
     fn delete(self: Box<Self>) -> io::Result<()> {
         if portable_identity(&fs::metadata(&self.path)?) != self.identity {
-            return Err(io::Error::new(io::ErrorKind::Other, "locked file identity changed"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "locked file identity changed",
+            ));
         }
         fs::remove_file(&self.path)
     }
@@ -1244,10 +1556,16 @@ impl LockedFile for PortableLockedFile {
 #[cfg(unix)]
 fn portable_identity(metadata: &fs::Metadata) -> FileIdentity {
     use std::os::unix::fs::MetadataExt;
-    FileIdentity { volume: metadata.dev(), file: metadata.ino() as u128 }
+    FileIdentity {
+        volume: metadata.dev(),
+        file: metadata.ino() as u128,
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
 fn portable_identity(metadata: &fs::Metadata) -> FileIdentity {
-    FileIdentity { volume: 0, file: metadata.len() as u128 }
+    FileIdentity {
+        volume: 0,
+        file: metadata.len() as u128,
+    }
 }

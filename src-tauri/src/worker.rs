@@ -3,7 +3,10 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{Arc, Mutex, mpsc::{self, Receiver, RecvTimeoutError}},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, RecvTimeoutError},
+    },
     time::{Duration, Instant},
 };
 
@@ -34,10 +37,22 @@ pub struct WorkerResponse {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WorkerEvent {
-    Hello { worker_version: String },
-    Progress { stage: String, current: usize, total: Option<usize> },
-    Parsed { document: WorkerDocument },
-    Error { code: String, message: String, retryable: bool },
+    Hello {
+        worker_version: String,
+    },
+    Progress {
+        stage: String,
+        current: usize,
+        total: Option<usize>,
+    },
+    Parsed {
+        document: WorkerDocument,
+    },
+    Error {
+        code: String,
+        message: String,
+        retryable: bool,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -61,54 +76,112 @@ struct WorkerPage {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-enum WorkerPageSource { Native, Ocr, AnyDoc, Text }
+enum WorkerPageSource {
+    Native,
+    Ocr,
+    AnyDoc,
+    Text,
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct WorkerImage { page_number: usize, mime_type: String, data_base64: String }
+struct WorkerImage {
+    page_number: usize,
+    mime_type: String,
+    data_base64: String,
+}
 
 pub fn decode_worker_response(line: &str) -> Result<WorkerResponse, WorkerFailure> {
     let response: WorkerResponse = serde_json::from_str(line)
         .map_err(|_| WorkerFailure::new("WORKER_PROTOCOL_INVALID", false, false))?;
     if response.protocol_version != PROTOCOL_VERSION {
-        return Err(WorkerFailure::new("PROTOCOL_VERSION_UNSUPPORTED", false, false));
+        return Err(WorkerFailure::new(
+            "PROTOCOL_VERSION_UNSUPPORTED",
+            false,
+            false,
+        ));
     }
     Ok(response)
 }
 
 pub fn adapt_parsed_document(document: WorkerDocument) -> Result<ParsedDocument, WorkerFailure> {
     if document.pages.iter().any(|page| page.page_number == 0)
-        || document.pages.iter().map(|page| page.page_number).collect::<HashSet<_>>().len() != document.pages.len()
+        || document
+            .pages
+            .iter()
+            .map(|page| page.page_number)
+            .collect::<HashSet<_>>()
+            .len()
+            != document.pages.len()
     {
         return Err(WorkerFailure::new("WORKER_PROTOCOL_INVALID", false, false));
     }
-    let page_numbers = document.pages.iter().map(|page| page.page_number).collect::<HashSet<_>>();
-    let text = document.pages.iter().map(|page| {
-        format!("[Page {}]\n{}", page.page_number, page.text)
-    }).collect::<Vec<_>>().join("\n\n");
-    let mut parser_warnings = document.warnings.into_iter().map(|code| ParserWarning {
-        code,
-        field_affecting: true,
-    }).collect::<Vec<_>>();
+    let page_numbers = document
+        .pages
+        .iter()
+        .map(|page| page.page_number)
+        .collect::<HashSet<_>>();
+    let text = document
+        .pages
+        .iter()
+        .map(|page| format!("[Page {}]\n{}", page.page_number, page.text))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let mut parser_warnings = document
+        .warnings
+        .into_iter()
+        .map(|code| ParserWarning {
+            code,
+            field_affecting: true,
+        })
+        .collect::<Vec<_>>();
     if document.pages.iter().any(|page| {
         page.source == WorkerPageSource::Ocr
-            && (page.vision_escalated || page.ocr_confidence.is_some_and(|confidence| confidence < 75.0))
-    }) && !parser_warnings.iter().any(|warning| warning.code == "LOW_OCR_CONFIDENCE") {
-        parser_warnings.push(ParserWarning { code: "LOW_OCR_CONFIDENCE".into(), field_affecting: true });
+            && (page.vision_escalated
+                || page
+                    .ocr_confidence
+                    .is_some_and(|confidence| confidence < 75.0))
+    }) && !parser_warnings
+        .iter()
+        .any(|warning| warning.code == "LOW_OCR_CONFIDENCE")
+    {
+        parser_warnings.push(ParserWarning {
+            code: "LOW_OCR_CONFIDENCE".into(),
+            field_affecting: true,
+        });
     }
-    if document.truncated && !parser_warnings.iter().any(|warning| warning.code == "TEXT_TRUNCATED") {
-        parser_warnings.push(ParserWarning { code: "TEXT_TRUNCATED".into(), field_affecting: true });
+    if document.truncated
+        && !parser_warnings
+            .iter()
+            .any(|warning| warning.code == "TEXT_TRUNCATED")
+    {
+        parser_warnings.push(ParserWarning {
+            code: "TEXT_TRUNCATED".into(),
+            field_affecting: true,
+        });
     }
-    let image = document.optional_image.map(|image| {
-        if !page_numbers.contains(&image.page_number) || image.mime_type != "image/png" {
-            return Err(WorkerFailure::new("WORKER_PROTOCOL_INVALID", false, false));
-        }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(image.data_base64)
-            .map_err(|_| WorkerFailure::new("WORKER_PROTOCOL_INVALID", false, false))?;
-        Ok(ImageInput { media_type: image.mime_type, bytes })
-    }).transpose()?;
-    Ok(ParsedDocument { extracted: ExtractedDocument { text, parser_warnings }, image })
+    let image = document
+        .optional_image
+        .map(|image| {
+            if !page_numbers.contains(&image.page_number) || image.mime_type != "image/png" {
+                return Err(WorkerFailure::new("WORKER_PROTOCOL_INVALID", false, false));
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(image.data_base64)
+                .map_err(|_| WorkerFailure::new("WORKER_PROTOCOL_INVALID", false, false))?;
+            Ok(ImageInput {
+                media_type: image.mime_type,
+                bytes,
+            })
+        })
+        .transpose()?;
+    Ok(ParsedDocument {
+        extracted: ExtractedDocument {
+            text,
+            parser_warnings,
+        },
+        image,
+    })
 }
 
 struct WorkerProcess {
@@ -122,28 +195,41 @@ impl WorkerProcess {
         let mut input = self.input.lock().map_err(|_| WorkerFailure::crashed())?;
         serde_json::to_writer(&mut *input, &value)
             .map_err(|_| WorkerFailure::new("WORKER_PROTOCOL_INVALID", false, false))?;
-        input.write_all(b"\n").map_err(|_| WorkerFailure::crashed())?;
+        input
+            .write_all(b"\n")
+            .map_err(|_| WorkerFailure::crashed())?;
         input.flush().map_err(|_| WorkerFailure::crashed())
     }
 
     fn receive(&self, timeout: Duration) -> Result<String, WorkerFailure> {
-        match self.output.lock().map_err(|_| WorkerFailure::crashed())?.recv_timeout(timeout) {
+        match self
+            .output
+            .lock()
+            .map_err(|_| WorkerFailure::crashed())?
+            .recv_timeout(timeout)
+        {
             Ok(Ok(line)) => Ok(line),
             Ok(Err(())) | Err(RecvTimeoutError::Disconnected) => Err(WorkerFailure::crashed()),
-            Err(RecvTimeoutError::Timeout) => Err(WorkerFailure::new("WORKER_POLL_TIMEOUT", true, false)),
+            Err(RecvTimeoutError::Timeout) => {
+                Err(WorkerFailure::new("WORKER_POLL_TIMEOUT", true, false))
+            }
         }
     }
 
     fn terminate(&self) {
         if let Ok(mut child) = self.child.lock() {
-            if child.try_wait().ok().flatten().is_none() { let _ = child.kill(); }
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+            }
             let _ = child.wait();
         }
     }
 }
 
 impl Drop for WorkerProcess {
-    fn drop(&mut self) { self.terminate(); }
+    fn drop(&mut self) {
+        self.terminate();
+    }
 }
 
 pub struct SupervisedWorker {
@@ -168,7 +254,11 @@ impl SupervisedWorker {
     }
 
     #[doc(hidden)]
-    pub fn with_timeouts(executable: impl Into<PathBuf>, handshake_timeout: Duration, parser_timeout: Duration) -> Self {
+    pub fn with_timeouts(
+        executable: impl Into<PathBuf>,
+        handshake_timeout: Duration,
+        parser_timeout: Duration,
+    ) -> Self {
         let mut worker = Self::new(executable);
         worker.handshake_timeout = handshake_timeout;
         worker.parser_timeout = parser_timeout;
@@ -177,7 +267,9 @@ impl SupervisedWorker {
 
     fn ensure_running(&self) -> Result<Arc<WorkerProcess>, WorkerFailure> {
         let mut running = self.running.lock().map_err(|_| WorkerFailure::crashed())?;
-        if let Some(process) = running.as_ref() { return Ok(Arc::clone(process)); }
+        if let Some(process) = running.as_ref() {
+            return Ok(Arc::clone(process));
+        }
         let process = Arc::new(launch(&self.executable)?);
         handshake(&process, self.handshake_timeout)?;
         *running = Some(Arc::clone(&process));
@@ -186,14 +278,21 @@ impl SupervisedWorker {
 
     fn clear_running(&self, expected: &Arc<WorkerProcess>) {
         if let Ok(mut running) = self.running.lock() {
-            if running.as_ref().is_some_and(|current| Arc::ptr_eq(current, expected)) {
+            if running
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, expected))
+            {
                 *running = None;
             }
         }
     }
 
     pub fn stop(&self) {
-        let process = self.running.lock().ok().and_then(|mut running| running.take());
+        let process = self
+            .running
+            .lock()
+            .ok()
+            .and_then(|mut running| running.take());
         if let Some(process) = process {
             let _ = process.write(json!({
                 "protocol_version": PROTOCOL_VERSION,
@@ -205,7 +304,10 @@ impl SupervisedWorker {
     }
 
     fn was_canceled(&self, request_id: &str) -> bool {
-        self.canceled.lock().map(|mut canceled| canceled.remove(request_id)).unwrap_or(false)
+        self.canceled
+            .lock()
+            .map(|mut canceled| canceled.remove(request_id))
+            .unwrap_or(false)
     }
 }
 
@@ -218,7 +320,9 @@ impl WorkerBoundary for SupervisedWorker {
     ) -> Result<ParsedDocument, WorkerFailure> {
         {
             let mut active = self.active.lock().map_err(|_| WorkerFailure::crashed())?;
-            if active.is_some() { return Err(WorkerFailure::new("WORKER_BUSY", true, false)); }
+            if active.is_some() {
+                return Err(WorkerFailure::new("WORKER_BUSY", true, false));
+            }
             *active = Some(request_id.to_owned());
         }
         let result = (|| {
@@ -243,7 +347,9 @@ impl WorkerBoundary for SupervisedWorker {
                     Err(error) if error.code == "WORKER_POLL_TIMEOUT" => continue,
                     Err(error) => {
                         self.clear_running(&process);
-                        if self.was_canceled(request_id) { return Err(WorkerFailure::canceled()); }
+                        if self.was_canceled(request_id) {
+                            return Err(WorkerFailure::canceled());
+                        }
                         return Err(error);
                     }
                     Ok(line) => line,
@@ -256,23 +362,38 @@ impl WorkerBoundary for SupervisedWorker {
                         return Err(error);
                     }
                 };
-                if response.request_id != request_id { continue; }
+                if response.request_id != request_id {
+                    continue;
+                }
                 match response.event {
-                    WorkerEvent::Progress { stage, current, total } => progress(PipelineProgress {
-                        item_id: 0, stage, current, total,
+                    WorkerEvent::Progress {
+                        stage,
+                        current,
+                        total,
+                    } => progress(PipelineProgress {
+                        item_id: 0,
+                        stage,
+                        current,
+                        total,
                     }),
-                    WorkerEvent::Parsed { document } => return match adapt_parsed_document(document) {
-                        Ok(document) => Ok(document),
-                        Err(error) => {
-                            process.terminate();
-                            self.clear_running(&process);
-                            Err(error)
-                        }
-                    },
-                    WorkerEvent::Error { code, retryable: _, .. } if code == "CANCELED" => {
+                    WorkerEvent::Parsed { document } => {
+                        return match adapt_parsed_document(document) {
+                            Ok(document) => Ok(document),
+                            Err(error) => {
+                                process.terminate();
+                                self.clear_running(&process);
+                                Err(error)
+                            }
+                        };
+                    }
+                    WorkerEvent::Error {
+                        code, retryable: _, ..
+                    } if code == "CANCELED" => {
                         return Err(WorkerFailure::canceled());
                     }
-                    WorkerEvent::Error { code, retryable, .. } => {
+                    WorkerEvent::Error {
+                        code, retryable, ..
+                    } => {
                         return Err(WorkerFailure::new(code, retryable, false));
                     }
                     WorkerEvent::Hello { .. } => {
@@ -283,16 +404,31 @@ impl WorkerBoundary for SupervisedWorker {
                 }
             }
         })();
-        if let Ok(mut active) = self.active.lock() { *active = None; }
+        if let Ok(mut active) = self.active.lock() {
+            *active = None;
+        }
         result
     }
 
     fn cancel(&self, request_id: &str) -> Result<(), WorkerFailure> {
-        let active_matches = self.active.lock().map_err(|_| WorkerFailure::crashed())?
-            .as_deref() == Some(request_id);
-        if !active_matches { return Err(WorkerFailure::new("ITEM_NOT_ACTIVE", false, false)); }
-        self.canceled.lock().map_err(|_| WorkerFailure::crashed())?.insert(request_id.to_owned());
-        let process = self.running.lock().map_err(|_| WorkerFailure::crashed())?.take()
+        let active_matches = self
+            .active
+            .lock()
+            .map_err(|_| WorkerFailure::crashed())?
+            .as_deref()
+            == Some(request_id);
+        if !active_matches {
+            return Err(WorkerFailure::new("ITEM_NOT_ACTIVE", false, false));
+        }
+        self.canceled
+            .lock()
+            .map_err(|_| WorkerFailure::crashed())?
+            .insert(request_id.to_owned());
+        let process = self
+            .running
+            .lock()
+            .map_err(|_| WorkerFailure::crashed())?
+            .take()
             .ok_or_else(WorkerFailure::crashed)?;
         let _ = process.write(json!({
             "protocol_version": PROTOCOL_VERSION,
@@ -304,7 +440,12 @@ impl WorkerBoundary for SupervisedWorker {
     }
 
     fn restart(&self) -> Result<(), WorkerFailure> {
-        if let Some(process) = self.running.lock().map_err(|_| WorkerFailure::crashed())?.take() {
+        if let Some(process) = self
+            .running
+            .lock()
+            .map_err(|_| WorkerFailure::crashed())?
+            .take()
+        {
             process.terminate();
         }
         let process = Arc::new(launch(&self.executable)?);
@@ -313,16 +454,24 @@ impl WorkerBoundary for SupervisedWorker {
         Ok(())
     }
 
-    fn shutdown(&self) -> Result<(), WorkerFailure> { self.stop(); Ok(()) }
+    fn shutdown(&self) -> Result<(), WorkerFailure> {
+        self.stop();
+        Ok(())
+    }
 }
 
 impl Drop for SupervisedWorker {
-    fn drop(&mut self) { self.stop(); }
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 fn launch(executable: &Path) -> Result<WorkerProcess, WorkerFailure> {
     let mut command = Command::new(executable);
-    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -331,29 +480,50 @@ fn launch(executable: &Path) -> Result<WorkerProcess, WorkerFailure> {
     let mut child = command.spawn().map_err(|_| WorkerFailure::crashed())?;
     let input = match child.stdin.take() {
         Some(input) => input,
-        None => { let _ = child.kill(); let _ = child.wait(); return Err(WorkerFailure::crashed()); }
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(WorkerFailure::crashed());
+        }
     };
     let output = match child.stdout.take() {
         Some(output) => output,
-        None => { let _ = child.kill(); let _ = child.wait(); return Err(WorkerFailure::crashed()); }
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(WorkerFailure::crashed());
+        }
     };
     let (sender, receiver) = mpsc::channel();
-    let reader = std::thread::Builder::new().name("intern-worker-jsonl".into()).spawn(move || {
-        let reader = BufReader::new(output);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => { if sender.send(Ok(line)).is_err() { return; } }
-                Err(_) => { let _ = sender.send(Err(())); return; }
+    let reader = std::thread::Builder::new()
+        .name("intern-worker-jsonl".into())
+        .spawn(move || {
+            let reader = BufReader::new(output);
+            for line in reader.lines() {
+                match line {
+                    Ok(line) => {
+                        if sender.send(Ok(line)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(_) => {
+                        let _ = sender.send(Err(()));
+                        return;
+                    }
+                }
             }
-        }
-        let _ = sender.send(Err(()));
-    });
+            let _ = sender.send(Err(()));
+        });
     if reader.is_err() {
         let _ = child.kill();
         let _ = child.wait();
         return Err(WorkerFailure::crashed());
     }
-    Ok(WorkerProcess { child: Mutex::new(child), input: Mutex::new(input), output: Mutex::new(receiver) })
+    Ok(WorkerProcess {
+        child: Mutex::new(child),
+        input: Mutex::new(input),
+        output: Mutex::new(receiver),
+    })
 }
 
 fn handshake(process: &WorkerProcess, timeout: Duration) -> Result<(), WorkerFailure> {

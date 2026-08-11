@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -39,15 +39,31 @@ pub struct Response {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    Hello { worker_version: &'static str },
-    Progress { stage: &'static str, current: usize, total: Option<usize> },
-    Parsed { document: ExtractedDocument },
-    Error { code: String, message: String, retryable: bool },
+    Hello {
+        worker_version: &'static str,
+    },
+    Progress {
+        stage: &'static str,
+        current: usize,
+        total: Option<usize>,
+    },
+    Parsed {
+        document: ExtractedDocument,
+    },
+    Error {
+        code: String,
+        message: String,
+        retryable: bool,
+    },
 }
 
 impl Response {
     pub fn new(request_id: impl Into<String>, event: Event) -> Self {
-        Self { protocol_version: PROTOCOL_VERSION, request_id: request_id.into(), event }
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: request_id.into(),
+            event,
+        }
     }
 
     pub fn extraction_error(request_id: impl Into<String>, error: ExtractionError) -> Self {
@@ -130,11 +146,14 @@ pub fn decode_request(line: &str) -> Result<Request, Response> {
         )
     })?;
     if request.protocol_version != PROTOCOL_VERSION {
-        return Err(Response::new(request.request_id, Event::Error {
-            code: "PROTOCOL_VERSION_UNSUPPORTED".to_owned(),
-            message: format!("supported protocol version is {PROTOCOL_VERSION}"),
-            retryable: false,
-        }));
+        return Err(Response::new(
+            request.request_id,
+            Event::Error {
+                code: "PROTOCOL_VERSION_UNSUPPORTED".to_owned(),
+                message: format!("supported protocol version is {PROTOCOL_VERSION}"),
+                retryable: false,
+            },
+        ));
     }
     Ok(request)
 }
@@ -142,18 +161,35 @@ pub fn decode_request(line: &str) -> Result<Request, Response> {
 pub fn handle_line(line: &str) -> Result<String, serde_json::Error> {
     let response = match decode_request(line) {
         Ok(request) => match request.command {
-            Command::Hello => Response::new(request.request_id, Event::Hello { worker_version: WORKER_VERSION }),
+            Command::Hello => Response::new(
+                request.request_id,
+                Event::Hello {
+                    worker_version: WORKER_VERSION,
+                },
+            ),
             Command::Parse { .. } => Response::new(
                 request.request_id,
-                Event::Progress { stage: "accepted", current: 0, total: None },
+                Event::Progress {
+                    stage: "accepted",
+                    current: 0,
+                    total: None,
+                },
             ),
             Command::Cancel { .. } => Response::new(
                 request.request_id,
-                Event::Progress { stage: "cancel_requested", current: 0, total: None },
+                Event::Progress {
+                    stage: "cancel_requested",
+                    current: 0,
+                    total: None,
+                },
             ),
             Command::Shutdown => Response::new(
                 request.request_id,
-                Event::Progress { stage: "shutdown", current: 0, total: None },
+                Event::Progress {
+                    stage: "shutdown",
+                    current: 0,
+                    total: None,
+                },
             ),
         },
         Err(response) => response,
@@ -165,7 +201,9 @@ pub trait EventSink {
     fn emit(&mut self, response: &Response) -> io::Result<()>;
 }
 
-struct JsonLineSink<'a, W: Write> { writer: &'a mut W }
+struct JsonLineSink<'a, W: Write> {
+    writer: &'a mut W,
+}
 
 impl<W: Write> EventSink for JsonLineSink<'_, W> {
     fn emit(&mut self, response: &Response) -> io::Result<()> {
@@ -192,43 +230,66 @@ where
         let request = match frame.and_then(|line| decode_request(&line)) {
             Ok(request) => request,
             Err(response) => {
-                let code = match &response.event { Event::Error { code, .. } => code.as_str(), _ => "PROTOCOL_ERROR" };
+                let code = match &response.event {
+                    Event::Error { code, .. } => code.as_str(),
+                    _ => "PROTOCOL_ERROR",
+                };
                 writeln!(
                     diagnostics,
                     "{{\"level\":\"warning\",\"code\":{}}}",
                     serde_json::to_string(code).map_err(io::Error::other)?
                 )?;
-                JsonLineSink { writer: &mut output }.emit(&response)?;
+                JsonLineSink {
+                    writer: &mut output,
+                }
+                .emit(&response)?;
                 continue;
             }
         };
         match request.command.clone() {
-            Command::Hello => JsonLineSink { writer: &mut output }.emit(&Response::new(
+            Command::Hello => JsonLineSink {
+                writer: &mut output,
+            }
+            .emit(&Response::new(
                 request.request_id,
-                Event::Hello { worker_version: WORKER_VERSION },
+                Event::Hello {
+                    worker_version: WORKER_VERSION,
+                },
             ))?,
             Command::Shutdown => break,
             Command::Parse { .. } => {
                 let request_id = request.request_id.clone();
-                let mut sink = JsonLineSink { writer: &mut output };
+                let mut sink = JsonLineSink {
+                    writer: &mut output,
+                };
                 if let Err(error) = parse_handler(request, &mut sink) {
                     sink.emit(&Response::extraction_error(request_id, error))?;
                 }
             }
-            Command::Cancel { .. } => JsonLineSink { writer: &mut output }.emit(
-                &Response::new(
-                    request.request_id,
-                    Event::Progress { stage: "cancel_requested", current: 0, total: None },
-                ),
-            )?,
+            Command::Cancel { .. } => JsonLineSink {
+                writer: &mut output,
+            }
+            .emit(&Response::new(
+                request.request_id,
+                Event::Progress {
+                    stage: "cancel_requested",
+                    current: 0,
+                    total: None,
+                },
+            ))?,
         }
     }
     Ok(())
 }
 
 fn emit_locked<W: Write>(output: &Arc<Mutex<W>>, response: &Response) -> io::Result<()> {
-    let mut output = output.lock().map_err(|_| io::Error::other("protocol output lock poisoned"))?;
-    JsonLineSink { writer: &mut *output }.emit(response)
+    let mut output = output
+        .lock()
+        .map_err(|_| io::Error::other("protocol output lock poisoned"))?;
+    JsonLineSink {
+        writer: &mut *output,
+    }
+    .emit(response)
 }
 
 struct ActiveRequestGuard {
@@ -266,7 +327,10 @@ where
     R: Read,
     W: Write + Send + 'static,
     E: Write,
-    X: Fn(PathBuf, CancellationToken) -> Result<ExtractedDocument, ExtractionError> + Send + Sync + 'static,
+    X: Fn(PathBuf, CancellationToken) -> Result<ExtractedDocument, ExtractionError>
+        + Send
+        + Sync
+        + 'static,
 {
     let output = Arc::new(Mutex::new(output));
     let extractor = Arc::new(extractor);
@@ -278,7 +342,10 @@ where
         let request = match frame.and_then(|line| decode_request(&line)) {
             Ok(request) => request,
             Err(response) => {
-                let code = match &response.event { Event::Error { code, .. } => code.as_str(), _ => "PROTOCOL_ERROR" };
+                let code = match &response.event {
+                    Event::Error { code, .. } => code.as_str(),
+                    _ => "PROTOCOL_ERROR",
+                };
                 writeln!(
                     diagnostics,
                     "{{\"level\":\"warning\",\"code\":{}}}",
@@ -293,7 +360,9 @@ where
                 &output,
                 &Response::new(
                     request.request_id,
-                    Event::Hello { worker_version: WORKER_VERSION },
+                    Event::Hello {
+                        worker_version: WORKER_VERSION,
+                    },
                 ),
             )?,
             Command::Cancel { target_request_id } => {
@@ -344,7 +413,11 @@ where
                     &output,
                     &Response::new(
                         request_id.clone(),
-                        Event::Progress { stage: "extracting", current: 0, total: None },
+                        Event::Progress {
+                            stage: "extracting",
+                            current: 0,
+                            total: None,
+                        },
                     ),
                 )?;
                 let thread_output = Arc::clone(&output);
@@ -357,24 +430,21 @@ where
                         request_id: request_id.clone(),
                         cleared: false,
                     };
-                    let response = match catch_unwind(AssertUnwindSafe(|| {
-                        thread_extractor(path, token)
-                    })) {
-                        Ok(Ok(document)) => {
-                            Response::new(request_id.clone(), Event::Parsed { document })
-                        }
-                        Ok(Err(error)) => {
-                            Response::extraction_error(request_id.clone(), error)
-                        }
-                        Err(_) => Response::new(
-                            request_id.clone(),
-                            Event::Error {
-                                code: "WORKER_THREAD_PANIC".to_owned(),
-                                message: "document extraction panicked".to_owned(),
-                                retryable: true,
-                            },
-                        ),
-                    };
+                    let response =
+                        match catch_unwind(AssertUnwindSafe(|| thread_extractor(path, token))) {
+                            Ok(Ok(document)) => {
+                                Response::new(request_id.clone(), Event::Parsed { document })
+                            }
+                            Ok(Err(error)) => Response::extraction_error(request_id.clone(), error),
+                            Err(_) => Response::new(
+                                request_id.clone(),
+                                Event::Error {
+                                    code: "WORKER_THREAD_PANIC".to_owned(),
+                                    message: "document extraction panicked".to_owned(),
+                                    retryable: true,
+                                },
+                            ),
+                        };
                     // The request is no longer active before its terminal event is visible.
                     lifecycle.clear();
                     let _ = emit_locked(&thread_output, &response);
@@ -401,11 +471,16 @@ where
         }
     }
     if let Ok(active) = active.lock() {
-        for token in active.values() { token.cancel(); }
+        for token in active.values() {
+            token.cancel();
+        }
     }
     for thread in threads {
         if thread.join().is_err() {
-            writeln!(diagnostics, "{{\"level\":\"error\",\"code\":\"WORKER_THREAD_PANIC\"}}")?;
+            writeln!(
+                diagnostics,
+                "{{\"level\":\"error\",\"code\":\"WORKER_THREAD_PANIC\"}}"
+            )?;
         }
     }
     Ok(())

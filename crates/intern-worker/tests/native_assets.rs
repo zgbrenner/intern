@@ -44,7 +44,10 @@ fn missing_pdfium_never_reports_successful_extraction() {
     let directory = tempdir().unwrap();
     let error = match PdfiumBackend::new(directory.path()) {
         Ok(backend) => backend
-            .inspect(directory.path().join("missing.pdf").as_path(), &CancellationToken::new())
+            .inspect(
+                directory.path().join("missing.pdf").as_path(),
+                &CancellationToken::new(),
+            )
             .unwrap_err(),
         Err(error) => error,
     };
@@ -59,7 +62,9 @@ fn missing_tesseract_never_reports_successful_ocr() {
     let tessdata = directory.path().join("tessdata");
     let page = RenderedPage::new(0, DynamicImage::ImageRgb8(RgbImage::new(10, 10)));
     let error = match TesseractOcr::new(executable, tessdata) {
-        Ok(backend) => backend.recognize(&page, &CancellationToken::new()).unwrap_err(),
+        Ok(backend) => backend
+            .recognize(&page, &CancellationToken::new())
+            .unwrap_err(),
         Err(error) => error,
     };
 
@@ -132,7 +137,9 @@ fn tesseract_spawn_failure_is_propagated_instead_of_falling_back() {
     std::fs::set_permissions(executable, permissions).unwrap();
     let page = RenderedPage::new(0, DynamicImage::ImageRgb8(RgbImage::new(10, 20)));
 
-    let error = backend.recognize(&page, &CancellationToken::new()).unwrap_err();
+    let error = backend
+        .recognize(&page, &CancellationToken::new())
+        .unwrap_err();
 
     assert_eq!(error.code(), "PARSE_FAILED");
     assert!(error.retryable());
@@ -153,7 +160,9 @@ fn tesseract_osd_exit_one_with_initialization_diagnostic_is_not_fallback() {
     );
     let page = RenderedPage::new(0, DynamicImage::ImageRgb8(RgbImage::new(10, 20)));
 
-    let error = backend.recognize(&page, &CancellationToken::new()).unwrap_err();
+    let error = backend
+        .recognize(&page, &CancellationToken::new())
+        .unwrap_err();
 
     assert_eq!(error.code(), "NATIVE_ASSETS_MISSING");
     assert!(!error.retryable());
@@ -226,5 +235,9 @@ fn form_xobject_nested_image_contributes_rendered_coverage() {
     let pages = backend.inspect(&path, &CancellationToken::new()).unwrap();
 
     assert_eq!(pages.len(), 1);
-    assert!(pages[0].image_coverage >= 0.65, "{}", pages[0].image_coverage);
+    assert!(
+        pages[0].image_coverage >= 0.65,
+        "{}",
+        pages[0].image_coverage
+    );
 }

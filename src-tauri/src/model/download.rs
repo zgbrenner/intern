@@ -15,10 +15,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{
-    ModelError, ModelErrorCode, ModelResult,
-    manifest::ModelFile,
-};
+use super::{ModelError, ModelErrorCode, ModelResult, manifest::ModelFile};
 
 pub const DISK_RESERVE_BYTES: u64 = 512 * 1024 * 1024;
 const BUFFER_BYTES: usize = 1024 * 1024;
@@ -70,7 +67,10 @@ pub struct SystemDiskSpace;
 impl DiskSpace for SystemDiskSpace {
     fn available_bytes(&self, path: &Path) -> ModelResult<u64> {
         fs4::available_space(path).map_err(|_| {
-            ModelError::new(ModelErrorCode::DownloadFailed, "available disk space could not be determined")
+            ModelError::new(
+                ModelErrorCode::DownloadFailed,
+                "available disk space could not be determined",
+            )
         })
     }
 }
@@ -97,7 +97,11 @@ pub struct ReqwestHttpTransport {
 
 impl ReqwestHttpTransport {
     pub fn new() -> ModelResult<Self> {
-        Self::with_timeouts(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT, DEFAULT_OVERALL_TIMEOUT)
+        Self::with_timeouts(
+            DEFAULT_CONNECT_TIMEOUT,
+            DEFAULT_READ_TIMEOUT,
+            DEFAULT_OVERALL_TIMEOUT,
+        )
     }
 
     pub fn with_timeouts(
@@ -117,7 +121,10 @@ impl ReqwestHttpTransport {
             .timeout(overall_timeout)
             .build()
             .map_err(|_| {
-                ModelError::new(ModelErrorCode::DownloadFailed, "download client could not be created")
+                ModelError::new(
+                    ModelErrorCode::DownloadFailed,
+                    "download client could not be created",
+                )
             })?;
         Ok(Self { client })
     }
@@ -149,7 +156,10 @@ impl HttpTransport for ReqwestHttpTransport {
                 return Err(canceled());
             }
             match messages.recv_timeout(CANCELLATION_POLL) {
-                Ok(NetworkMessage::Headers { status, content_range }) => {
+                Ok(NetworkMessage::Headers {
+                    status,
+                    content_range,
+                }) => {
                     return Ok(HttpResponse {
                         status,
                         content_range,
@@ -184,7 +194,10 @@ impl HttpTransport for ReqwestHttpTransport {
 }
 
 enum NetworkMessage {
-    Headers { status: u16, content_range: Option<String> },
+    Headers {
+        status: u16,
+        content_range: Option<String>,
+    },
     Chunk(Vec<u8>),
     End,
     Failed,
@@ -205,7 +218,9 @@ impl CancelableResponseBody {
         self.abort.store(true, Ordering::Release);
         self.messages.take();
         if let Some(worker) = self.worker.take() {
-            worker.join().map_err(|_| io::Error::other("download worker panicked"))?;
+            worker
+                .join()
+                .map_err(|_| io::Error::other("download worker panicked"))?;
         }
         Ok(())
     }
@@ -217,7 +232,9 @@ impl Read for CancelableResponseBody {
             return Ok(0);
         }
         if self.current_offset < self.current.len() {
-            let copied = destination.len().min(self.current.len() - self.current_offset);
+            let copied = destination
+                .len()
+                .min(self.current.len() - self.current_offset);
             destination[..copied]
                 .copy_from_slice(&self.current[self.current_offset..self.current_offset + copied]);
             self.current_offset += copied;
@@ -227,7 +244,10 @@ impl Read for CancelableResponseBody {
         loop {
             if self.cancellation.is_canceled() {
                 self.stop_and_join()?;
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "download canceled"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "download canceled",
+                ));
             }
             let Some(messages) = self.messages.as_ref() else {
                 return Ok(0);
@@ -250,7 +270,10 @@ impl Read for CancelableResponseBody {
                 }
                 Ok(NetworkMessage::Canceled) => {
                     self.stop_and_join()?;
-                    return Err(io::Error::new(io::ErrorKind::Interrupted, "download canceled"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "download canceled",
+                    ));
                 }
                 Ok(NetworkMessage::Failed) | Err(RecvTimeoutError::Disconnected) => {
                     self.stop_and_join()?;
@@ -283,7 +306,10 @@ fn spawn_network_worker(
     thread::Builder::new()
         .name("intern-model-download".into())
         .spawn(move || {
-            let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
                 let _ = sender.send(NetworkMessage::Failed);
                 return;
             };
@@ -311,7 +337,13 @@ fn spawn_network_worker(
                     .get(reqwest::header::CONTENT_RANGE)
                     .and_then(|header| header.to_str().ok())
                     .map(ToOwned::to_owned);
-                if sender.send(NetworkMessage::Headers { status, content_range }).is_err() {
+                if sender
+                    .send(NetworkMessage::Headers {
+                        status,
+                        content_range,
+                    })
+                    .is_err()
+                {
                     return;
                 }
 
@@ -382,7 +414,11 @@ impl<H: HttpTransport, D: DiskSpace> Downloader<H, D> {
         let final_path = destination_directory.join(&expected.name);
         let partial_path = destination_directory.join(format!("{}.partial", expected.name));
 
-        progress(SetupProgress { stage: SetupStage::Checking, completed_bytes: 0, total_bytes: expected.size });
+        progress(SetupProgress {
+            stage: SetupStage::Checking,
+            completed_bytes: 0,
+            total_bytes: expected.size,
+        });
         if final_path.exists() {
             validate_file_cancelable(&final_path, expected, cancellation, |checked| {
                 progress(SetupProgress {
@@ -426,7 +462,9 @@ impl<H: HttpTransport, D: DiskSpace> Downloader<H, D> {
                     });
                     return Ok(final_path);
                 }
-                Err(error) if error.code() == ModelErrorCode::DownloadCanceled => return Err(error),
+                Err(error) if error.code() == ModelErrorCode::DownloadCanceled => {
+                    return Err(error);
+                }
                 Err(_) => {}
             }
         }
@@ -450,10 +488,22 @@ impl<H: HttpTransport, D: DiskSpace> Downloader<H, D> {
             Err(error) => return Err(error),
         };
         let append_from = match (requested_start, response.status) {
-            (Some(start), 206) if confirmed_content_range(response.content_range.as_deref(), start, expected.size) => start,
+            (Some(start), 206)
+                if confirmed_content_range(
+                    response.content_range.as_deref(),
+                    start,
+                    expected.size,
+                ) =>
+            {
+                start
+            }
             (Some(_), 200) => 0,
             (None, 200) => 0,
-            (None, 206) if confirmed_content_range(response.content_range.as_deref(), 0, expected.size) => 0,
+            (None, 206)
+                if confirmed_content_range(response.content_range.as_deref(), 0, expected.size) =>
+            {
+                0
+            }
             _ => return Err(download_failed()),
         };
         require_disk(
@@ -493,7 +543,9 @@ impl<H: HttpTransport, D: DiskSpace> Downloader<H, D> {
             if completed.saturating_add(read as u64) > expected.size {
                 return Err(invalid_file());
             }
-            output.write_all(&buffer[..read]).map_err(|_| download_failed())?;
+            output
+                .write_all(&buffer[..read])
+                .map_err(|_| download_failed())?;
             completed += read as u64;
             progress(SetupProgress {
                 stage: SetupStage::Downloading,
@@ -538,7 +590,10 @@ impl<H: HttpTransport, D: DiskSpace> Downloader<H, D> {
 
 pub fn default_model_directory() -> ModelResult<PathBuf> {
     let local_app_data = env::var_os("LOCALAPPDATA").ok_or_else(|| {
-        ModelError::new(ModelErrorCode::DownloadFailed, "LocalAppData is unavailable")
+        ModelError::new(
+            ModelErrorCode::DownloadFailed,
+            "LocalAppData is unavailable",
+        )
     })?;
     Ok(PathBuf::from(local_app_data).join("Intern").join("models"))
 }
@@ -578,7 +633,11 @@ where
     }
     fs::create_dir_all(destination_directory).map_err(|_| download_failed())?;
     let final_path = destination_directory.join(&expected.name);
-    progress(SetupProgress { stage: SetupStage::Checking, completed_bytes: 0, total_bytes: expected.size });
+    progress(SetupProgress {
+        stage: SetupStage::Checking,
+        completed_bytes: 0,
+        total_bytes: expected.size,
+    });
     if cancellation.is_canceled() {
         return Err(canceled());
     }
@@ -652,7 +711,9 @@ where
         if read == 0 {
             break;
         }
-        output.write_all(&buffer[..read]).map_err(|_| download_failed())?;
+        output
+            .write_all(&buffer[..read])
+            .map_err(|_| download_failed())?;
         copied += read as u64;
         progress(SetupProgress {
             stage: SetupStage::Downloading,
@@ -693,7 +754,9 @@ where
 }
 
 fn require_disk<D: DiskSpace>(disk: &D, path: &Path, remaining: u64) -> ModelResult<()> {
-    let required = remaining.checked_add(DISK_RESERVE_BYTES).ok_or_else(download_failed)?;
+    let required = remaining
+        .checked_add(DISK_RESERVE_BYTES)
+        .ok_or_else(download_failed)?;
     if disk.available_bytes(path)? < required {
         return Err(ModelError::new(
             ModelErrorCode::InsufficientDisk,
@@ -722,9 +785,15 @@ fn safe_install_name(name: &str) -> bool {
 
 fn confirmed_content_range(header: Option<&str>, start: u64, total: u64) -> bool {
     let Some(value) = header else { return false };
-    let Some(value) = value.strip_prefix("bytes ") else { return false };
-    let Some((range, received_total)) = value.split_once('/') else { return false };
-    let Some((received_start, received_end)) = range.split_once('-') else { return false };
+    let Some(value) = value.strip_prefix("bytes ") else {
+        return false;
+    };
+    let Some((range, received_total)) = value.split_once('/') else {
+        return false;
+    };
+    let Some((received_start, received_end)) = range.split_once('-') else {
+        return false;
+    };
     received_start.parse::<u64>().ok() == Some(start)
         && received_total.parse::<u64>().ok() == Some(total)
         && received_end.parse::<u64>().ok() == total.checked_sub(1)
@@ -843,13 +912,22 @@ const fn download_failed() -> ModelError {
 }
 
 const fn invalid_file() -> ModelError {
-    ModelError::new(ModelErrorCode::ModelFileInvalid, "model file failed size or digest validation")
+    ModelError::new(
+        ModelErrorCode::ModelFileInvalid,
+        "model file failed size or digest validation",
+    )
 }
 
 const fn canceled() -> ModelError {
-    ModelError::new(ModelErrorCode::DownloadCanceled, "model download was canceled")
+    ModelError::new(
+        ModelErrorCode::DownloadCanceled,
+        "model download was canceled",
+    )
 }
 
 const fn interrupted() -> ModelError {
-    ModelError::new(ModelErrorCode::DownloadInterrupted, "model download was interrupted")
+    ModelError::new(
+        ModelErrorCode::DownloadInterrupted,
+        "model download was interrupted",
+    )
 }

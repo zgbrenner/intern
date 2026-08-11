@@ -48,7 +48,9 @@ impl ResourceLimits {
 
     pub fn validate_page_count(&self, pages: usize) -> Result<(), ExtractionError> {
         if pages > self.max_page_count {
-            return Err(ExtractionError::resource_limit("document exceeds 500 pages"));
+            return Err(ExtractionError::resource_limit(
+                "document exceeds 500 pages",
+            ));
         }
         Ok(())
     }

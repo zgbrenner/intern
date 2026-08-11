@@ -1,11 +1,14 @@
 use std::path::Path;
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use image::{DynamicImage, GenericImageView, Rgb, RgbImage};
 use intern_worker::extract::{
     CancellationToken, ExtractionError, OcrBackend, OcrResult, PageSource, PdfBackend,
-    PdfPageInspection, RenderedPage, apply_detected_rotation, extract_pdf,
-    normalize_vision_image, page_needs_ocr,
+    PdfPageInspection, RenderedPage, apply_detected_rotation, extract_pdf, normalize_vision_image,
+    page_needs_ocr,
 };
 use intern_worker::limits::{MAX_PAGE_MEGAPIXELS, ResourceLimits};
 
@@ -62,7 +65,10 @@ fn page(text: &str, coverage: f32) -> PdfPageInspection {
     }
 }
 
-fn route(pages: Vec<PdfPageInspection>, ocr: Vec<OcrResult>) -> (intern_worker::extract::ExtractedDocument, usize) {
+fn route(
+    pages: Vec<PdfPageInspection>,
+    ocr: Vec<OcrResult>,
+) -> (intern_worker::extract::ExtractedDocument, usize) {
     let renders = Arc::new(AtomicUsize::new(0));
     let pdf = FakePdf {
         pages,
@@ -82,13 +88,19 @@ fn route(pages: Vec<PdfPageInspection>, ocr: Vec<OcrResult>) -> (intern_worker::
 #[test]
 fn native_text_page_does_not_render_or_ocr() {
     let (document, renders) = route(
-        vec![page("This page contains complete native document text.", 0.0)],
+        vec![page(
+            "This page contains complete native document text.",
+            0.0,
+        )],
         vec![OcrResult::new("unused", 0.0)],
     );
 
     assert_eq!(renders, 0);
     assert_eq!(document.pages[0].source, PageSource::Native);
-    assert_eq!(document.pages[0].text, "This page contains complete native document text.");
+    assert_eq!(
+        document.pages[0].text,
+        "This page contains complete native document text."
+    );
     assert!(document.optional_image.is_none());
 }
 
@@ -130,7 +142,10 @@ fn selective_ocr_threshold_boundaries_are_exact() {
 #[test]
 fn clean_mixed_page_preserves_native_text() {
     let (document, renders) = route(
-        vec![page("Native text remains authoritative on a mixed page.", 0.8)],
+        vec![page(
+            "Native text remains authoritative on a mixed page.",
+            0.8,
+        )],
         vec![OcrResult::new("unused", 0.0)],
     );
 
@@ -155,17 +170,18 @@ fn low_ocr_confidence_selects_exactly_one_lowest_confidence_image() {
     assert_eq!(renders, 2);
     assert_eq!(document.optional_image.as_ref().unwrap().page_number, 2);
     assert_eq!(
-        document.pages.iter().filter(|page| page.vision_escalated).count(),
+        document
+            .pages
+            .iter()
+            .filter(|page| page.vision_escalated)
+            .count(),
         1
     );
 }
 
 #[test]
 fn exactly_seventy_five_confidence_does_not_escalate_but_below_does() {
-    let (exactly, _) = route(
-        vec![page("", 1.0)],
-        vec![OcrResult::new("readable", 75.0)],
-    );
+    let (exactly, _) = route(vec![page("", 1.0)], vec![OcrResult::new("readable", 75.0)]);
     assert!(exactly.optional_image.is_none());
 
     let (below, _) = route(
@@ -248,7 +264,9 @@ fn cancellation_stops_between_pages() {
     let error = extract_pdf(
         Path::new("cancel.pdf"),
         &pdf,
-        &CancelAfterFirst { token: token.clone() },
+        &CancelAfterFirst {
+            token: token.clone(),
+        },
         &ResourceLimits::default(),
         &token,
     )

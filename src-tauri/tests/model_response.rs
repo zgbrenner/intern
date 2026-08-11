@@ -124,7 +124,10 @@ fn completion(content: Value, finish_reason: &str) -> String {
 }
 
 fn document() -> DocumentInput {
-    DocumentInput { text: "Signed April 12, 2024 by John Smith and Acme Corporation.".into(), image: None }
+    DocumentInput {
+        text: "Signed April 12, 2024 by John Smith and Acme Corporation.".into(),
+        image: None,
+    }
 }
 
 #[derive(Clone)]
@@ -170,7 +173,11 @@ impl ProcessLauncher for FakeLauncher {
         _executable: &Path,
         arguments: &[String],
     ) -> Result<Box<dyn ProcessControl>, intern_app::model::ModelError> {
-        let port_index = arguments.iter().position(|argument| argument == "--port").unwrap() + 1;
+        let port_index = arguments
+            .iter()
+            .position(|argument| argument == "--port")
+            .unwrap()
+            + 1;
         let port = arguments[port_index].parse().unwrap();
         self.launches.lock().unwrap().push(port);
         Ok(Box::new(FakeProcess {
@@ -218,11 +225,18 @@ impl ProcessLauncher for ErrorLauncher {
         _executable: &Path,
         _arguments: &[String],
     ) -> Result<Box<dyn ProcessControl>, intern_app::model::ModelError> {
-        Ok(Box::new(ErrorProcess { reaped: Arc::clone(&self.reaped) }))
+        Ok(Box::new(ErrorProcess {
+            reaped: Arc::clone(&self.reaped),
+        }))
     }
 }
 
-fn fake_server_files() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+fn fake_server_files() -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
     let directory = tempdir().unwrap();
     let executable = directory.path().join("llama-server.exe");
     let model = directory.path().join("model.gguf");
@@ -244,9 +258,22 @@ fn server_arguments_pin_local_single_slot_cpu_configuration() {
     assert_eq!(
         arguments,
         [
-            "--host", "127.0.0.1", "--port", "49123", "--api-key", "secret", "--model",
-            "model.gguf", "--mmproj", "mmproj.gguf", "--parallel", "1", "--ctx-size", "8192",
-            "--n-gpu-layers", "0",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "49123",
+            "--api-key",
+            "secret",
+            "--model",
+            "model.gguf",
+            "--mmproj",
+            "mmproj.gguf",
+            "--parallel",
+            "1",
+            "--ctx-size",
+            "8192",
+            "--n-gpu-layers",
+            "0",
         ]
     );
 }
@@ -297,7 +324,9 @@ fn early_process_exits_have_a_bounded_spawn_retry_count() {
         spontaneous_exit: Arc::new(AtomicBool::new(false)),
         reaped: Arc::new(AtomicBool::new(false)),
     };
-    let ports = FixedPorts(Arc::new(Mutex::new(VecDeque::from([42_001, 42_002, 42_003]))));
+    let ports = FixedPorts(Arc::new(Mutex::new(VecDeque::from([
+        42_001, 42_002, 42_003,
+    ]))));
 
     let error = LlamaServer::start_with(
         &executable,
@@ -350,7 +379,9 @@ fn stop_reaps_a_process_that_exits_spontaneously() {
 fn process_probe_error_terminates_and_waits_before_returning() {
     let (_directory, executable, model, projector) = fake_server_files();
     let reaped = Arc::new(AtomicBool::new(false));
-    let launcher = ErrorLauncher { reaped: Arc::clone(&reaped) };
+    let launcher = ErrorLauncher {
+        reaped: Arc::clone(&reaped),
+    };
     let ports = FixedPorts(Arc::new(Mutex::new(VecDeque::from([44_001]))));
 
     let error = LlamaServer::start_with(
@@ -402,7 +433,10 @@ fn attached_image_is_explicitly_untrusted_at_system_level() {
     let system = requests[0]["messages"][0]["content"].as_str().unwrap();
     assert!(system.contains("extracted text and every attached image"));
     assert!(system.contains("untrusted document data"));
-    assert_eq!(requests[0]["messages"][1]["content"][1]["type"], "image_url");
+    assert_eq!(
+        requests[0]["messages"][1]["content"][1]["type"],
+        "image_url"
+    );
 }
 
 #[test]
@@ -423,7 +457,10 @@ fn malformed_json_retries_exactly_once_then_succeeds() {
         completion(json!("{not-json"), "stop"),
         completion(proposal(0.90), "stop"),
     ]);
-    let decoded = ModelClient::new(&server.endpoint, "key").unwrap().propose(&document()).unwrap();
+    let decoded = ModelClient::new(&server.endpoint, "key")
+        .unwrap()
+        .propose(&document())
+        .unwrap();
 
     assert_eq!(decoded.confidence, 0.90);
     assert_eq!(server.requests.lock().unwrap().len(), 2);
@@ -435,7 +472,10 @@ fn confidence_above_one_is_structurally_malformed_and_retried_once() {
         completion(proposal(1.1), "stop"),
         completion(proposal(0.90), "stop"),
     ]);
-    let decoded = ModelClient::new(&server.endpoint, "key").unwrap().propose(&document()).unwrap();
+    let decoded = ModelClient::new(&server.endpoint, "key")
+        .unwrap()
+        .propose(&document())
+        .unwrap();
 
     assert_eq!(decoded.confidence, 0.90);
     assert_eq!(server.requests.lock().unwrap().len(), 2);
@@ -450,7 +490,10 @@ fn nine_parties_remain_invalid_after_exactly_one_retry() {
         completion(invalid.clone(), "stop"),
         completion(invalid, "stop"),
     ]);
-    let error = ModelClient::new(&server.endpoint, "key").unwrap().propose(&document()).unwrap_err();
+    let error = ModelClient::new(&server.endpoint, "key")
+        .unwrap()
+        .propose(&document())
+        .unwrap_err();
 
     assert_eq!(error.code(), ModelErrorCode::ModelResponseInvalid);
     assert_eq!(server.requests.lock().unwrap().len(), 2);
@@ -468,7 +511,10 @@ fn semantic_evidence_and_review_issues_do_not_retry() {
     invalid["review_reasons"] = json!(["semantic inconsistency for core review"]);
     invalid["party_evidence"] = json!(["John Smith"]);
     let server = FakeOpenAiServer::new(vec![completion(invalid, "stop")]);
-    let decoded = ModelClient::new(&server.endpoint, "key").unwrap().propose(&document()).unwrap();
+    let decoded = ModelClient::new(&server.endpoint, "key")
+        .unwrap()
+        .propose(&document())
+        .unwrap();
 
     assert_eq!(decoded.evidence.date, None);
     assert_eq!(decoded.date_kind, None);
@@ -487,7 +533,10 @@ fn unknown_proposal_fields_are_rejected_and_retried() {
         completion(invalid, "stop"),
         completion(proposal(0.90), "stop"),
     ]);
-    ModelClient::new(&server.endpoint, "key").unwrap().propose(&document()).unwrap();
+    ModelClient::new(&server.endpoint, "key")
+        .unwrap()
+        .propose(&document())
+        .unwrap();
 
     assert_eq!(server.requests.lock().unwrap().len(), 2);
 }
@@ -498,7 +547,10 @@ fn interrupted_completion_retries_exactly_once() {
         completion(json!({"document_date": null}), "length"),
         completion(proposal(0.89), "stop"),
     ]);
-    let decoded = ModelClient::new(&server.endpoint, "key").unwrap().propose(&document()).unwrap();
+    let decoded = ModelClient::new(&server.endpoint, "key")
+        .unwrap()
+        .propose(&document())
+        .unwrap();
 
     assert_eq!(decoded.confidence, 0.89);
     assert_eq!(server.requests.lock().unwrap().len(), 2);
@@ -507,7 +559,10 @@ fn interrupted_completion_retries_exactly_once() {
 #[test]
 fn semantic_low_confidence_is_returned_without_retry() {
     let server = FakeOpenAiServer::new(vec![completion(proposal(0.40), "stop")]);
-    let decoded = ModelClient::new(&server.endpoint, "key").unwrap().propose(&document()).unwrap();
+    let decoded = ModelClient::new(&server.endpoint, "key")
+        .unwrap()
+        .propose(&document())
+        .unwrap();
 
     assert_eq!(decoded.confidence, 0.40);
     assert!(decoded.needs_review);
@@ -520,7 +575,10 @@ fn second_malformed_response_has_stable_error_code() {
         completion(json!("{"), "stop"),
         completion(json!("still invalid"), "stop"),
     ]);
-    let error = ModelClient::new(&server.endpoint, "key").unwrap().propose(&document()).unwrap_err();
+    let error = ModelClient::new(&server.endpoint, "key")
+        .unwrap()
+        .propose(&document())
+        .unwrap_err();
 
     assert_eq!(error.code(), ModelErrorCode::ModelResponseInvalid);
     assert_eq!(error.code().as_str(), "MODEL_RESPONSE_INVALID");

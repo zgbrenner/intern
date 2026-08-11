@@ -1,6 +1,7 @@
 use intern_core::{
-    build_document_packet, compose_filename, packet_contains, validate_proposal, DateKind, Evidence,
-    ExtractedDocument, ModelProposal, ParserWarning, ProposalStatus, ReviewReason, ValidatedProposal,
+    DateKind, Evidence, ExtractedDocument, ModelProposal, ParserWarning, ProposalStatus,
+    ReviewReason, ValidatedProposal, build_document_packet, compose_filename, packet_contains,
+    validate_proposal,
 };
 
 fn packet(text: &str) -> intern_core::DocumentPacket {
@@ -95,7 +96,10 @@ fn exact_natural_language_date_evidence_is_ready() {
         candidate,
         &packet("Agreement with Acme Corporation, effective April 12, 2024"),
     );
-    assert_eq!(outcome.proposal.document_date.as_deref(), Some("2024-04-12"));
+    assert_eq!(
+        outcome.proposal.document_date.as_deref(),
+        Some("2024-04-12")
+    );
     assert_eq!(outcome.status, ProposalStatus::Ready);
 }
 
@@ -149,7 +153,10 @@ fn unsupported_subject_is_removed_without_fuzzy_matching() {
 fn multiple_sentence_description_is_reduced_and_reviewed() {
     let mut candidate = proposal();
     candidate.description = "First sentence. Unsupported second sentence.".into();
-    let outcome = validate_proposal(candidate, &packet("Agreement with Acme Corporation. First sentence."));
+    let outcome = validate_proposal(
+        candidate,
+        &packet("Agreement with Acme Corporation. First sentence."),
+    );
     assert_eq!(outcome.proposal.description, "First sentence.");
     assert_eq!(outcome.status, ProposalStatus::NeedsReview);
     assert!(outcome.reasons.contains(&ReviewReason::DescriptionTooLong));
@@ -199,51 +206,124 @@ fn model_flag_and_field_affecting_parser_warning_prevent_ready() {
         },
         false,
     );
-    assert_eq!(validate_proposal(proposal(), &informational).status, ProposalStatus::Ready);
+    assert_eq!(
+        validate_proposal(proposal(), &informational).status,
+        ProposalStatus::Ready
+    );
 }
 
 #[test]
 fn packet_budgets_text_and_image_requests_from_both_ends() {
     let text = format!("{}{}", "A".repeat(16_000), "Z".repeat(10_000));
     let text_only = build_document_packet(
-        ExtractedDocument { text: text.clone(), parser_warnings: vec![] },
+        ExtractedDocument {
+            text: text.clone(),
+            parser_warnings: vec![],
+        },
         false,
     );
-    assert_eq!(text_only.text_segments.iter().map(|value| value.chars().count()).sum::<usize>(), 22_000);
-    assert_eq!(text_only.text_segments[0].chars().filter(|c| *c == 'A').count(), 14_000);
-    assert_eq!(text_only.text_segments[1].chars().filter(|c| *c == 'Z').count(), 8_000);
+    assert_eq!(
+        text_only
+            .text_segments
+            .iter()
+            .map(|value| value.chars().count())
+            .sum::<usize>(),
+        22_000
+    );
+    assert_eq!(
+        text_only.text_segments[0]
+            .chars()
+            .filter(|c| *c == 'A')
+            .count(),
+        14_000
+    );
+    assert_eq!(
+        text_only.text_segments[1]
+            .chars()
+            .filter(|c| *c == 'Z')
+            .count(),
+        8_000
+    );
 
     let imaged = build_document_packet(
-        ExtractedDocument { text, parser_warnings: vec![] },
+        ExtractedDocument {
+            text,
+            parser_warnings: vec![],
+        },
         true,
     );
-    assert_eq!(imaged.text_segments.iter().map(|value| value.chars().count()).sum::<usize>(), 12_000);
-    assert_eq!(imaged.text_segments[0].chars().filter(|c| *c == 'A').count(), 8_000);
-    assert_eq!(imaged.text_segments[1].chars().filter(|c| *c == 'Z').count(), 4_000);
+    assert_eq!(
+        imaged
+            .text_segments
+            .iter()
+            .map(|value| value.chars().count())
+            .sum::<usize>(),
+        12_000
+    );
+    assert_eq!(
+        imaged.text_segments[0]
+            .chars()
+            .filter(|c| *c == 'A')
+            .count(),
+        8_000
+    );
+    assert_eq!(
+        imaged.text_segments[1]
+            .chars()
+            .filter(|c| *c == 'Z')
+            .count(),
+        4_000
+    );
 }
 
 #[test]
 fn packet_evidence_cannot_match_across_the_head_tail_gap() {
-    let text = format!("{}Acme{} Corporation{}", "A".repeat(13_996), "M".repeat(5_000), "Z".repeat(7_988));
-    let packet = build_document_packet(ExtractedDocument { text, parser_warnings: vec![] }, false);
-    assert!(packet.text.contains("Acme\n\n[... DOCUMENT GAP ...]\n\n Corporation"));
+    let text = format!(
+        "{}Acme{} Corporation{}",
+        "A".repeat(13_996),
+        "M".repeat(5_000),
+        "Z".repeat(7_988)
+    );
+    let packet = build_document_packet(
+        ExtractedDocument {
+            text,
+            parser_warnings: vec![],
+        },
+        false,
+    );
+    assert!(
+        packet
+            .text
+            .contains("Acme\n\n[... DOCUMENT GAP ...]\n\n Corporation")
+    );
     assert!(!packet_contains(&packet, "Acme Corporation"));
 }
 
 #[test]
 fn composer_uses_iso_date_type_subject_and_collision_suffix() {
     let name = compose_filename(
-        &validated(Some("2024-04-12"), Some("Employment Agreement"), Some("John Smith")),
+        &validated(
+            Some("2024-04-12"),
+            Some("Employment Agreement"),
+            Some("John Smith"),
+        ),
         "PDF",
         &["2024-04-12 - Employment Agreement - John Smith.pdf"],
     );
-    assert_eq!(name.value, "2024-04-12 - Employment Agreement - John Smith (2).pdf");
+    assert_eq!(
+        name.value,
+        "2024-04-12 - Employment Agreement - John Smith (2).pdf"
+    );
 }
 
 #[test]
 fn composer_is_windows_safe_and_deterministic() {
     let name = compose_filename(
-        &validated(None, Some("CON."), Some("A\u{202e}B\u{0001}<>:\"/\\|?*..pdf")),
+        &validated(
+            None,
+            Some("CON."),
+            Some("A\u{202e}B\u{0001}<>:\"/\\|?*..pdf"),
+        ),
         ".PDF",
         &[],
     );
@@ -252,7 +332,9 @@ fn composer_is_windows_safe_and_deterministic() {
 
 #[test]
 fn composer_escapes_every_windows_device_family() {
-    for reserved in ["PRN", "AUX.txt", "NUL", "COM1", "COM9.log", "LPT1", "LPT9.txt"] {
+    for reserved in [
+        "PRN", "AUX.txt", "NUL", "COM1", "COM9.log", "LPT1", "LPT9.txt",
+    ] {
         let name = compose_filename(&validated(None, Some(reserved), None), "pdf", &[]);
         assert!(name.value.starts_with('_'), "{reserved} was not escaped");
     }
@@ -261,7 +343,12 @@ fn composer_escapes_every_windows_device_family() {
 #[test]
 fn composer_omits_absent_segments_and_duplicate_extension() {
     assert_eq!(
-        compose_filename(&validated(None, None, Some("Quarterly Report.pdf")), "pdf", &[]).value,
+        compose_filename(
+            &validated(None, None, Some("Quarterly Report.pdf")),
+            "pdf",
+            &[]
+        )
+        .value,
         "Quarterly Report.pdf"
     );
 }
@@ -288,7 +375,11 @@ fn composer_limits_every_collision_candidate_to_140_characters() {
     let subject = "x".repeat(200);
     let first = compose_filename(&validated(None, None, Some(&subject)), "tiff", &[]);
     assert_eq!(first.value.chars().count(), 140);
-    let second = compose_filename(&validated(None, None, Some(&subject)), "tiff", &[first.value.as_str()]);
+    let second = compose_filename(
+        &validated(None, None, Some(&subject)),
+        "tiff",
+        &[first.value.as_str()],
+    );
     assert_eq!(second.value.chars().count(), 140);
     assert!(second.value.ends_with(" (2).tiff"));
 }

@@ -1,6 +1,6 @@
 use crate::{
-    evidence_supports, packet_contains, ModelProposal, ProposalStatus, ReviewReason,
-    ValidatedProposal, ValidationOutcome, DocumentPacket,
+    DocumentPacket, ModelProposal, ProposalStatus, ReviewReason, ValidatedProposal,
+    ValidationOutcome, evidence_supports, packet_contains,
 };
 
 const READY_CONFIDENCE: f32 = 0.86;
@@ -36,17 +36,23 @@ pub fn validate_proposal(candidate: ModelProposal, packet: &DocumentPacket) -> V
         &mut reasons,
     );
 
-    let parties = candidate.parties.iter().filter_map(|party| {
-        let supported = candidate.evidence.parties.iter().any(|evidence| {
-            evidence_supports(packet, evidence, party)
-        });
-        if supported {
-            Some(party.clone())
-        } else {
-            push_reason(&mut reasons, ReviewReason::EvidenceMissing);
-            None
-        }
-    }).collect();
+    let parties = candidate
+        .parties
+        .iter()
+        .filter_map(|party| {
+            let supported = candidate
+                .evidence
+                .parties
+                .iter()
+                .any(|evidence| evidence_supports(packet, evidence, party));
+            if supported {
+                Some(party.clone())
+            } else {
+                push_reason(&mut reasons, ReviewReason::EvidenceMissing);
+                None
+            }
+        })
+        .collect();
 
     let description = first_sentence(&candidate.description, &mut reasons);
     if !candidate.confidence.is_finite() || candidate.confidence < READY_CONFIDENCE {
@@ -55,11 +61,19 @@ pub fn validate_proposal(candidate: ModelProposal, packet: &DocumentPacket) -> V
     if candidate.needs_review || !candidate.review_reasons.is_empty() {
         push_reason(&mut reasons, ReviewReason::ModelRequestedReview);
     }
-    if packet.parser_warnings.iter().any(|warning| warning.field_affecting) {
+    if packet
+        .parser_warnings
+        .iter()
+        .any(|warning| warning.field_affecting)
+    {
         push_reason(&mut reasons, ReviewReason::ParserWarning);
     }
 
-    let status = if reasons.is_empty() { ProposalStatus::Ready } else { ProposalStatus::NeedsReview };
+    let status = if reasons.is_empty() {
+        ProposalStatus::Ready
+    } else {
+        ProposalStatus::NeedsReview
+    };
     ValidationOutcome {
         proposal: ValidatedProposal {
             document_date,
@@ -113,9 +127,11 @@ fn valid_iso_date(value: &str) -> bool {
     if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return false;
     }
-    if bytes.iter().enumerate().any(|(index, byte)| {
-        index != 4 && index != 7 && !byte.is_ascii_digit()
-    }) {
+    if bytes
+        .iter()
+        .enumerate()
+        .any(|(index, byte)| index != 4 && index != 7 && !byte.is_ascii_digit())
+    {
         return false;
     }
     let parse = |range: std::ops::Range<usize>| value[range].parse::<u32>().ok();
@@ -140,8 +156,19 @@ fn date_is_in_evidence(date: &str, evidence: &str) -> bool {
     let month_number = month.parse::<usize>().unwrap_or(0);
     let month_unpadded = month.trim_start_matches('0');
     let month_name = [
-        "", "january", "february", "march", "april", "may", "june",
-        "july", "august", "september", "october", "november", "december",
+        "",
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
     ][month_number];
     let short_month = &month_name[..3];
     let day_unpadded = day.trim_start_matches('0');
@@ -155,5 +182,7 @@ fn date_is_in_evidence(date: &str, evidence: &str) -> bool {
         format!("{short_month} {day_unpadded}, {year}"),
         format!("{day_unpadded} {month_name} {year}"),
         format!("{day_unpadded} {short_month} {year}"),
-    ].iter().any(|form| normalized.contains(form))
+    ]
+    .iter()
+    .any(|form| normalized.contains(form))
 }

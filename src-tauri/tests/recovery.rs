@@ -5,17 +5,15 @@ use std::{
 
 use intern_app::{
     pipeline::{
-        FileActions, ModelBoundary, ModelFailure, ParsedDocument, Pipeline, PipelineError,
-        LeaseKeeper, PipelineEventSink, PipelineProgress, WorkerBoundary, WorkerFailure,
+        FileActions, LeaseKeeper, ModelBoundary, ModelFailure, ParsedDocument, Pipeline,
+        PipelineError, PipelineEventSink, PipelineProgress, WorkerBoundary, WorkerFailure,
     },
     settings::SettingsStore,
 };
-use intern_core::{
-    ErrorCode, ModelProposal, OperationReceipt, QueueItem, QueueStatus, QueueStore,
-};
-use tempfile::tempdir;
-use std::time::Duration;
+use intern_core::{ErrorCode, ModelProposal, OperationReceipt, QueueItem, QueueStatus, QueueStore};
 use rusqlite::Connection;
+use std::time::Duration;
+use tempfile::tempdir;
 
 struct IdleWorker;
 impl WorkerBoundary for IdleWorker {
@@ -27,23 +25,38 @@ impl WorkerBoundary for IdleWorker {
     ) -> Result<ParsedDocument, WorkerFailure> {
         Err(WorkerFailure::new("PARSE_FAILED", false, false))
     }
-    fn cancel(&self, _request_id: &str) -> Result<(), WorkerFailure> { Ok(()) }
-    fn restart(&self) -> Result<(), WorkerFailure> { Ok(()) }
+    fn cancel(&self, _request_id: &str) -> Result<(), WorkerFailure> {
+        Ok(())
+    }
+    fn restart(&self) -> Result<(), WorkerFailure> {
+        Ok(())
+    }
 }
 
 struct IdleModel;
 impl ModelBoundary for IdleModel {
-    fn propose(&self, _document: &intern_app::model::client::DocumentInput) -> Result<ModelProposal, ModelFailure> {
+    fn propose(
+        &self,
+        _document: &intern_app::model::client::DocumentInput,
+    ) -> Result<ModelProposal, ModelFailure> {
         Err(ModelFailure::fatal("MODEL_NOT_READY"))
     }
 }
 
 #[derive(Default)]
-struct RecoveryFiles { reconciled: Mutex<Vec<i64>> }
+struct RecoveryFiles {
+    reconciled: Mutex<Vec<i64>>,
+}
 impl FileActions for RecoveryFiles {
-    fn fingerprint(&self, _path: &Path) -> Result<String, PipelineError> { Ok("hash".into()) }
-    fn apply(&self, _item: &QueueItem, _destination: &Path) -> Result<(), PipelineError> { Ok(()) }
-    fn undo(&self, _item: &QueueItem, _receipt: &OperationReceipt) -> Result<(), PipelineError> { Ok(()) }
+    fn fingerprint(&self, _path: &Path) -> Result<String, PipelineError> {
+        Ok("hash".into())
+    }
+    fn apply(&self, _item: &QueueItem, _destination: &Path) -> Result<(), PipelineError> {
+        Ok(())
+    }
+    fn undo(&self, _item: &QueueItem, _receipt: &OperationReceipt) -> Result<(), PipelineError> {
+        Ok(())
+    }
     fn reconcile(&self, item: &QueueItem) -> Result<(), PipelineError> {
         self.reconciled.lock().unwrap().push(item.id);
         Ok(())
@@ -66,7 +79,9 @@ fn interrupted_analyzing_is_requeued_with_an_incremented_failure_count() {
         let item = store.enqueue(Path::new("interrupted.pdf"), "hash").unwrap();
         id = item.id;
         store.claim_next().unwrap().unwrap();
-        store.transition(id, QueueStatus::Extracting, QueueStatus::Analyzing, None).unwrap();
+        store
+            .transition(id, QueueStatus::Extracting, QueueStatus::Analyzing, None)
+            .unwrap();
     }
     let pipeline = Pipeline::open(
         &database,
@@ -75,11 +90,17 @@ fn interrupted_analyzing_is_requeued_with_an_incremented_failure_count() {
         Arc::new(RecoveryFiles::default()),
         Arc::new(NoEvents),
         SettingsStore::new(temp.path().join("settings.json")),
-    ).unwrap();
+    )
+    .unwrap();
 
     pipeline.recover().unwrap();
 
-    let item = pipeline.list().unwrap().into_iter().find(|item| item.id == id).unwrap();
+    let item = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == id)
+        .unwrap();
     assert_eq!(item.status, QueueStatus::Queued);
     assert_eq!(item.processing_failures, 1);
 }
@@ -92,22 +113,61 @@ fn recovery_requeues_interrupted_processing_and_reconciles_applying_without_rese
     let applying_id;
     {
         let store = QueueStore::open(&database).unwrap();
-        let processing = store.enqueue(Path::new("processing.pdf"), "hash-1").unwrap();
+        let processing = store
+            .enqueue(Path::new("processing.pdf"), "hash-1")
+            .unwrap();
         processing_id = processing.id;
         store.claim_next().unwrap().unwrap();
-        store.transition(processing.id, QueueStatus::Extracting, QueueStatus::Analyzing, None).unwrap();
-        store.transition(processing.id, QueueStatus::Analyzing, QueueStatus::Failed, Some(ErrorCode::IoError)).unwrap();
+        store
+            .transition(
+                processing.id,
+                QueueStatus::Extracting,
+                QueueStatus::Analyzing,
+                None,
+            )
+            .unwrap();
+        store
+            .transition(
+                processing.id,
+                QueueStatus::Analyzing,
+                QueueStatus::Failed,
+                Some(ErrorCode::IoError),
+            )
+            .unwrap();
         store.manual_retry(processing.id).unwrap();
         store.claim_next().unwrap().unwrap();
 
         let applying = store.enqueue(Path::new("applying.pdf"), "hash-2").unwrap();
         applying_id = applying.id;
         // Release the active processing lease before constructing a durable Applying epoch.
-        store.transition(processing.id, QueueStatus::Extracting, QueueStatus::Canceled, None).unwrap();
+        store
+            .transition(
+                processing.id,
+                QueueStatus::Extracting,
+                QueueStatus::Canceled,
+                None,
+            )
+            .unwrap();
         store.claim_next().unwrap().unwrap();
-        store.transition(applying.id, QueueStatus::Extracting, QueueStatus::Analyzing, None).unwrap();
-        store.transition(applying.id, QueueStatus::Analyzing, QueueStatus::Ready, None).unwrap();
-        store.begin_applying(applying.id, QueueStatus::Ready).unwrap();
+        store
+            .transition(
+                applying.id,
+                QueueStatus::Extracting,
+                QueueStatus::Analyzing,
+                None,
+            )
+            .unwrap();
+        store
+            .transition(
+                applying.id,
+                QueueStatus::Analyzing,
+                QueueStatus::Ready,
+                None,
+            )
+            .unwrap();
+        store
+            .begin_applying(applying.id, QueueStatus::Ready)
+            .unwrap();
     }
 
     let files = Arc::new(RecoveryFiles::default());
@@ -118,13 +178,28 @@ fn recovery_requeues_interrupted_processing_and_reconciles_applying_without_rese
         Arc::clone(&files),
         Arc::new(NoEvents),
         SettingsStore::new(temp.path().join("settings.json")),
-    ).unwrap();
+    )
+    .unwrap();
 
     pipeline.recover().unwrap();
 
     let items = pipeline.list().unwrap();
-    assert_eq!(items.iter().find(|item| item.id == processing_id).unwrap().status, QueueStatus::Canceled);
-    assert_eq!(items.iter().find(|item| item.id == applying_id).unwrap().status, QueueStatus::Applying);
+    assert_eq!(
+        items
+            .iter()
+            .find(|item| item.id == processing_id)
+            .unwrap()
+            .status,
+        QueueStatus::Canceled
+    );
+    assert_eq!(
+        items
+            .iter()
+            .find(|item| item.id == applying_id)
+            .unwrap()
+            .status,
+        QueueStatus::Applying
+    );
     assert_eq!(files.reconciled.lock().unwrap().as_slice(), &[applying_id]);
 }
 
@@ -137,8 +212,18 @@ fn periodic_lease_renewal_prevents_a_second_store_from_stealing_live_work() {
     owner.claim_next().unwrap().unwrap();
     let lease = LeaseKeeper::start(Arc::clone(&owner), item.id, Duration::from_millis(10)).unwrap();
     let connection = Connection::open(&database).unwrap();
-    connection.execute("UPDATE queue_items SET lease_expires_at = 0 WHERE id = ?1", [item.id]).unwrap();
-    connection.execute("UPDATE queue_sessions SET heartbeat_at = 0 WHERE session_id = ?1", [owner.session_id()]).unwrap();
+    connection
+        .execute(
+            "UPDATE queue_items SET lease_expires_at = 0 WHERE id = ?1",
+            [item.id],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE queue_sessions SET heartbeat_at = 0 WHERE session_id = ?1",
+            [owner.session_id()],
+        )
+        .unwrap();
     std::thread::sleep(Duration::from_millis(40));
     let observer = QueueStore::open(&database).unwrap();
 
@@ -156,9 +241,13 @@ fn lease_renewal_loss_is_reported_to_the_active_operation() {
     owner.claim_next().unwrap().unwrap();
     let lease = LeaseKeeper::start(Arc::clone(&owner), item.id, Duration::from_millis(10)).unwrap();
     lease.check().unwrap();
-    Connection::open(&database).unwrap().execute(
-        "DELETE FROM queue_sessions WHERE session_id = ?1", [owner.session_id()],
-    ).unwrap();
+    Connection::open(&database)
+        .unwrap()
+        .execute(
+            "DELETE FROM queue_sessions WHERE session_id = ?1",
+            [owner.session_id()],
+        )
+        .unwrap();
     std::thread::sleep(Duration::from_millis(40));
 
     let error = lease.stop_and_check().unwrap_err();
@@ -181,13 +270,24 @@ fn post_crash_recovery_waits_for_stale_deadline_then_requeues() {
         Arc::new(RecoveryFiles::default()),
         Arc::new(NoEvents),
         SettingsStore::new(temp.path().join("settings.json")),
-    ).unwrap();
+    )
+    .unwrap();
 
     pipeline.recover().unwrap();
     assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Extracting);
     let connection = Connection::open(&database).unwrap();
-    connection.execute("UPDATE queue_items SET lease_expires_at = 0 WHERE id = ?1", [item.id]).unwrap();
-    connection.execute("UPDATE queue_sessions SET heartbeat_at = 0 WHERE session_id = ?1", [crashed_session]).unwrap();
+    connection
+        .execute(
+            "UPDATE queue_items SET lease_expires_at = 0 WHERE id = ?1",
+            [item.id],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE queue_sessions SET heartbeat_at = 0 WHERE session_id = ?1",
+            [crashed_session],
+        )
+        .unwrap();
 
     pipeline.recover().unwrap();
 

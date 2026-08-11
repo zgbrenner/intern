@@ -49,7 +49,11 @@ impl ModelClient {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| request_failed())?;
-        Ok(Self { endpoint, api_key: api_key.into(), http })
+        Ok(Self {
+            endpoint,
+            api_key: api_key.into(),
+            http,
+        })
     }
 
     pub fn propose(&self, document: &DocumentInput) -> ModelResult<ModelProposal> {
@@ -116,11 +120,19 @@ fn decode_completion(completion: ChatCompletion) -> Result<ModelProposal, Attemp
     if completion.object != "chat.completion" || completion.choices.len() != 1 {
         return Err(AttemptError::Retryable);
     }
-    let choice = completion.choices.into_iter().next().ok_or(AttemptError::Retryable)?;
+    let choice = completion
+        .choices
+        .into_iter()
+        .next()
+        .ok_or(AttemptError::Retryable)?;
     if choice.finish_reason.as_deref() != Some("stop") || choice.message.role != "assistant" {
         return Err(AttemptError::Retryable);
     }
-    let content = choice.message.content.into_text().ok_or(AttemptError::Retryable)?;
+    let content = choice
+        .message
+        .content
+        .into_text()
+        .ok_or(AttemptError::Retryable)?;
     let json = extract_json_object(&content).ok_or(AttemptError::Retryable)?;
     let proposal: WireProposal = serde_json::from_str(json).map_err(|_| AttemptError::Retryable)?;
     proposal.into_domain().ok_or(AttemptError::Retryable)
@@ -128,7 +140,10 @@ fn decode_completion(completion: ChatCompletion) -> Result<ModelProposal, Attemp
 
 fn extract_json_object(content: &str) -> Option<&str> {
     let trimmed = content.trim();
-    if let Some(fenced) = trimmed.strip_prefix("```json").or_else(|| trimmed.strip_prefix("```JSON")) {
+    if let Some(fenced) = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```JSON"))
+    {
         return fenced.strip_suffix("```").map(str::trim);
     }
     if let Some(fenced) = trimmed.strip_prefix("```") {
@@ -239,9 +254,10 @@ impl WireProposal {
             || self.parties.len() > 8
             || self.review_reasons.len() > 8
             || self.party_evidence.len() > 8
-            || self.document_date.as_deref().is_some_and(|date| {
-                !date.trim().is_empty() && !is_iso_date_shape(date)
-            })
+            || self
+                .document_date
+                .as_deref()
+                .is_some_and(|date| !date.trim().is_empty() && !is_iso_date_shape(date))
         {
             return None;
         }
@@ -283,5 +299,8 @@ enum AttemptError {
 }
 
 const fn request_failed() -> ModelError {
-    ModelError::new(ModelErrorCode::ModelRequestFailed, "local model request failed")
+    ModelError::new(
+        ModelErrorCode::ModelRequestFailed,
+        "local model request failed",
+    )
 }

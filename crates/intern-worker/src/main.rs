@@ -10,7 +10,9 @@ use intern_worker::ocr::TesseractOcr;
 use intern_worker::pdf::PdfiumBackend;
 
 fn runtime_directory() -> Result<PathBuf, ExtractionError> {
-    if let Some(path) = std::env::var_os("INTERN_RUNTIME_DIR") { return Ok(path.into()); }
+    if let Some(path) = std::env::var_os("INTERN_RUNTIME_DIR") {
+        return Ok(path.into());
+    }
     let executable = std::env::current_exe().map_err(ExtractionError::io)?;
     executable.parent().map(Path::to_path_buf).ok_or_else(|| {
         ExtractionError::native_assets_missing("worker executable has no parent directory")
@@ -27,11 +29,18 @@ fn ocr_backend() -> Result<TesseractOcr, ExtractionError> {
     TesseractOcr::new(runtime.join("tesseract.exe"), runtime.join("tessdata"))
 }
 
-fn extract_path(path: PathBuf, cancel: CancellationToken) -> Result<ExtractedDocument, ExtractionError> {
+fn extract_path(
+    path: PathBuf,
+    cancel: CancellationToken,
+) -> Result<ExtractedDocument, ExtractionError> {
     let limits = ResourceLimits::default();
     let snapshot = snapshot_source(&path, &limits, &cancel)?;
     let path = snapshot.path();
-    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     match extension.as_str() {
         "docx" | "docm" => extract_anydoc(path, &limits, &cancel),
         "txt" | "md" | "markdown" => extract_text(path, &limits, &cancel),
@@ -57,8 +66,11 @@ fn extract_path(path: PathBuf, cancel: CancellationToken) -> Result<ExtractedDoc
             };
             Ok(ExtractedDocument {
                 pages: vec![intern_worker::extract::ExtractedPage {
-                    page_number: 1, text: result.text, source: intern_worker::extract::PageSource::Ocr,
-                    ocr_confidence: Some(result.mean_confidence), vision_escalated: low_confidence,
+                    page_number: 1,
+                    text: result.text,
+                    source: intern_worker::extract::PageSource::Ocr,
+                    ocr_confidence: Some(result.mean_confidence),
+                    vision_escalated: low_confidence,
                 }],
                 warnings: if low_confidence {
                     vec![intern_worker::extract::ExtractionWarning::LowOcrConfidence]
@@ -69,7 +81,9 @@ fn extract_path(path: PathBuf, cancel: CancellationToken) -> Result<ExtractedDoc
                 optional_image,
             })
         }
-        _ => Err(ExtractionError::unsupported("supported formats are PDF, DOCX, TXT, Markdown, PNG, JPEG, and TIFF")),
+        _ => Err(ExtractionError::unsupported(
+            "supported formats are PDF, DOCX, TXT, Markdown, PNG, JPEG, and TIFF",
+        )),
     }
 }
 
