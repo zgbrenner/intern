@@ -1,0 +1,32 @@
+name: Rust dependency lock
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/intern-v1
+    paths:
+      - Cargo.toml
+      - "**/Cargo.toml"
+      - .github/workflows/lockfile.yml
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup default 1.88.0
+      - name: Generate dependency lock
+        run: cargo generate-lockfile
+      - name: Upload Cargo.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: intern-cargo-lock
+          if-no-files-found: error
+          path: Cargo.lock
