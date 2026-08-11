@@ -1261,9 +1261,9 @@ mod windows_file {
     use windows_sys::Win32::{
         Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE},
         Storage::FileSystem::{
-            BY_HANDLE_FILE_INFORMATION, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+            BY_HANDLE_FILE_INFORMATION, DELETE, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
             FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo,
-            GetFileInformationByHandle, MOVEFILE_WRITE_THROUGH, MoveFileExW, DELETE,
+            GetFileInformationByHandle, MOVEFILE_WRITE_THROUGH, MoveFileExW,
             SetFileInformationByHandle,
         },
     };
