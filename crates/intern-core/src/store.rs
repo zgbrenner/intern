@@ -820,7 +820,7 @@ impl QueueStore {
         let timestamp = now();
         let source_path = path_text(&receipt.source);
         let destination_path = path_text(&receipt.destination);
-        let temporary_path = receipt.temporary_path.as_ref().map(path_text);
+        let temporary_path = receipt.temporary_path.as_deref().map(path_text);
         transaction
             .execute(
                 "INSERT INTO operation_receipts(
@@ -954,7 +954,7 @@ impl QueueStore {
                    AND active_receipt_id = ?8
                )",
                 params![
-                    receipt.temporary_path.as_ref().map(path_text),
+                    receipt.temporary_path.as_deref().map(path_text),
                     receipt.post_operation_hash,
                     receipt.stage.as_db(),
                     receipt.source_exists,
