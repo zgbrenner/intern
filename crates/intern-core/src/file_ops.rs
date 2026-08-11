@@ -1,6 +1,6 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    fs,
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -8,6 +8,9 @@ use std::{
     },
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(not(windows))]
+use std::{fs::OpenOptions, io::Write};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -461,7 +464,7 @@ impl FileApplier {
     }
 
     fn reconcile_published(&self, receipt: OperationReceipt) -> InternResult<QueueItem> {
-        let mut destination = self.verify_reconciled_destination(&receipt)?;
+        let destination = self.verify_reconciled_destination(&receipt)?;
         let destination_identity = destination.identity().map_err(|_| {
             InternError::new(
                 ErrorCode::MoveVerificationFailed,
@@ -1256,11 +1259,11 @@ mod windows_file {
 
     use sha2::{Digest, Sha256};
     use windows_sys::Win32::{
-        Foundation::{DELETE, GENERIC_READ, GENERIC_WRITE, HANDLE},
+        Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE},
         Storage::FileSystem::{
             BY_HANDLE_FILE_INFORMATION, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
             FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo,
-            GetFileInformationByHandle, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+            GetFileInformationByHandle, MOVEFILE_WRITE_THROUGH, MoveFileExW, DELETE,
             SetFileInformationByHandle,
         },
     };
@@ -1298,7 +1301,7 @@ mod windows_file {
                     "locked file identity changed",
                 ));
             }
-            let disposition = FILE_DISPOSITION_INFO { DeleteFile: 1 };
+            let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
             // SAFETY: `self.file` owns a live handle opened with DELETE access, and
             // `disposition` remains valid for the exact byte size supplied here.
             let success = unsafe {
