@@ -127,7 +127,7 @@ fn validated_description(
         push_reason(reasons, ReviewReason::DescriptionTooLong);
         let mut words = sentence.split_whitespace().take(30).collect::<Vec<_>>();
         if let Some(last) = words.last_mut() {
-            *last = last.trim_end_matches(|character| matches!(character, '.' | '!' | '?'));
+            *last = last.trim_end_matches(['.', '!', '?']);
         }
         sentence = format!("{}.", words.join(" "));
     }
