@@ -144,8 +144,8 @@ fn is_reserved_number(value: &str) -> bool {
 }
 
 fn fit_filename(base: &str, suffix: &str, extension: &str) -> String {
-    let maximum_extension = MAX_FILENAME_CHARS
-        .saturating_sub(suffix.chars().count() + MIN_FILENAME_STEM_CHARS + 1);
+    let maximum_extension =
+        MAX_FILENAME_CHARS.saturating_sub(suffix.chars().count() + MIN_FILENAME_STEM_CHARS + 1);
     let extension = extension
         .chars()
         .take(maximum_extension)
