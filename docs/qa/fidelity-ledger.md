@@ -1,13 +1,13 @@
 # Intern primary-screen fidelity ledger
 
-**Rendered sign-off status: pending.** The accepted concept was inspected at original resolution. No implementation screenshot was produced on this host, so this ledger records code-backed expectations and the exact runtime assertions prepared for CI; it does not claim visual or pixel fidelity.
+**Rendered sign-off status: accepted**, recorded in `docs/qa/rendered-fidelity-signoff.json` on 2026-08-12 against the committed 1536×1024 capture. What was reviewed is the implementation capture itself; it was not pixel-diffed against the concept art, and this ledger's per-area rows below remain code-backed expectations rather than pixel measurements.
 
 ## Evidence inspected
 
 - Accepted concept: `docs/design/intern-primary-screen.png`, 1536×1024, SHA-256 `c8cf322da777d77bc490b855fd18c5a70fe24192a343505e677d34d925a30de8`.
 - Concept inspection: performed with `view_image` at original detail. The screen contains native chrome, a 72-pixel-style product header, left navigation, compact queue list, selected review row, and right inspector.
 - Implementation sources inspected: `src/App.tsx`, components under `src/components`, `src/styles/tokens.css`, `src/styles/app.css`, and the in-memory browser adapter.
-- Latest implementation capture: pending. `docs/qa/latest-implementation.png` must be created by Playwright at exactly 1536×1024 and then inspected; a placeholder is intentionally not committed.
+- Latest implementation capture: `docs/qa/latest-implementation.png`, produced by Playwright at exactly 1536×1024, SHA-256 `aedb8798c512332d5a79e8194ae3075234eaa01a3a3b8e15c5c66911fd6a1b5c`. Regenerating it from the current tree reproduces the same bytes, so the reviewed image is the one the release ships.
 
 ## Comparison ledger
 
