@@ -261,7 +261,11 @@ impl OcrBackend for TesseractOcr {
             .arg(&self.tessdata_directory)
             .arg("--psm")
             .arg("1")
-            .arg("tsv")
+            // Request the TSV renderer via -c: the bundled tessdata ships only
+            // traineddata files, and the `tsv` positional argument is a config
+            // file Tesseract would silently fail to find in tessdata/configs.
+            .arg("-c")
+            .arg("tessedit_create_tsv=1")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
