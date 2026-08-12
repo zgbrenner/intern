@@ -69,8 +69,14 @@ function Invoke-WorkerCommand {
         if ($null -eq $Line) { throw "Worker closed stdout: $Stderr" }
         if ([string]::IsNullOrWhiteSpace($Line)) { continue }
         $Envelope = $Line | ConvertFrom-Json
+        # Under Set-StrictMode, reading a missing property throws an opaque
+        # error; check shape explicitly so protocol violations stay diagnosable.
+        foreach ($Required in @("protocol_version", "request_id", "event")) {
+            if (-not $Envelope.PSObject.Properties[$Required]) { throw "Worker emitted unsupported protocol: $Line" }
+        }
         if ($Envelope.protocol_version -ne 1) { throw "Worker emitted unsupported protocol: $Line" }
         if ($Envelope.request_id -ne $RequestId) { throw "Worker interleaved an unexpected request: $Line" }
+        if (-not $Envelope.event.PSObject.Properties["type"]) { throw "Worker emitted unsupported protocol: $Line" }
         if ($Envelope.event.type -in @("hello", "parsed", "error")) { return $Envelope.event }
     }
     throw "Timed out waiting for worker request $RequestId. stderr: $Stderr"
