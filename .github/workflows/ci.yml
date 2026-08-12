@@ -64,6 +64,8 @@ jobs:
         with:
           path: ${{ runner.temp }}\intern-assets-cache
           key: runtime-assets-${{ runner.os }}-${{ hashFiles('src-tauri/resources/runtime-assets.json', 'scripts/fetch-windows-assets.ps1') }}
+          restore-keys: |
+            runtime-assets-${{ runner.os }}-
       - run: npm ci
       - run: npm run fixtures
       - run: npm run check

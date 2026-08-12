@@ -55,6 +55,8 @@ jobs:
         with:
           path: ${{ runner.temp }}\intern-assets-cache
           key: qa-runtime-assets-${{ runner.os }}-${{ hashFiles('src-tauri/resources/runtime-assets.json', 'scripts/fetch-windows-assets.ps1') }}
+          restore-keys: |
+            qa-runtime-assets-${{ runner.os }}-
       - uses: actions/cache@v4
         with:
           path: ~\AppData\Local\ms-playwright
