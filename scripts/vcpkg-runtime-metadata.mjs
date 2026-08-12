@@ -24,7 +24,7 @@ export async function readVcpkgRuntimeMetadata(installRoot, triplet) {
     const owner = candidates[0];
     for (const line of (await readFile(join(infoRoot, entry.name), 'utf8')).split(/\r?\n/)) {
       const path = line.trim().replaceAll('\\', '/').replace(/^\/+/, '');
-      if (!path) continue;
+      if (!path || path.endsWith('/')) continue;
       const previous = owners[path];
       if (previous && (previous.name !== owner.name || previous.version !== owner.version)) throw new Error(`conflicting vcpkg owners for ${path}`);
       owners[path] = owner;

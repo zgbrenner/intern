@@ -100,10 +100,13 @@ jobs:
         shell: pwsh
         run: |
           cargo build --locked -p intern-worker --release --features windows-native
-          cargo build --locked -p intern-app --release --bin intern-model-evaluator
-          cargo build --locked -p intern-app --release --bin intern-model-evidence-validator
+          if ($LASTEXITCODE -ne 0) { throw "Native parser worker build failed" }
           New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
           Copy-Item target\release\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
+          cargo build --locked -p intern-app --release --bin intern-model-evaluator
+          if ($LASTEXITCODE -ne 0) { throw "Model evaluator build failed" }
+          cargo build --locked -p intern-app --release --bin intern-model-evidence-validator
+          if ($LASTEXITCODE -ne 0) { throw "Model evidence validator build failed" }
       - name: Fetch and verify pinned Windows assets
         shell: pwsh
         run: |
@@ -222,6 +225,17 @@ jobs:
             --workflow="$env:GITHUB_WORKFLOW" `
             --run-id=$env:GITHUB_RUN_ID `
             --run-attempt=$env:GITHUB_RUN_ATTEMPT
+      - name: Export reviewable screenshot binding to the job log
+        if: success()
+        shell: pwsh
+        run: |
+          $Evaluation = Get-Content -LiteralPath docs\qa\model-evaluation.json -Raw | ConvertFrom-Json
+          $Screenshot = "docs\qa\latest-implementation.png"
+          Write-Host "INTERN_RELEASE_INPUTS_SHA256=$($Evaluation.release_inputs_sha256)"
+          Write-Host "INTERN_SCREENSHOT_SHA256=$((Get-FileHash -LiteralPath $Screenshot -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Write-Host "INTERN_SCREENSHOT_BASE64_BEGIN"
+          Write-Host ([Convert]::ToBase64String([IO.File]::ReadAllBytes($Screenshot)))
+          Write-Host "INTERN_SCREENSHOT_BASE64_END"
       - name: Upload QA evidence without publishing a release
         if: always()
         uses: actions/upload-artifact@v4

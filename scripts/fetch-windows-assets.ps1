@@ -147,7 +147,7 @@ try {
     Get-ChildItem -LiteralPath $LlamaServer[0].Directory.FullName -File -Filter "*.dll" | ForEach-Object {
         Copy-SidecarDll $_.FullName "llama.cpp" ([string]($Manifest.downloads | Where-Object id -eq "llama.cpp").version)
     }
-    Copy-UpstreamLicense $LlamaExtract "llama.cpp-LICENSE.txt"
+    Copy-RuntimeFile $Downloads["llama.cpp-license"] (Join-Path $LicensesDirectory "llama.cpp-LICENSE.txt")
 
     $PdfiumExtract = Join-Path $WorkDirectory "pdfium"
     if (Test-Path -LiteralPath $PdfiumExtract) { Remove-Item -LiteralPath $PdfiumExtract -Recurse -Force }
@@ -243,7 +243,7 @@ try {
             }
     )
     if ($BundledFiles.Count -lt 7) { throw "Runtime asset staging produced an unexpectedly small signed file set" }
-    $DuplicateInstallPaths = @($BundledFiles | Group-Object install_path | Where-Object Count -gt 1)
+    $DuplicateInstallPaths = @($BundledFiles | Group-Object { [string]$_['install_path'] } | Where-Object Count -gt 1)
     if ($DuplicateInstallPaths.Count -gt 0) { throw "Runtime assets collide in the package: $($DuplicateInstallPaths.Name -join ', ')" }
     $LicenseFiles = @(
         Get-ChildItem -LiteralPath $LicensesDirectory -Recurse -File | Sort-Object FullName | ForEach-Object {

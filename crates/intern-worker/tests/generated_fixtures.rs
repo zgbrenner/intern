@@ -42,7 +42,7 @@ fn clean_room_docx_and_markdown_expose_literal_gold_facts() {
 
 #[cfg(all(windows, feature = "native-pdfium"))]
 #[test]
-fn pinned_pdfium_extracts_literal_employment_facts() {
+fn pinned_pdfium_reuses_bindings_across_sequential_backends() {
     use intern_worker::extract::{OcrBackend, OcrResult, RenderedPage, extract_pdf};
     use intern_worker::pdf::PdfiumBackend;
 
@@ -62,14 +62,25 @@ fn pinned_pdfium_extracts_literal_employment_facts() {
     };
     let pdfium = std::env::var_os("INTERN_PDFIUM_DIR")
         .expect("INTERN_PDFIUM_DIR is required for the Windows fixture gate");
+    let first_backend = PdfiumBackend::new(&pdfium).unwrap();
     let extracted = extract_pdf(
         &path,
-        &PdfiumBackend::new(pdfium).unwrap(),
+        &first_backend,
         &OcrMustNotRun,
         &ResourceLimits::default(),
         &CancellationToken::new(),
     )
     .unwrap();
+    let second_backend = PdfiumBackend::new(&pdfium).unwrap();
+    let repeated = extract_pdf(
+        &path,
+        &second_backend,
+        &OcrMustNotRun,
+        &ResourceLimits::default(),
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(extracted.pages, repeated.pages);
     let text = extracted
         .pages
         .iter()
