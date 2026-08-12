@@ -4,7 +4,13 @@ import { App } from '../../App';
 import { createFixtureBatchBridge, createInMemoryBridge } from '../../lib/inMemoryBridge';
 
 describe('queue interactions', () => {
-  const selectRow = (row: HTMLElement) => fireEvent.click(within(row).getByRole('button', { name: /select/i }));
+  const selectRow = async (row: HTMLElement) => {
+    const select = within(row).getByRole('button', { name: /select/i });
+    const filename = select.getAttribute('aria-label')?.replace(/^Select /, '');
+    fireEvent.click(select);
+    const inspector = await screen.findByRole('complementary', { name: 'Review item' });
+    if (filename) await waitFor(() => expect(inspector).toHaveTextContent(filename));
+  };
   it('keeps identical bytes from different paths separate and deduplicates only the same path', async () => {
     const bridge = createFixtureBatchBridge();
 
@@ -74,7 +80,7 @@ describe('queue interactions', () => {
     const approve = vi.fn(base.approve);
     render(<App bridge={{ ...base, approve }} />);
 
-    selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
+    await selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Apply rename' }));
 
     await waitFor(() => expect(approve).toHaveBeenCalledWith(
@@ -115,7 +121,7 @@ describe('queue interactions', () => {
     const approve = vi.fn(async () => { throw new Error('Destination is unavailable.'); });
     render(<App bridge={{ ...base, approve }} />);
 
-    selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
+    await selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Apply rename' }));
 
     expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('Destination is unavailable.');
@@ -129,7 +135,7 @@ describe('queue interactions', () => {
     const approve = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     render(<App bridge={{ ...base, approve }} />);
 
-    selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
+    await selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
     const action = screen.getByRole('button', { name: 'Apply rename' });
     fireEvent.click(action);
 
@@ -144,9 +150,9 @@ describe('queue interactions', () => {
     const approve = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     render(<App bridge={{ ...base, approve }} />);
 
-    selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
+    await selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Apply rename' }));
-    selectRow(screen.getByRole('row', { name: /NDA - Acme Corp/i }));
+    await selectRow(screen.getByRole('row', { name: /NDA - Acme Corp/i }));
     finish?.();
 
     await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveValue('NDA - Acme Corp - 2024-03-01.docx'));
@@ -162,9 +168,9 @@ describe('queue interactions', () => {
     });
     render(<App bridge={{ ...base, approve }} />);
 
-    selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
+    await selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Apply all ready' }));
-    selectRow(screen.getByRole('row', { name: /Lease Agreement - 123 Main St/i }));
+    await selectRow(screen.getByRole('row', { name: /Lease Agreement - 123 Main St/i }));
     finish?.();
 
     await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveValue('Lease Agreement - 123 Main St - 2023-09-15.pdf'));
@@ -181,7 +187,7 @@ describe('queue interactions', () => {
     const bridge = { ...base, [method]: command };
     render(<App bridge={bridge} />);
 
-    selectRow(await screen.findByRole('row', { name: new RegExp(item.originalFilename, 'i') }));
+    await selectRow(await screen.findByRole('row', { name: new RegExp(item.originalFilename, 'i') }));
     fireEvent.click(screen.getByRole('button', { name: actionName }));
 
     expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent(`${actionName} failed.`);
@@ -205,7 +211,7 @@ describe('queue interactions', () => {
     const bridge = { ...createInMemoryBridge({ items: [{ id: 'failed', originalFilename: 'broken.pdf', status: 'failed', reason: 'Extraction failed.' }] }), retry, remove };
     render(<App bridge={bridge} />);
 
-    selectRow(await screen.findByRole('row', { name: /broken.pdf/i }));
+    await selectRow(await screen.findByRole('row', { name: /broken.pdf/i }));
     expect(screen.queryByLabelText('Filename')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Failure details' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Retry item' })).toBeVisible();
@@ -220,7 +226,7 @@ describe('queue interactions', () => {
     const bridge = { ...createInMemoryBridge({ items: [{ id: 'active', originalFilename: 'active.pdf', status: 'processing', progress: 25 }] }), cancel };
     render(<App bridge={bridge} />);
 
-    selectRow(await screen.findByRole('row', { name: /active.pdf/i }));
+    await selectRow(await screen.findByRole('row', { name: /active.pdf/i }));
     expect(screen.queryByLabelText('Filename')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel processing' }));
 
@@ -231,7 +237,7 @@ describe('queue interactions', () => {
     const bridge = createInMemoryBridge({ items: [{ id: 'applying', originalFilename: 'applying.pdf', status: 'processing', progress: 90, cancelable: false }] });
     render(<App bridge={bridge} />);
 
-    selectRow(await screen.findByRole('row', { name: /applying.pdf/i }));
+    await selectRow(await screen.findByRole('row', { name: /applying.pdf/i }));
 
     expect(screen.queryByRole('button', { name: 'Cancel processing' })).not.toBeInTheDocument();
   });
@@ -263,7 +269,7 @@ describe('queue interactions', () => {
     const bridge = createInMemoryBridge();
     render(<App bridge={bridge} />);
 
-    selectRow(await screen.findByRole('row', { name: /Lease Agreement - 123 Main St.pdf/i }));
+    await selectRow(await screen.findByRole('row', { name: /Lease Agreement - 123 Main St.pdf/i }));
 
     expect(screen.getByRole('complementary', { name: 'Review item' })).toBeVisible();
     expect(screen.getByLabelText('Filename')).toHaveValue('Lease Agreement - 123 Main St - 2023-09-15.pdf');
@@ -317,7 +323,7 @@ describe('queue interactions', () => {
   it('uses the refreshed selected item rather than stale inspector data', async () => {
     const bridge = createInMemoryBridge();
     render(<App bridge={bridge} />);
-    selectRow(await screen.findByRole('row', { name: /Lease Agreement - 123 Main St.pdf/i }));
+    await selectRow(await screen.findByRole('row', { name: /Lease Agreement - 123 Main St.pdf/i }));
     await bridge.keepOriginal('lease');
     fireEvent.click(screen.getByRole('button', { name: 'Pause queue' }));
 
