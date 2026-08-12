@@ -147,6 +147,22 @@ fitting a prompt to it is not the same as being right:
   Agreement` - correct but less specific than the text supports.
 * The vendor invoice reads `between` its two sides rather than `from` the party
   that issued it. The direction is under-determined by the document's own layout.
-* Six OCR fixtures were not scored on this machine, which has no Tesseract
-  build; the OCR path is covered by the Rust routing tests and by CI, which
-  builds the pinned Tesseract.
+* The six OCR fixtures are not scored for naming quality. They have since been
+  run through the packaged worker against a real Tesseract, and the clean-room
+  bitmap font reads at 62-95 mean confidence with digits corrupted often enough
+  (`2024` as `24h24`, `2025` as `2625`) that literal-evidence validation cannot
+  confirm a date. Every scanned fixture therefore goes to review, which is what
+  `expected.json` expects of them and what should happen to a poor scan, but it
+  means the corpus does not measure how well Intern names scanned documents.
+  `fixtures/README.md` records the measured per-fixture fidelity.
+* Running that path for the first time found a real defect rather than a fixture
+  problem: Tesseract's orientation detection, which is trained on prose with
+  ascenders and descenders, reported a confident but 180-degree-wrong rotation on
+  these all-caps forms, and OCR then returned a full page of gibberish with the
+  same word count as a real reading. A page that does not read confidently is now
+  re-read in the other orientations and the most confident reading wins. On the
+  rotated fixture that moved mean confidence from 14-23 to 76 and turned
+  unusable output into the document's actual text. Upright pages, which is
+  effectively every real document, still cost exactly one OCR pass.
+* Those OCR measurements come from UB-Mannheim Tesseract 5.4.0, not the pinned
+  vcpkg 5.5.2 that ships; treat the exact confidences as indicative.

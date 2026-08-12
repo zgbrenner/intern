@@ -150,7 +150,7 @@ fn stem(date: &str, document_type: &str, parties: &[String], relation: PartyRela
 }
 
 fn party_clause(parties: &[String], relation: PartyRelation) -> Option<String> {
-    if parties.is_empty() || relation == PartyRelation::None {
+    if parties.is_empty() {
         return None;
     }
     // Only "between" joins two names. A notice is "for John Smith", not "for
@@ -161,6 +161,18 @@ fn party_clause(parties: &[String], relation: PartyRelation) -> Option<String> {
         (_, [only, ..]) => only.clone(),
         (_, []) => return None,
     };
+    // A validated party is identifying information the filename exists to carry,
+    // so an unstated relation costs the connecting word, not the name. The model
+    // called a termination notice's subject `none` and "John Smith" vanished from
+    // the filename entirely, which is the one thing that must not happen to a
+    // fact that survived validation.
+    //
+    // A separator rather than a guessed preposition: "from" would be wrong on an
+    // invoice the party was billed for, and asserting a relationship the document
+    // did not state is exactly what the rest of this pipeline refuses to do.
+    if relation == PartyRelation::None {
+        return Some(format!("- {names}"));
+    }
     Some(format!("{} {names}", relation.as_str()))
 }
 
@@ -284,6 +296,27 @@ mod tests {
 
     fn name(proposal: &ValidatedProposal, extension: &str) -> String {
         compose_filename(proposal, extension, &[]).value
+    }
+
+    /// Measured on the corpus: the model read the termination notice correctly,
+    /// answered `John Smith`, and then called the relation `none`, and the party
+    /// disappeared from the filename. A validated name is the most identifying
+    /// thing the filename carries; an unstated relation costs the connecting word,
+    /// not the name.
+    #[test]
+    fn an_unstated_relation_keeps_the_party_and_drops_only_the_connector() {
+        assert_eq!(
+            name(
+                &proposal(
+                    Some("2026-12-29"),
+                    Some("Notice of Termination"),
+                    &["John Smith"],
+                    PartyRelation::None,
+                ),
+                "pdf",
+            ),
+            "2026-12-29 Notice of Termination - John Smith.pdf"
+        );
     }
 
     #[test]

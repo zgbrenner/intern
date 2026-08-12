@@ -45,6 +45,15 @@ documented as intent:
 * PDFium is bound once per process and shared. Binding it per document made
   every PDF after the first one in a queue fail as "native assets missing";
   `one_pdf_backend_parses_every_document_in_a_queue` keeps that fixed.
+* A page that does not read confidently is re-read in the other orientations.
+  Tesseract's orientation detection is trained on prose with ascenders and
+  descenders; on a dense all-caps form it can be confidently 180 degrees wrong,
+  and OCR then returns a full page of gibberish with the same word count and
+  shape as a real reading. Volume cannot tell those apart, so mean word
+  confidence arbitrates: one corpus page scored 23, 14, 14, and 76 across the
+  four orientations. A page that reads well the first time — every upright
+  document — still costs exactly one pass, so the common case is unchanged and
+  only a page already headed for a low-confidence warning pays for the search.
 
 ## Distillation
 

@@ -595,7 +595,13 @@ export async function generateFixtures(outputDirectory) {
   const purchaseOrder = rasterText(['PURCHASE ORDER PO-310', 'DATE JULY 14 2025', 'EMBER POST MANUFACTURING LLC'], 560, 300, 3);
   const packingSlip = 'Packing Slip PS-311 dated July 15, 2025 for Quartz Meadow Retail LLC';
   const workOrder = rasterText(['WORK ORDER WO-312', 'DATE JULY 16 2025', 'HARBOR COMET REPAIRS LLC'], 560, 300, 3);
-  const rotatedRaster = rotateClockwise(rasterText(['DELIVERY RECEIPT DR-771', 'JUNE 12 2025', 'PINE ECHO COURIERS LLC', 'VIOLET CARTOGRAPHY STUDIO'], 640, 360, 2));
+  // 560x300 at scale 3 is still a low-resolution scan by document standards - a
+  // real page at 200 DPI is 1700x2200 - but it is readable. At scale 1 the glyphs
+  // were seven pixels tall and Tesseract returned nothing at any page-segmentation
+  // mode, so this fixture used to prove only that an unreadable page fails
+  // politely. At scale 2 it read but misspelled the identifiers it exists to
+  // carry ("DELIWERY", "OR-771").
+  const rotatedRaster = rotateClockwise(rasterText(['DELIVERY RECEIPT DR-771', 'JUNE 12 2025', 'PINE ECHO COURIERS LLC', 'VIOLET CARTOGRAPHY STUDIO'], 560, 300, 3));
   const invoice = buildPdf([{ lines: ['INVOICE INV-2048', 'Invoice date: April 30, 2025', 'Due date: May 30, 2025', 'Nimbus Orchard Supply Co.', 'Bill to Atlas Threadworks LLC', 'Total: $1,248.00'] }]);
   const files = new Map([
     ['employment-agreement.pdf', buildPdf([{ lines: ['EMPLOYMENT AGREEMENT', 'Effective date: February 14, 2025', 'Employer: Northstar Lantern Works LLC', 'Employee: Mira Vale', 'Work location: 18 Lantern Way, Fictional Harbor, WA 98000'] }])],

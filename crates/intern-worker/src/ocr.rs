@@ -13,17 +13,12 @@ use std::time::Duration;
 use image::{DynamicImage, ImageFormat};
 
 #[cfg(feature = "native-tesseract")]
-use crate::extract::apply_detected_rotation;
+use crate::extract::{CONFIDENT_READING, apply_detected_rotation};
 use crate::extract::{CancellationToken, ExtractionError, OcrBackend, OcrResult, RenderedPage};
 #[cfg(feature = "native-tesseract")]
 use crate::limits::ResourceLimits;
 #[cfg(feature = "native-tesseract")]
 use crate::temp::TempWorkspace;
-
-/// A rotated OCR pass below this confidence is re-verified upright, because
-/// OSD misreads sparse pages and a wrong quarter-turn yields letter salad.
-#[cfg(feature = "native-tesseract")]
-const ROTATION_FALLBACK_MIN_CONFIDENCE: f32 = 60.0;
 
 #[cfg(feature = "native-tesseract")]
 #[derive(Clone, Debug)]
@@ -174,6 +169,72 @@ impl TesseractOcr {
             format!("{operation} {}: {error}", path.display()),
         ))
     }
+
+    fn recognize_at(
+        &self,
+        workspace: &TempWorkspace,
+        page: &RenderedPage,
+        rotation: u16,
+        label: &str,
+        cancel: &CancellationToken,
+    ) -> Result<OcrResult, ExtractionError> {
+        let rotated = apply_detected_rotation(page.image.clone(), rotation)?;
+        let input = self.write_png(workspace, &format!("{label}.png"), &rotated)?;
+        let output_base = workspace.path().join(format!("ocr-{label}"));
+        let child = Command::new(&self.executable)
+            .arg(&input)
+            .arg(&output_base)
+            .arg("-l")
+            .arg(&self.language)
+            .arg("--tessdata-dir")
+            .arg(&self.tessdata_directory)
+            // psm 3 segments automatically WITHOUT re-running OSD: this pass
+            // exists to score exactly the orientation it was given, and psm 1
+            // would let recognition rotate the page again on its own.
+            .arg("--psm")
+            .arg("3")
+            // Request the TSV renderer via -c: the bundled tessdata ships only
+            // traineddata files, and the `tsv` positional argument is a config
+            // file Tesseract would silently fail to find in tessdata/configs.
+            .arg("-c")
+            .arg("tessedit_create_tsv=1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| {
+                Self::io_context("failed to launch Tesseract at", &self.executable, error)
+            })?;
+        Self::require_success(self.wait_for_child(child, cancel)?)?;
+        let output_path = output_base.with_extension("tsv");
+        workspace.register_existing(&output_path).map_err(|error| {
+            ExtractionError::parse_failed(format!(
+                "Tesseract reported success but its TSV output at {} is unusable ({error})",
+                output_path.display()
+            ))
+        })?;
+        let output = std::fs::read(&output_path).map_err(|error| {
+            Self::io_context("failed to read Tesseract TSV output", &output_path, error)
+        })?;
+        Ok(self.parse_tsv(&output)?.with_rotation(rotation))
+    }
+
+    /// Of two readings of the same page, the one Tesseract is more confident in.
+    /// A tie keeps the incumbent, so the orientation OSD chose wins by default
+    /// and behaviour on a blank page stays predictable.
+    ///
+    /// Orientation detection is trained on prose with ascenders and descenders.
+    /// On a dense all-caps form it can report a rotation that is 180 degrees
+    /// wrong, and OCR then returns a full page of gibberish rather than
+    /// obviously empty output - same word count, plausible shape, useless text.
+    /// Volume cannot tell those apart; word confidence can. Measured on one
+    /// corpus page, the four orientations scored 23, 14, 14, and 76.
+    fn better_reading(incumbent: OcrResult, challenger: OcrResult) -> OcrResult {
+        if challenger.mean_confidence > incumbent.mean_confidence {
+            challenger
+        } else {
+            incumbent
+        }
+    }
 }
 
 #[cfg(feature = "native-tesseract")]
@@ -254,75 +315,33 @@ impl OcrBackend for TesseractOcr {
             )));
         };
 
-        let result = self.recognize_at_rotation(&workspace, page, rotation, "ocr", cancel)?;
-        if rotation == 0 || result.mean_confidence >= ROTATION_FALLBACK_MIN_CONFIDENCE {
-            return Ok(result);
+        let mut best = self.recognize_at(&workspace, page, rotation, "oriented", cancel)?;
+        // A page that reads confidently in the orientation OSD asked for is done:
+        // the overwhelmingly common upright document still costs exactly one pass.
+        for candidate in [270, 90, 180, 0] {
+            if best.mean_confidence >= CONFIDENT_READING {
+                break;
+            }
+            if candidate == rotation {
+                continue;
+            }
+            let attempt = self.recognize_at(
+                &workspace,
+                page,
+                candidate,
+                &format!("try-{candidate}"),
+                cancel,
+            )?;
+            best = Self::better_reading(best, attempt);
         }
-        // OSD misreads sparse pages: verify a low-confidence rotated read
-        // against the upright orientation and keep the stronger result.
-        let upright = self.recognize_at_rotation(&workspace, page, 0, "ocr-upright", cancel)?;
-        if upright.mean_confidence > result.mean_confidence {
-            Ok(upright)
-        } else {
-            Ok(result)
-        }
-    }
-}
-
-#[cfg(feature = "native-tesseract")]
-impl TesseractOcr {
-    fn recognize_at_rotation(
-        &self,
-        workspace: &TempWorkspace,
-        page: &RenderedPage,
-        rotation: u16,
-        base_name: &str,
-        cancel: &CancellationToken,
-    ) -> Result<OcrResult, ExtractionError> {
-        let rotated = apply_detected_rotation(page.image.clone(), rotation)?;
-        let input = self.write_png(workspace, &format!("{base_name}.png"), &rotated)?;
-        let output_base = workspace.path().join(base_name);
-        let child = Command::new(&self.executable)
-            .arg(&input)
-            .arg(&output_base)
-            .arg("-l")
-            .arg(&self.language)
-            .arg("--tessdata-dir")
-            .arg(&self.tessdata_directory)
-            // psm 3 segments automatically WITHOUT re-running OSD: orientation
-            // was already decided by the dedicated psm 0 pass above, and psm 1
-            // would let recognition rotate the page again on its own.
-            .arg("--psm")
-            .arg("3")
-            // Request the TSV renderer via -c: the bundled tessdata ships only
-            // traineddata files, and the `tsv` positional argument is a config
-            // file Tesseract would silently fail to find in tessdata/configs.
-            .arg("-c")
-            .arg("tessedit_create_tsv=1")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| {
-                Self::io_context("failed to launch Tesseract at", &self.executable, error)
-            })?;
-        Self::require_success(self.wait_for_child(child, cancel)?)?;
-        let output_path = output_base.with_extension("tsv");
-        workspace.register_existing(&output_path).map_err(|error| {
-            ExtractionError::parse_failed(format!(
-                "Tesseract reported success but its TSV output at {} is unusable ({error})",
-                output_path.display()
-            ))
-        })?;
-        let output = std::fs::read(&output_path).map_err(|error| {
-            Self::io_context("failed to read Tesseract TSV output", &output_path, error)
-        })?;
-        Ok(self.parse_tsv(&output)?.with_rotation(rotation))
+        Ok(best)
     }
 }
 
 #[cfg(all(test, feature = "native-tesseract"))]
 mod tests {
     use super::TesseractOcr;
+    use crate::extract::OcrResult;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -343,6 +362,40 @@ mod tests {
             "Skipping this page; Error opening data file osd.traineddata; \
              Failed loading language osd; Could not initialize tesseract"
         ));
+    }
+
+    /// Measured on the corpus: a page read in the orientation OSD asked for
+    /// scored 44 while the same page read as-is scored 95, with both readings
+    /// returning eleven words. Volume cannot choose between them; confidence
+    /// can.
+    #[test]
+    fn a_confidently_misdetected_rotation_loses_to_the_page_as_it_was() {
+        let oriented = OcrResult::new("O71 TIVL3Y MOGVAW ZLYVNO", 44.1).with_rotation(180);
+        let unrotated = OcrResult::new("PACKING SLIP PS-311 DATE JULY 15 2025", 95.2);
+        let chosen = TesseractOcr::better_reading(oriented, unrotated);
+        assert_eq!(chosen.text, "PACKING SLIP PS-311 DATE JULY 15 2025");
+        assert_eq!(chosen.rotation_degrees, 0);
+    }
+
+    #[test]
+    fn a_genuinely_rotated_page_keeps_the_rotation_that_read_it() {
+        let oriented = OcrResult::new("DELIVERY RECEIPT DR-771", 92.0).with_rotation(270);
+        let unrotated = OcrResult::new("gibberish", 31.0);
+        let chosen = TesseractOcr::better_reading(oriented, unrotated);
+        assert_eq!(chosen.text, "DELIVERY RECEIPT DR-771");
+        assert_eq!(chosen.rotation_degrees, 270);
+    }
+
+    /// A tie keeps the detected orientation rather than silently preferring the
+    /// unrotated read, so behaviour on a blank page stays predictable.
+    #[test]
+    fn an_equal_score_keeps_the_detected_orientation() {
+        let oriented = OcrResult::new("", 0.0).with_rotation(90);
+        let unrotated = OcrResult::new("", 0.0);
+        assert_eq!(
+            TesseractOcr::better_reading(oriented, unrotated).rotation_degrees,
+            90
+        );
     }
 }
 
