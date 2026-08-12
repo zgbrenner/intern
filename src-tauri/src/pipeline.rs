@@ -57,6 +57,9 @@ impl LeaseKeeper {
                     Err(_) => return,
                 };
                 loop {
+                    if *stopped {
+                        return;
+                    }
                     let waited = match wake.wait_timeout(stopped, interval) {
                         Ok(value) => value,
                         Err(_) => return,
