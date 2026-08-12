@@ -8,6 +8,7 @@ on:
     paths:
       - Cargo.toml
       - "**/Cargo.toml"
+      - "**/*.rs"
       - .github/workflows/lockfile.yml
 
 permissions:
