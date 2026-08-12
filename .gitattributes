@@ -1,0 +1,32 @@
+# The release gate hashes the checked-out working tree.
+#
+# scripts/hash-release-inputs.mjs reads every tracked file and digests its bytes
+# into release_inputs_sha256, which binds the rendered-fidelity sign-off to the
+# code it was reviewed against. With no .gitattributes that digest depended on
+# whichever core.autocrlf the checkout happened to use: this repository stores LF
+# in the index, so a Windows checkout with autocrlf=true produces CRLF working
+# files and a different digest than the same commit checked out with
+# autocrlf=input. The sign-off would then be rejected on the release runner for a
+# reason that has nothing to do with what was reviewed.
+#
+# Pinning eol=lf makes the working tree byte-identical to the index on every
+# machine, so the digest is a property of the commit rather than of the client
+# that fetched it. Nothing in the repository changes: the index is already LF.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted. text=auto already detects
+# these, but the release digest and the pinned SHA-256 checks in
+# scripts/verify-assets.mjs make silent corruption expensive enough to be
+# explicit about it.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tif binary
+*.tiff binary
+*.pdf binary
+*.docx binary
+*.gguf binary
+*.exe binary
+*.dll binary
+*.zip binary
+*.traineddata binary
