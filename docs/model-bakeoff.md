@@ -224,3 +224,12 @@ fitting a prompt to it is not the same as being right:
   effectively every real document, still cost exactly one OCR pass.
 * Those OCR measurements come from UB-Mannheim Tesseract 5.4.0, not the pinned
   vcpkg 5.5.2 that ships; treat the exact confidences as indicative.
+* Repeated boilerplate still consumes digest budget. Near-duplicate blocks are
+  dropped by comparing a digit-masked prefix, so `25. Assignment.` and
+  `41. Assignment.` collapse to one - but only when the repeats begin the same
+  way. In the 14-page statement of work, the same assignment and force-majeure
+  clauses reappear several times because some copies start with the numbered
+  heading and some start mid-clause, and the prefixes therefore differ. It costs
+  budget rather than accuracy: the identifying content and every date still
+  survive, and date accuracy on that document is correct. Worth tightening only
+  with a measurement showing it buys something.
