@@ -20,6 +20,20 @@ use crate::limits::ResourceLimits;
 #[cfg(feature = "native-tesseract")]
 use crate::temp::TempWorkspace;
 
+/// How to ask Tesseract for TSV output without depending on a file we do not ship.
+///
+/// `tesseract in out tsv` does not pass a flag: `tsv` names a config file that
+/// must exist at `tessdata/configs/tsv`. The pinned tessdata is two
+/// `.traineddata` files and nothing else, so on a packaged install Tesseract
+/// warned `read_params_file: Can't open tsv`, fell back to its default renderer,
+/// exited 0, and wrote a `.txt`. Reading the `.tsv` then failed with "The system
+/// cannot find the file specified", which surfaced as a parse failure on every
+/// scanned document. A development machine with a full Tesseract install has that
+/// config file, which is exactly why this passed locally and failed on a real
+/// package.
+#[cfg(feature = "native-tesseract")]
+const TSV_RENDERER: [&str; 2] = ["-c", "tessedit_create_tsv=1"];
+
 #[cfg(feature = "native-tesseract")]
 #[derive(Clone, Debug)]
 pub struct TesseractOcr {
@@ -183,7 +197,7 @@ impl TesseractOcr {
             .arg(&self.tessdata_directory)
             .arg("--psm")
             .arg("1")
-            .arg("tsv")
+            .args(TSV_RENDERER)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -307,7 +321,7 @@ impl OcrBackend for TesseractOcr {
 
 #[cfg(all(test, feature = "native-tesseract"))]
 mod tests {
-    use super::TesseractOcr;
+    use super::{TSV_RENDERER, TesseractOcr};
     use crate::extract::OcrResult;
     use std::path::{Path, PathBuf};
 
@@ -329,6 +343,19 @@ mod tests {
             "Skipping this page; Error opening data file osd.traineddata; \
              Failed loading language osd; Could not initialize tesseract"
         ));
+    }
+
+    /// The packaged tessdata has no `configs/` directory, so TSV output has to be
+    /// requested as a parameter. Naming the `tsv` config instead made Tesseract
+    /// write a `.txt` and succeed, and every scanned document then failed to
+    /// parse.
+    #[test]
+    fn tsv_output_is_requested_by_parameter_not_by_a_config_file() {
+        assert_eq!(TSV_RENDERER, ["-c", "tessedit_create_tsv=1"]);
+        assert!(
+            !TSV_RENDERER.contains(&"tsv"),
+            "a bare `tsv` argument names tessdata/configs/tsv, which is not shipped"
+        );
     }
 
     /// Measured on the corpus: a page read in the orientation OSD asked for
