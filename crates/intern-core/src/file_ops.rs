@@ -1330,11 +1330,15 @@ mod windows_file {
         destination: &Path,
     ) -> io::Result<Box<dyn LockedFile>> {
         let mut input = fs::File::open(source)?;
+        // access_mode replaces the effective access bits, but std still
+        // validates create_new against the write flag, so write(true) is
+        // required for the open to be accepted at all.
         let output = OpenOptions::new()
             .read(true)
             .write(true)
             .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
             .share_mode(FILE_SHARE_READ)
+            .write(true)
             .create_new(true)
             .open(destination)?;
         let identity = file_identity(&output)?;
