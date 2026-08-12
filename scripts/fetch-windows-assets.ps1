@@ -144,10 +144,17 @@ try {
     $LlamaDestination = Join-Path $BinariesDirectory "llama-server-$TargetTriple.exe"
     Copy-RuntimeFile $LlamaServer[0].FullName $LlamaDestination
     Register-RuntimePackage $LlamaDestination "llama.cpp" ([string]($Manifest.downloads | Where-Object id -eq "llama.cpp").version)
-    Get-ChildItem -LiteralPath $LlamaServer[0].Directory.FullName -File -Filter "*.dll" | ForEach-Object {
-        Copy-SidecarDll $_.FullName "llama.cpp" ([string]($Manifest.downloads | Where-Object id -eq "llama.cpp").version)
-    }
-    Copy-UpstreamLicense $LlamaExtract "llama.cpp-LICENSE.txt"
+    # The release zip is flat and also contains impl DLLs for every CLI tool;
+    # stage only llama-server's dependency closure (server impl, core llama/ggml
+    # runtime, and the OpenMP runtime), not the other tools' private DLLs.
+    Get-ChildItem -LiteralPath $LlamaServer[0].Directory.FullName -File -Filter "*.dll" |
+        Where-Object { $_.Name -eq "llama-server-impl.dll" -or $_.Name -notmatch '-impl\.dll$' } |
+        ForEach-Object {
+            Copy-SidecarDll $_.FullName "llama.cpp" ([string]($Manifest.downloads | Where-Object id -eq "llama.cpp").version)
+        }
+    # llama.cpp binary releases ship no license text inside the archive, so the
+    # MIT license is pinned as its own download from the same upstream tag.
+    Copy-RuntimeFile $Downloads["llama.cpp-license"] (Join-Path $LicensesDirectory "llama.cpp-LICENSE.txt")
 
     $PdfiumExtract = Join-Path $WorkDirectory "pdfium"
     if (Test-Path -LiteralPath $PdfiumExtract) { Remove-Item -LiteralPath $PdfiumExtract -Recurse -Force }

@@ -34,6 +34,7 @@ jobs:
   windows-release-gates:
     name: Windows Rust, assets, E2E, and NSIS
     runs-on: windows-latest
+    timeout-minutes: 240
     env:
       CARGO_TERM_COLOR: always
       INTERN_REQUIRE_GENERATED_FIXTURES: "1"
@@ -120,7 +121,7 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: intern-v0.1.0-alpha.1-windows
+          name: intern-v0.1.0-alpha.1-windows-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           path: |
             target/release/bundle/nsis/*.exe

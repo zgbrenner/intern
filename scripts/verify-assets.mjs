@@ -8,6 +8,7 @@ const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MANIFEST = resolve(REPOSITORY_ROOT, 'src-tauri/resources/runtime-assets.json');
 const EXPECTED_DOWNLOADS = Object.freeze({
   'llama.cpp': { version: 'b10361', archive: 'llama-b10361-bin-win-cpu-x64.zip', url: 'https://github.com/ggml-org/llama.cpp/releases/download/b10361/llama-b10361-bin-win-cpu-x64.zip', size: 18_427_695, sha256: '36da9e9c1c094bf7842fab69e6cc0921125a67fa2611ba8f329a00804350302a' },
+  'llama.cpp-license': { version: 'b10361', archive: 'llama.cpp-LICENSE.txt', url: 'https://raw.githubusercontent.com/ggml-org/llama.cpp/b10361/LICENSE', size: 1_078, sha256: '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d' },
   pdfium: { version: 'chromium/7999', archive: 'pdfium-win-x64.tgz', url: 'https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7999/pdfium-win-x64.tgz', size: 3_762_593, sha256: '55329d5cb5de8a379a2fc563106492d7f385a1f795d18970922c71f708f9fbb4' },
   'eng.traineddata': { version: '87416418657359cb625c412a48b6e1d6d41c29bd', archive: 'eng.traineddata', url: 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata', size: 4_113_088, sha256: '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2' },
   'osd.traineddata': { version: '87416418657359cb625c412a48b6e1d6d41c29bd', archive: 'osd.traineddata', url: 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/osd.traineddata', size: 10_562_727, sha256: '9cf5d576fcc47564f11265841e5ca839001e7e6f38ff7f7aacf46d15a96b00ff' },
@@ -46,7 +47,7 @@ function validateDigest(value, label) {
 
 function verifyPins(manifest) {
   const byId = new Map(manifest.downloads.map((download) => [download.id, download]));
-  assert(manifest.downloads.length === Object.keys(EXPECTED_DOWNLOADS).length, 'runtime download set must contain exactly four entries');
+  assert(manifest.downloads.length === Object.keys(EXPECTED_DOWNLOADS).length, 'runtime download set must contain exactly the expected pinned entries');
   for (const [id, expected] of Object.entries(EXPECTED_DOWNLOADS)) {
     const download = byId.get(id);
     assert(download, `runtime manifest is missing the ${id} pin`);

@@ -28,6 +28,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
     "externalBin": [
       "binaries/intern-worker",
       "binaries/llama-server",

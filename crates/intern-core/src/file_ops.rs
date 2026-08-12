@@ -1554,10 +1554,7 @@ impl LockedFile for PortableLockedFile {
 
     fn delete(self: Box<Self>) -> io::Result<()> {
         if portable_identity(&fs::metadata(&self.path)?) != self.identity {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "locked file identity changed",
-            ));
+            return Err(io::Error::other("locked file identity changed"));
         }
         fs::remove_file(&self.path)
     }
