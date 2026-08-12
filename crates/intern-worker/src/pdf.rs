@@ -1,6 +1,6 @@
 use std::path::Path;
 #[cfg(feature = "native-pdfium")]
-use std::path::PathBuf;
+use std::sync::Mutex;
 
 use crate::extract::{
     CancellationToken, ExtractionError, PdfBackend, PdfPageInspection, RenderedPage,
@@ -12,8 +12,11 @@ use crate::limits::MAX_PAGE_COUNT;
 use pdfium_render::prelude::*;
 
 #[cfg(feature = "native-pdfium")]
+static PDFIUM_INITIALIZATION: Mutex<()> = Mutex::new(());
+
+#[cfg(feature = "native-pdfium")]
 pub struct PdfiumBackend {
-    library_path: PathBuf,
+    pdfium: Pdfium,
     render_dpi: f32,
 }
 
@@ -27,18 +30,24 @@ impl PdfiumBackend {
                 library_path.display()
             )));
         }
-        Pdfium::bind_to_library(&library_path)
-            .map_err(|error| ExtractionError::native_assets_missing(error.to_string()))?;
+        let _initialization = PDFIUM_INITIALIZATION.lock().map_err(|_| {
+            ExtractionError::native_assets_missing("PDFium initialization lock is poisoned")
+        })?;
+        let pdfium = match Pdfium::bind_to_library(&library_path) {
+            Ok(bindings) => Pdfium::new(bindings),
+            Err(PdfiumError::PdfiumLibraryBindingsAlreadyInitialized) => Pdfium::default(),
+            Err(error) => {
+                return Err(ExtractionError::native_assets_missing(error.to_string()));
+            }
+        };
         Ok(Self {
-            library_path,
+            pdfium,
             render_dpi: 300.0,
         })
     }
 
-    fn pdfium(&self) -> Result<Pdfium, ExtractionError> {
-        let bindings = Pdfium::bind_to_library(&self.library_path)
-            .map_err(|error| ExtractionError::native_assets_missing(error.to_string()))?;
-        Ok(Pdfium::new(bindings))
+    fn pdfium(&self) -> &Pdfium {
+        &self.pdfium
     }
 
     fn page_dimensions(&self, width_points: f32, height_points: f32) -> (u32, u32) {
@@ -90,7 +99,7 @@ impl PdfBackend for PdfiumBackend {
         cancel: &CancellationToken,
     ) -> Result<Vec<PdfPageInspection>, ExtractionError> {
         cancel.check()?;
-        let pdfium = self.pdfium()?;
+        let pdfium = self.pdfium();
         let document = pdfium
             .load_pdf_from_file(path, None)
             .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
@@ -137,7 +146,7 @@ impl PdfBackend for PdfiumBackend {
         cancel: &CancellationToken,
     ) -> Result<RenderedPage, ExtractionError> {
         cancel.check()?;
-        let pdfium = self.pdfium()?;
+        let pdfium = self.pdfium();
         let document = pdfium
             .load_pdf_from_file(path, None)
             .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
