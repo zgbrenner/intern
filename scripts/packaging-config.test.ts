@@ -15,3 +15,19 @@ it('packages the license directory as a tree so vcpkg subpaths match the signed 
   expect(smoke).toContain('WaitForExit(');
   expect(smoke).toContain('$EvidencePath');
 });
+
+it('leaves packaged-path collision detection to the checker that can actually see the property', async () => {
+  const fetch = await readFile('scripts/fetch-windows-assets.ps1', 'utf8');
+  // The staged file records are ordered hashtables, and PowerShell cannot
+  // resolve a hashtable key as a named property when grouping. Grouping them by
+  // the packaged-path key therefore put every file in one unnamed group and
+  // reported a collision for any package holding more than one file. That check
+  // never passed, and it is redundant: verify-assets.mjs performs it with real
+  // property access and is covered by verify-assets.test.ts.
+  expect(fetch).not.toMatch(/Group-Object\s+install_path/);
+  expect(fetch).toMatch(/node .*verify-assets\.mjs.* --require-bundled/);
+  // The manifest must be written before it is verified, or the check reads stale
+  // contents. Match the invocation, not the comment above it.
+  expect(fetch.indexOf('$Manifest.bundled_files = $BundledFiles'))
+    .toBeLessThan(fetch.lastIndexOf('verify-assets.mjs'));
+});
