@@ -79,8 +79,24 @@ try {
     if (-not $WindowReady) { throw "Installed Intern.exe did not create a main window" }
     if (-not $AppProcess.CloseMainWindow()) { throw "Installed Intern.exe rejected a normal window close request" }
     # WebView2 teardown on a busy CI runner can exceed 15 seconds even when the
-    # close was accepted; the assertion is a clean exit, not a fast one.
-    if (-not $AppProcess.WaitForExit(60000)) { throw "Installed Intern.exe did not shut down cleanly" }
+    # close was accepted; the assertion is a clean exit, not a fast one. When
+    # the wait still times out, report what is keeping the process alive - the
+    # QA job hits this while the CI job never does, and the failure is useless
+    # without knowing which window, thread, or child survived the close.
+    if (-not $AppProcess.WaitForExit(60000)) {
+        $Diagnostics = [System.Collections.Generic.List[string]]::new()
+        $AppProcess.Refresh()
+        $Diagnostics.Add("main: pid=$($AppProcess.Id) responding=$($AppProcess.Responding) windowTitle='$($AppProcess.MainWindowTitle)' threads=$($AppProcess.Threads.Count)")
+        foreach ($Child in @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($AppProcess.Id)" -ErrorAction SilentlyContinue)) {
+            $Diagnostics.Add("child: pid=$($Child.ProcessId) name=$($Child.Name)")
+        }
+        foreach ($Name in @("intern", "intern-worker", "llama-server", "msedgewebview2")) {
+            foreach ($Alive in @(Get-Process -Name $Name -ErrorAction SilentlyContinue)) {
+                $Diagnostics.Add("alive: $($Alive.ProcessName) pid=$($Alive.Id) responding=$($Alive.Responding)")
+            }
+        }
+        throw "Installed Intern.exe did not shut down cleanly. $($Diagnostics -join ' | ')"
+    }
     if ($AppProcess.ExitCode -ne 0) { throw "Installed Intern.exe exited with $($AppProcess.ExitCode)" }
 
     $Uninstaller = Get-ChildItem -LiteralPath $InstallDirectory -File -Filter "uninstall*.exe" | Select-Object -First 1
