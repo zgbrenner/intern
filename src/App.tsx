@@ -233,9 +233,14 @@ function describeSetupError(error: unknown) {
       : undefined;
   switch (code) {
     case 'SETUP_BUSY': return 'Another model setup operation is already active. Wait for it to finish or cancel it. (SETUP_BUSY)';
+    // These used to name files this build does not use: "the matching Q4 or Q8
+    // model and mmproj GGUF files", and an "image self-test". Intern pins one
+    // model file and has no vision projector, so the advice sent people looking
+    // for something that does not exist. Name the file the manifest actually
+    // pins instead.
     case 'MODEL_FILE_INVALID':
-    case 'MODEL_MANIFEST_INVALID': return 'The selected model files did not match Intern’s required files. Choose the matching Q4 or Q8 model and mmproj GGUF files. (MODEL_FILE_INVALID)';
-    case 'MODEL_SELF_TEST_FAILED': return 'Intern installed the model, but its local text and image self-test failed. Try the download again or choose verified model files. (MODEL_SELF_TEST_FAILED)';
+    case 'MODEL_MANIFEST_INVALID': return 'The selected file did not match the model Intern pins. Choose the exact Qwen3.5-2B-Q4_K_M.gguf file, or let Intern download it. (MODEL_FILE_INVALID)';
+    case 'MODEL_SELF_TEST_FAILED': return 'Intern installed the model, but its local self-test failed. Try the download again or choose a verified model file. (MODEL_SELF_TEST_FAILED)';
     case 'INSUFFICIENT_DISK': return 'There is not enough free disk space to install the local model. Free space and try again. (INSUFFICIENT_DISK)';
   }
   if (error instanceof Error && error.message.trim()) return error.message.trim();
