@@ -77,7 +77,7 @@ Measured over the same runs, per document, including extraction:
 
 | | Qwen2.5-VL-3B, old pipeline | Qwen3.5-2B, new pipeline |
 | --- | ---: | ---: |
-| Median total time | 23.6 s | 12.4 s |
+| Median total time | 23.6 s | 12.4-16.6 s |
 | Slowest document | 115 s | 51 s |
 | Peak model process memory | 4,215 MB | 2,590 MB |
 | Installed model size | 3.05 GiB *(model + projector, both resident)* | 1.19 GiB *(projector installed but not loaded)* |
@@ -92,6 +92,9 @@ Essentially all the time is the model:
 | 100-page journal | 100 | 9,592 | 103 | 0.5 ms | 9.5 s |
 | Settlement agreement | 7 | 14,837 | 12,565 | 5.4 ms | 51.1 s |
 | Statement of work | 14 | 29,285 | 13,178 | 9.2 ms | 42.3 s |
+
+Repeated runs of the same corpus on this machine put the median between 12.4 s
+and 16.6 s depending on what else is running; treat a single figure as noise.
 
 Short documents are dominated by *generation* — the structured reply is about
 240 tokens at 17.5 tokens/second. Long documents add prefill at 157
@@ -138,8 +141,10 @@ Reported rather than tuned away, because twelve documents is a small corpus and
 fitting a prompt to it is not the same as being right:
 
 * Two documents (`meeting-minutes.md`, a 100-page project journal) get no
-  document type and are named `<date> Document.<ext>`. Both are the least
-  contract-like fixtures in the corpus.
+  document type at all and are named `<date> Document.<ext>`. Both are the
+  least contract-like fixtures in the corpus. `nda.docx` answers
+  `Non-Disclosure Agreement` where the document says `Mutual Non-Disclosure
+  Agreement` - correct but less specific than the text supports.
 * The vendor invoice reads `between` its two sides rather than `from` the party
   that issued it. The direction is under-determined by the document's own layout.
 * Six OCR fixtures were not scored on this machine, which has no Tesseract

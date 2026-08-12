@@ -230,7 +230,7 @@ ordinary applications running:
 | --- | --- |
 | Extraction | 13 ms for a one-page invoice, 33 ms for a 14-page contract |
 | Distillation | 0.3 ms to 9 ms |
-| Median document, end to end | 12.4 s |
+| Median document, end to end | 12.4-16.6 s, depending on machine load |
 | 29,000-character contract | 42 s |
 | Peak model process memory | 2,590 MB |
 | Installed model | 1.19 GiB, plus a 638 MB projector that is not loaded |

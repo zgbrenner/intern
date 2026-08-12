@@ -6,7 +6,7 @@
     {
       "description": "An employment agreement between Northstar Lantern Works LLC and Mira Vale specifying the effective date as February 14, 2025.",
       "digest_characters": 180,
-      "extraction_millis": 287,
+      "extraction_millis": 360,
       "file": "employment-agreement.pdf",
       "filename": "2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf",
       "pages": 1,
@@ -51,14 +51,14 @@
       "telemetry": {
         "compressionRatio": 1.034482717514038,
         "digestCharacters": 180,
-        "distillMicros": 97,
-        "inferenceMillis": 11926,
+        "distillMicros": 194,
+        "inferenceMillis": 15794,
         "sourceCharacters": 174,
         "visionUsed": false
       }
     },
     {
-      "extraction_millis": 57,
+      "extraction_millis": 114,
       "file": "scanned-lease.pdf",
       "parser_error": "NATIVE_ASSETS_MISSING",
       "readiness": "failed",
@@ -68,7 +68,7 @@
       "status": "extraction_failed"
     },
     {
-      "extraction_millis": 59,
+      "extraction_millis": 89,
       "file": "mixed-signature.pdf",
       "parser_error": "NATIVE_ASSETS_MISSING",
       "readiness": "failed",
@@ -80,7 +80,7 @@
     {
       "description": "A non-disclosure agreement effective March 3, 2025, between Fable Harbor Labs LLC and Copper Wren Design Inc. regarding Project Marigold.",
       "digest_characters": 282,
-      "extraction_millis": 14,
+      "extraction_millis": 45,
       "file": "nda.docx",
       "filename": "2025-03-03 Non-Disclosure Agreement between Fable Harbor Labs LLC and Copper Wren Design Inc.docx",
       "pages": 1,
@@ -125,8 +125,8 @@
       "telemetry": {
         "compressionRatio": 1.029197096824646,
         "digestCharacters": 282,
-        "distillMicros": 124,
-        "inferenceMillis": 10593,
+        "distillMicros": 76,
+        "inferenceMillis": 14479,
         "sourceCharacters": 274,
         "visionUsed": false
       }
@@ -134,7 +134,7 @@
     {
       "description": "An invoice dated April 30, 2025, from Nimbus Orchard Supply Co. to Atlas Threadworks LLC for a total of $1,248.",
       "digest_characters": 276,
-      "extraction_millis": 16,
+      "extraction_millis": 33,
       "file": "multi-date-invoice.pdf",
       "filename": "2025-04-30 Invoice from Nimbus Orchard Supply Co.pdf",
       "pages": 1,
@@ -181,8 +181,8 @@
       "telemetry": {
         "compressionRatio": 1.8904109001159668,
         "digestCharacters": 276,
-        "distillMicros": 62,
-        "inferenceMillis": 11259,
+        "distillMicros": 60,
+        "inferenceMillis": 14953,
         "sourceCharacters": 146,
         "visionUsed": false
       }
@@ -190,7 +190,7 @@
     {
       "description": "A review of inventory, safety, and the next quarterly plan held on May 7, 2025.",
       "digest_characters": 152,
-      "extraction_millis": 10,
+      "extraction_millis": 14,
       "file": "meeting-minutes.md",
       "filename": "2025-05-07 Document.md",
       "pages": 1,
@@ -234,14 +234,14 @@
       "telemetry": {
         "compressionRatio": 1.0555555820465088,
         "digestCharacters": 152,
-        "distillMicros": 101,
-        "inferenceMillis": 8398,
+        "distillMicros": 66,
+        "inferenceMillis": 11068,
         "sourceCharacters": 144,
         "visionUsed": false
       }
     },
     {
-      "extraction_millis": 13,
+      "extraction_millis": 15,
       "file": "rotated-low-resolution-scan.png",
       "parser_error": "NATIVE_ASSETS_MISSING",
       "readiness": "failed",
@@ -251,7 +251,7 @@
       "status": "extraction_failed"
     },
     {
-      "extraction_millis": 10,
+      "extraction_millis": 12,
       "file": "encrypted.pdf",
       "parser_error": "PARSE_FAILED",
       "readiness": "failed",
@@ -261,7 +261,7 @@
       "status": "expected_error"
     },
     {
-      "extraction_millis": 10,
+      "extraction_millis": 11,
       "file": "malformed.pdf",
       "parser_error": "PARSE_FAILED",
       "readiness": "failed",
@@ -273,7 +273,7 @@
     {
       "description": "A fictional observation journal dated July 1, 2025, containing no substantive content.",
       "digest_characters": 103,
-      "extraction_millis": 21,
+      "extraction_millis": 18,
       "file": "long-document-100-pages.pdf",
       "filename": "2025-07-01 Document.pdf",
       "pages": 100,
@@ -319,14 +319,14 @@
       "telemetry": {
         "compressionRatio": 0.010738114826381207,
         "digestCharacters": 103,
-        "distillMicros": 411,
-        "inferenceMillis": 8727,
+        "distillMicros": 284,
+        "inferenceMillis": 11542,
         "sourceCharacters": 9592,
         "visionUsed": false
       }
     },
     {
-      "extraction_millis": 16,
+      "extraction_millis": 34,
       "file": "document-image.png",
       "parser_error": "NATIVE_ASSETS_MISSING",
       "readiness": "failed",
@@ -336,7 +336,7 @@
       "status": "extraction_failed"
     },
     {
-      "extraction_millis": 12,
+      "extraction_millis": 10,
       "file": "document-image.jpg",
       "parser_error": "NATIVE_ASSETS_MISSING",
       "readiness": "failed",
@@ -346,7 +346,7 @@
       "status": "extraction_failed"
     },
     {
-      "extraction_millis": 13,
+      "extraction_millis": 10,
       "file": "document-image.tiff",
       "parser_error": "NATIVE_ASSETS_MISSING",
       "readiness": "failed",
@@ -358,7 +358,7 @@
     {
       "description": "A Statement of Work for the implementation of a client management platform, data migration, and training, effective April 1, 2026, through March 31, 2027.",
       "digest_characters": 12771,
-      "extraction_millis": 30,
+      "extraction_millis": 27,
       "file": "statement-of-work.pdf",
       "filename": "2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf",
       "pages": 14,
@@ -405,8 +405,8 @@
       "telemetry": {
         "compressionRatio": 0.4360935688018799,
         "digestCharacters": 12771,
-        "distillMicros": 8632,
-        "inferenceMillis": 32879,
+        "distillMicros": 9537,
+        "inferenceMillis": 43388,
         "sourceCharacters": 29285,
         "visionUsed": false
       }
@@ -414,7 +414,7 @@
     {
       "description": "A notice of termination of an employment agreement between John Smith and Northstar Lantern Works LLC, effective January 31, 2027.",
       "digest_characters": 1833,
-      "extraction_millis": 14,
+      "extraction_millis": 30,
       "file": "termination-notice.pdf",
       "filename": "2026-12-29 Notice of Termination to John Smith.pdf",
       "pages": 1,
@@ -458,8 +458,8 @@
       "telemetry": {
         "compressionRatio": 1.3771600723266602,
         "digestCharacters": 1833,
-        "distillMicros": 378,
-        "inferenceMillis": 12331,
+        "distillMicros": 354,
+        "inferenceMillis": 16621,
         "sourceCharacters": 1331,
         "visionUsed": false
       }
@@ -467,7 +467,7 @@
     {
       "description": "This amendment modifies the Consulting Agreement to change fees and extend the term, signed by Vistage Worldwide, Inc. and Jane Ellery.",
       "digest_characters": 3963,
-      "extraction_millis": 15,
+      "extraction_millis": 35,
       "file": "consulting-amendment.pdf",
       "filename": "2025-09-14 First Amendment to Consulting Agreement between Vistage Worldwide, Inc and Jane Ellery.pdf",
       "pages": 2,
@@ -512,8 +512,8 @@
       "telemetry": {
         "compressionRatio": 1.2454431056976318,
         "digestCharacters": 3963,
-        "distillMicros": 998,
-        "inferenceMillis": 17962,
+        "distillMicros": 1123,
+        "inferenceMillis": 24462,
         "sourceCharacters": 3182,
         "visionUsed": false
       }
@@ -521,7 +521,7 @@
     {
       "description": "An invoice for annual platform subscription and services totaling $56,700 due on February 4, 2026.",
       "digest_characters": 845,
-      "extraction_millis": 12,
+      "extraction_millis": 32,
       "file": "vendor-invoice.pdf",
       "filename": "2026-01-05 Invoice between Vistage Worldwide, Inc and Acme Corporation.pdf",
       "pages": 1,
@@ -569,8 +569,8 @@
       "telemetry": {
         "compressionRatio": 1.318252682685852,
         "digestCharacters": 845,
-        "distillMicros": 195,
-        "inferenceMillis": 14879,
+        "distillMicros": 225,
+        "inferenceMillis": 19996,
         "sourceCharacters": 641,
         "visionUsed": false
       }
@@ -578,7 +578,7 @@
     {
       "description": "Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc. settle a dispute over invoices under a logistics services agreement for $312,500.",
       "digest_characters": 12282,
-      "extraction_millis": 20,
+      "extraction_millis": 41,
       "file": "settlement-agreement.pdf",
       "filename": "2026-07-22 Settlement Agreement between Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc.pdf",
       "pages": 7,
@@ -626,8 +626,8 @@
       "telemetry": {
         "compressionRatio": 0.8277953863143921,
         "digestCharacters": 12282,
-        "distillMicros": 4174,
-        "inferenceMillis": 31354,
+        "distillMicros": 4392,
+        "inferenceMillis": 41205,
         "sourceCharacters": 14837,
         "visionUsed": false
       }
@@ -635,7 +635,7 @@
     {
       "description": "Discussion regarding the termination of a project with Rowan and Priya.",
       "digest_characters": 301,
-      "extraction_millis": 14,
+      "extraction_millis": 34,
       "file": "ambiguous-note.pdf",
       "filename": "Document between Rowan and Priya.pdf",
       "pages": 1,
@@ -680,8 +680,8 @@
       "telemetry": {
         "compressionRatio": 1.0134680271148682,
         "digestCharacters": 301,
-        "distillMicros": 128,
-        "inferenceMillis": 14514,
+        "distillMicros": 84,
+        "inferenceMillis": 18624,
         "sourceCharacters": 297,
         "visionUsed": false
       }
@@ -689,7 +689,7 @@
     {
       "description": "An Order Form establishing a subscription agreement between Tessellate Analytics Ltd. and Vistage Worldwide, Inc. for an annual fee of $96,000, effective February 1, 2026.",
       "digest_characters": 721,
-      "extraction_millis": 14,
+      "extraction_millis": 34,
       "file": "order-form.docx",
       "filename": "2026-02-01 Order Form between Tessellate Analytics Ltd and Vistage Worldwide, Inc.docx",
       "pages": 1,
@@ -737,8 +737,8 @@
       "telemetry": {
         "compressionRatio": 1.688524603843689,
         "digestCharacters": 721,
-        "distillMicros": 156,
-        "inferenceMillis": 12351,
+        "distillMicros": 170,
+        "inferenceMillis": 16432,
         "sourceCharacters": 427,
         "visionUsed": false
       }
@@ -784,10 +784,10 @@
     },
     "inference_millis": {
       "count": 12,
-      "max": 32879,
-      "mean": 15597,
-      "median": 12351,
-      "min": 8398
+      "max": 43388,
+      "mean": 20713,
+      "median": 16621,
+      "min": 11068
     },
     "parties_correct": {
       "correct": 9,
@@ -812,10 +812,10 @@
     "review_rate": 0.25,
     "total_millis": {
       "count": 12,
-      "max": 32909,
-      "mean": 15636,
-      "median": 12365,
-      "min": 8408
+      "max": 43415,
+      "mean": 20772,
+      "median": 16651,
+      "min": 11082
     },
     "type_correct": {
       "correct": 8,
@@ -828,8 +828,8 @@
       "total": 11
     }
   },
-  "peak_server_rss_bytes": 2588135424,
-  "wall_clock_seconds": 189.0,
+  "peak_server_rss_bytes": 2585849856,
+  "wall_clock_seconds": 251.1,
   "status": "completed",
   "provenance": "local developer run; release evidence is regenerated by the QA and release workflows and bound to their commit and run id",
   "model_file": "Qwen3.5-2B-Q4_K_M.gguf",

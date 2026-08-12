@@ -327,13 +327,17 @@ fn score(fixture: &Value, actual: ScoreInput<'_>) -> Value {
         );
     }
     if let Some(gold_type) = fixture.get("document_type").and_then(Value::as_str) {
+        // A document can have more than one right name. The minutes fixture is
+        // titled "Quarterly Operations Review" and never uses the word
+        // "minutes", so demanding "Meeting Minutes" would contradict the rule
+        // that a document type has to be grounded in the document's own words.
+        let acceptable = strings(fixture, "acceptable_types");
         scores.insert(
             "type_correct".into(),
-            Value::Bool(
-                actual
-                    .document_type
-                    .is_some_and(|value| type_matches(gold_type, value)),
-            ),
+            Value::Bool(actual.document_type.is_some_and(|value| {
+                type_matches(gold_type, value)
+                    || acceptable.iter().any(|other| type_matches(other, value))
+            })),
         );
         scores.insert(
             "type_present".into(),
