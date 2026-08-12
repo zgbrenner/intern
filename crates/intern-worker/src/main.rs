@@ -20,13 +20,38 @@ fn runtime_directory() -> Result<PathBuf, ExtractionError> {
 }
 
 fn pdf_backend() -> Result<PdfiumBackend, ExtractionError> {
-    let runtime = runtime_directory()?;
-    PdfiumBackend::new(&runtime)
+    PdfiumBackend::new(runtime_directory()?)
 }
 
 fn ocr_backend() -> Result<TesseractOcr, ExtractionError> {
     let runtime = runtime_directory()?;
     TesseractOcr::new(runtime.join("tesseract.exe"), runtime.join("tessdata"))
+}
+
+/// Builds the OCR engine the first time a page actually needs it.
+///
+/// Around ninety-nine per cent of documents carry usable text, and those
+/// documents must not fail, wait, or load anything because an OCR engine
+/// happens to be unavailable.
+struct LazyOcr {
+    engine: std::sync::OnceLock<Result<TesseractOcr, ExtractionError>>,
+}
+
+static LAZY_OCR: LazyOcr = LazyOcr {
+    engine: std::sync::OnceLock::new(),
+};
+
+impl OcrBackend for LazyOcr {
+    fn recognize(
+        &self,
+        page: &RenderedPage,
+        cancel: &CancellationToken,
+    ) -> Result<intern_worker::extract::OcrResult, ExtractionError> {
+        match self.engine.get_or_init(ocr_backend) {
+            Ok(engine) => engine.recognize(page, cancel),
+            Err(error) => Err(error.clone()),
+        }
+    }
 }
 
 fn extract_path(
@@ -44,17 +69,12 @@ fn extract_path(
     match extension.as_str() {
         "docx" | "docm" => extract_anydoc(path, &limits, &cancel),
         "txt" | "md" | "markdown" => extract_text(path, &limits, &cancel),
-        "pdf" => {
-            let pdf = pdf_backend()?;
-            let ocr = ocr_backend()?;
-            extract_pdf(path, &pdf, &ocr, &limits, &cancel)
-        }
+        "pdf" => extract_pdf(path, &pdf_backend()?, &LAZY_OCR, &limits, &cancel),
         "png" | "jpg" | "jpeg" | "tif" | "tiff" => {
             cancel.check()?;
             let image = load_oriented_image(path, &limits)?;
-            let ocr = ocr_backend()?;
             let rendered = RenderedPage::new(0, image);
-            let result = ocr.recognize(&rendered, &cancel)?;
+            let result = LAZY_OCR.recognize(&rendered, &cancel)?;
             let low_confidence = result.mean_confidence < 75.0;
             let optional_image = Some(normalize_vision_image(
                 0,

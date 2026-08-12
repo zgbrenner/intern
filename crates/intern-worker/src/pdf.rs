@@ -1,6 +1,4 @@
 use std::path::Path;
-#[cfg(feature = "native-pdfium")]
-use std::path::PathBuf;
 
 use crate::extract::{
     CancellationToken, ExtractionError, PdfBackend, PdfPageInspection, RenderedPage,
@@ -11,9 +9,15 @@ use crate::limits::MAX_PAGE_COUNT;
 #[cfg(feature = "native-pdfium")]
 use pdfium_render::prelude::*;
 
+/// PDFium initialises itself once per process. Binding it again - which is what
+/// building a backend per document used to do - fails on the second attempt and
+/// can abort the process outright, so the binding is created exactly once and
+/// every backend shares it.
+#[cfg(feature = "native-pdfium")]
+static PDFIUM: std::sync::OnceLock<Result<Pdfium, String>> = std::sync::OnceLock::new();
+
 #[cfg(feature = "native-pdfium")]
 pub struct PdfiumBackend {
-    library_path: PathBuf,
     render_dpi: f32,
 }
 
@@ -27,18 +31,24 @@ impl PdfiumBackend {
                 library_path.display()
             )));
         }
-        Pdfium::bind_to_library(&library_path)
-            .map_err(|error| ExtractionError::native_assets_missing(error.to_string()))?;
-        Ok(Self {
-            library_path,
-            render_dpi: 300.0,
-        })
+        match PDFIUM.get_or_init(|| {
+            Pdfium::bind_to_library(&library_path)
+                .map(Pdfium::new)
+                .map_err(|error| error.to_string())
+        }) {
+            Ok(_) => Ok(Self { render_dpi: 300.0 }),
+            Err(message) => Err(ExtractionError::native_assets_missing(message.clone())),
+        }
     }
 
-    fn pdfium(&self) -> Result<Pdfium, ExtractionError> {
-        let bindings = Pdfium::bind_to_library(&self.library_path)
-            .map_err(|error| ExtractionError::native_assets_missing(error.to_string()))?;
-        Ok(Pdfium::new(bindings))
+    fn pdfium(&self) -> Result<&'static Pdfium, ExtractionError> {
+        match PDFIUM.get() {
+            Some(Ok(pdfium)) => Ok(pdfium),
+            Some(Err(message)) => Err(ExtractionError::native_assets_missing(message.clone())),
+            None => Err(ExtractionError::native_assets_missing(
+                "PDFium was not initialised",
+            )),
+        }
     }
 
     fn page_dimensions(&self, width_points: f32, height_points: f32) -> (u32, u32) {
