@@ -117,10 +117,13 @@ jobs:
         shell: pwsh
         run: |
           cargo build --locked -p intern-worker --release --features windows-native
-          cargo build --locked -p intern-app --release --bin intern-model-evaluator
-          cargo build --locked -p intern-app --release --bin intern-model-evidence-validator
+          if ($LASTEXITCODE -ne 0) { throw "Native parser worker build failed" }
           New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
           Copy-Item target\release\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
+          cargo build --locked -p intern-app --release --bin intern-model-evaluator
+          if ($LASTEXITCODE -ne 0) { throw "Model evaluator build failed" }
+          cargo build --locked -p intern-app --release --bin intern-model-evidence-validator
+          if ($LASTEXITCODE -ne 0) { throw "Model evidence validator build failed" }
       - name: Fetch and verify pinned Windows assets
         shell: pwsh
         run: |
