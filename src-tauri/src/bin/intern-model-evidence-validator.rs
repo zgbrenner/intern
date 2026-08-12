@@ -5,11 +5,9 @@ use intern_app::{
     pipeline::WorkerBoundary,
     worker::SupervisedWorker,
 };
-use intern_core::{
-    ModelProposal, ProposalStatus, ValidatedProposal, build_document_packet, validate_proposal,
-};
+use intern_core::{ModelProposal, ProposalStatus, build_document_packet, validate_proposal};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{Number, Value, json};
 use sha2::{Digest, Sha256};
 
 fn main() {
@@ -116,8 +114,10 @@ fn verify_model_result(
         ProposalStatus::Ready => "ready",
         ProposalStatus::NeedsReview => "needs_review",
     };
-    let validated = serde_json::to_value(&outcome.proposal)
-        .map_err(|error| format!("cannot serialize replayed production proposal: {error}"))?;
+    let validated = canonical_json(
+        serde_json::to_value(&outcome.proposal)
+            .map_err(|error| format!("cannot serialize replayed production proposal: {error}"))?,
+    );
     if result["validated_proposal"] != validated || result["readiness"] != readiness {
         return Err(format!(
             "{variant} production validation outcome does not replay for {fixture_name}"
@@ -130,7 +130,7 @@ fn verify_model_result(
         &serde_json::to_vec(&ValidationBinding {
             input_packet_sha256: input_digest,
             proposal_sha256,
-            validated_proposal: &outcome.proposal,
+            validated_proposal: &validated,
             readiness,
         })
         .map_err(|error| format!("cannot serialize replayed validation evidence: {error}"))?,
@@ -147,8 +147,40 @@ fn verify_model_result(
 struct ValidationBinding<'a> {
     input_packet_sha256: &'a str,
     proposal_sha256: &'a str,
-    validated_proposal: &'a ValidatedProposal,
+    validated_proposal: &'a Value,
     readiness: &'a str,
+}
+
+// Mirrors the evaluator's canonicalization: evidence hashes are computed over
+// the report's own JSON representation (sorted object keys, integral floats
+// collapsed to integers) so the JavaScript release validator can recompute
+// them with JSON.stringify.
+fn canonical_json(value: Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(items.into_iter().map(canonical_json).collect()),
+        Value::Object(entries) => Value::Object(
+            entries
+                .into_iter()
+                .map(|(key, entry)| (key, canonical_json(entry)))
+                .collect(),
+        ),
+        Value::Number(number) => {
+            let integral = number
+                .as_f64()
+                .filter(|float| {
+                    number.as_i64().is_none()
+                        && number.as_u64().is_none()
+                        && float.fract() == 0.0
+                        && float.abs() <= 9_007_199_254_740_992.0
+                })
+                .map(|float| float as i64);
+            match integral {
+                Some(int) => Value::Number(Number::from(int)),
+                None => Value::Number(number),
+            }
+        }
+        other => other,
+    }
 }
 
 fn arguments() -> Result<HashMap<String, String>, String> {

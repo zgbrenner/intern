@@ -5,11 +5,9 @@ use intern_app::{
     pipeline::WorkerBoundary,
     worker::SupervisedWorker,
 };
-use intern_core::{
-    ModelProposal, ProposalStatus, ValidatedProposal, build_document_packet, validate_proposal,
-};
+use intern_core::{ModelProposal, ProposalStatus, build_document_packet, validate_proposal};
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Number, Value, json};
 use sha2::{Digest, Sha256};
 
 fn main() {
@@ -139,16 +137,22 @@ fn evaluate() -> Result<Value, String> {
         ProposalStatus::Ready => "ready",
         ProposalStatus::NeedsReview => "needs_review",
     };
-    let proposal_json = serde_json::to_string(&proposal)
-        .map_err(|error| format!("cannot serialize production proposal: {error}"))?;
-    let proposal_sha256 = digest(proposal_json.as_bytes());
+    let proposal_value = canonical_json(
+        serde_json::to_value(&proposal)
+            .map_err(|error| format!("cannot serialize production proposal: {error}"))?,
+    );
+    let proposal_sha256 = digest(proposal_value.to_string().as_bytes());
     let field_results = field_results(fixture, &outcome.proposal);
     let unsupported_facts = unsupported_facts(fixture, &proposal);
+    let validated_value = canonical_json(
+        serde_json::to_value(&outcome.proposal)
+            .map_err(|error| format!("cannot serialize validated production proposal: {error}"))?,
+    );
     let validation_sha256 = digest(
         &serde_json::to_vec(&ValidationBinding {
             input_packet_sha256: &input_packet_sha256,
             proposal_sha256: &proposal_sha256,
-            validated_proposal: &outcome.proposal,
+            validated_proposal: &validated_value,
             readiness,
         })
         .map_err(|error| format!("cannot serialize validation evidence: {error}"))?,
@@ -164,8 +168,8 @@ fn evaluate() -> Result<Value, String> {
         "input_packet_sha256": input_packet_sha256,
         "proposal_sha256": proposal_sha256,
         "validation_sha256": validation_sha256,
-        "proposal": proposal,
-        "validated_proposal": outcome.proposal,
+        "proposal": proposal_value,
+        "validated_proposal": validated_value,
         "field_results": field_results,
         "unsupported_facts": unsupported_facts,
         "timings_ms": {"extraction": extraction_ms, "inference": inference_ms, "total": elapsed_ms(started)},
@@ -229,8 +233,40 @@ fn field_results(fixture: &Value, proposal: &intern_core::ValidatedProposal) -> 
 struct ValidationBinding<'a> {
     input_packet_sha256: &'a str,
     proposal_sha256: &'a str,
-    validated_proposal: &'a ValidatedProposal,
+    validated_proposal: &'a Value,
     readiness: &'a str,
+}
+
+// Evidence hashes must reproduce from the report file alone: the release
+// validator recomputes them with JavaScript's JSON.stringify over the parsed
+// report. Hash and emit the same Value (sorted object keys), and collapse
+// integral floats to integers because JSON.stringify prints 1.0 as "1".
+fn canonical_json(value: Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(items.into_iter().map(canonical_json).collect()),
+        Value::Object(entries) => Value::Object(
+            entries
+                .into_iter()
+                .map(|(key, entry)| (key, canonical_json(entry)))
+                .collect(),
+        ),
+        Value::Number(number) => {
+            let integral = number
+                .as_f64()
+                .filter(|float| {
+                    number.as_i64().is_none()
+                        && number.as_u64().is_none()
+                        && float.fract() == 0.0
+                        && float.abs() <= 9_007_199_254_740_992.0
+                })
+                .map(|float| float as i64);
+            match integral {
+                Some(int) => Value::Number(Number::from(int)),
+                None => Value::Number(number),
+            }
+        }
+        other => other,
+    }
 }
 
 fn unsupported_facts(fixture: &Value, proposal: &ModelProposal) -> Value {
@@ -286,6 +322,19 @@ mod tests {
             &["Mira".into(), "Acme".into()]
         ));
         assert!(!same_strings(&json!(["Acme"]), &["Acme Corp".into()]));
+    }
+
+    #[test]
+    fn canonical_json_sorts_keys_and_collapses_integral_floats() {
+        let value = canonical_json(json!({
+            "b": 1.0_f64,
+            "a": 0.899_999_976_158_142_1_f64,
+            "nested": [{"z": 2.0_f64, "k": null}],
+        }));
+        assert_eq!(
+            value.to_string(),
+            r#"{"a":0.8999999761581421,"b":1,"nested":[{"k":null,"z":2}]}"#
+        );
     }
 
     #[test]
