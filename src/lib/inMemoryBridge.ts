@@ -2,15 +2,15 @@ import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, 
 import type { AppSettings, QueueItem, SetupState } from '../types';
 
 const seedItems: QueueItem[] = [
-  { id: 'employment', originalFilename: 'Employment Agreement - John Smith.pdf', status: 'ready', proposedFilename: 'Employment Agreement - John Smith - 2024-04-12.pdf', confidence: 0.98 },
-  { id: 'lease', originalFilename: 'Lease Agreement - 123 Main St.pdf', status: 'review', proposedFilename: 'Lease Agreement - 123 Main St - 2023-09-15.pdf', confidence: 0.72, description: 'Commercial lease agreement between landlord and tenant for 123 Main St.', evidence: { date: 'Sep 15, 2023', type: 'Lease Agreement', parties: 'ABC Properties LLC; TenantCo Inc.' }, reason: 'Lower confidence due to unclear document type keywords and multiple possible dates.' },
-  { id: 'nda', originalFilename: 'NDA - Acme Corp.docx', status: 'ready', proposedFilename: 'NDA - Acme Corp - 2024-03-01.docx', confidence: 0.95 },
-  { id: 'financials', originalFilename: 'Q1 Financials.xlsx', status: 'processing', proposedFilename: 'Q1 Financials - 2024.xlsx', progress: 60 },
-  { id: 'service', originalFilename: 'Service Agreement - BlueSky LLC.pdf', status: 'ready', proposedFilename: 'Service Agreement - BlueSky LLC - 2024-02-28.pdf', confidence: 0.96 },
+  { id: 'employment', originalFilename: 'Employment Agreement - John Smith.pdf', status: 'ready', proposedFilename: '2024-04-12 Employment Agreement with John Smith.pdf', confidence: 0.98 },
+  { id: 'lease', originalFilename: 'Lease Agreement - 123 Main St.pdf', status: 'review', proposedFilename: '2023-09-15 Lease Agreement between ABC Properties LLC and TenantCo Inc.pdf', confidence: 0.72, description: 'Commercial lease agreement between landlord and tenant for 123 Main St.', evidence: { date: 'Sep 15, 2023', type: 'Lease Agreement', parties: 'ABC Properties LLC; TenantCo Inc.' }, reason: 'Lower confidence due to unclear document type keywords and multiple possible dates.' },
+  { id: 'nda', originalFilename: 'NDA - Acme Corp.docx', status: 'ready', proposedFilename: '2024-03-01 Non-Disclosure Agreement with Acme Corp.docx', confidence: 0.95 },
+  { id: 'financials', originalFilename: 'Q1 Financials.xlsx', status: 'processing', proposedFilename: '2024-03-31 Q1 Financial Statements.xlsx', progress: 60 },
+  { id: 'service', originalFilename: 'Service Agreement - BlueSky LLC.pdf', status: 'ready', proposedFilename: '2024-02-28 Service Agreement with BlueSky LLC.pdf', confidence: 0.96 },
   { id: 'minutes', originalFilename: 'Board Meeting Minutes - May 7, 2024.docx', status: 'waiting' },
   { id: 'invoice', originalFilename: 'Invoice INV-1001.pdf', status: 'waiting' },
   { id: 'notes', originalFilename: 'Notes from Call - 2024-05-02.txt', status: 'waiting' },
-  { id: 'completed', originalFilename: 'Completed lease.pdf', status: 'completed', proposedFilename: '2024-01-22 - Lease Agreement.pdf', confidence: 0.93, undoable: true },
+  { id: 'completed', originalFilename: 'Completed lease.pdf', status: 'completed', proposedFilename: '2024-01-22 Lease Agreement.pdf', confidence: 0.93, undoable: true },
 ];
 
 export interface InMemoryBridgeOptions {
@@ -24,14 +24,14 @@ function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
   if (fixtureBatch) {
     if (file.displayName === 'duplicate-invoice-a.pdf') return {
       id: `file-${crypto.randomUUID()}`, originalFilename: file.displayName, status: 'review',
-      proposedFilename: '2025-04-30 - Invoice - INV-2048.pdf', confidence: 0.82,
+      proposedFilename: '2025-04-30 Invoice from Nimbus Orchard Supply Co.pdf', confidence: 0.82,
       description: 'Invoice INV-2048 dated April 30, 2025 for Atlas Threadworks LLC.',
       evidence: { date: 'Invoice date: April 30, 2025', type: 'INVOICE INV-2048', parties: 'Nimbus Orchard Supply Co.; Atlas Threadworks LLC' },
       reason: 'Needs review because the invoice and due dates are both present.',
     };
     if (file.displayName === 'duplicate-invoice-b.pdf') return {
       id: `file-${crypto.randomUUID()}`, originalFilename: file.displayName, status: 'review',
-      proposedFilename: '2025-04-30 - Invoice - INV-2048.pdf', confidence: 0.82,
+      proposedFilename: '2025-04-30 Invoice from Nimbus Orchard Supply Co.pdf', confidence: 0.82,
       description: 'Invoice INV-2048 dated April 30, 2025 for Atlas Threadworks LLC.',
       evidence: { date: 'Invoice date: April 30, 2025', type: 'INVOICE INV-2048', parties: 'Nimbus Orchard Supply Co.; Atlas Threadworks LLC' },
       reason: 'Identical content from a different path is retained as a separate review result.',

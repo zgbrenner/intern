@@ -22,7 +22,7 @@ describe('queue interactions', () => {
     ]);
 
     const items = await bridge.listItems();
-    expect(items.find((item) => item.originalFilename === 'duplicate-invoice-a.pdf')).toMatchObject({ status: 'review', proposedFilename: '2025-04-30 - Invoice - INV-2048.pdf' });
+    expect(items.find((item) => item.originalFilename === 'duplicate-invoice-a.pdf')).toMatchObject({ status: 'review', proposedFilename: '2025-04-30 Invoice from Nimbus Orchard Supply Co.pdf' });
     expect(items.find((item) => item.originalFilename === 'duplicate-invoice-b.pdf')).toMatchObject({ status: 'review', reason: expect.stringMatching(/different path.*separate/i) });
     expect(items.find((item) => item.originalFilename === 'duplicate-invoice-b.pdf')?.id).not.toBe(items.find((item) => item.originalFilename === 'duplicate-invoice-a.pdf')?.id);
     expect(items.find((item) => item.originalFilename === 'unsupported.csv')).toMatchObject({ status: 'failed', reason: expect.stringMatching(/unsupported.*skipped/i) });
@@ -85,7 +85,7 @@ describe('queue interactions', () => {
 
     await waitFor(() => expect(approve).toHaveBeenCalledWith(
       'employment',
-      'Employment Agreement - John Smith - 2024-04-12.pdf',
+      '2024-04-12 Employment Agreement with John Smith.pdf',
       '',
     ));
   });
@@ -155,7 +155,7 @@ describe('queue interactions', () => {
     await selectRow(screen.getByRole('row', { name: /NDA - Acme Corp/i }));
     finish?.();
 
-    await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveValue('NDA - Acme Corp - 2024-03-01.docx'));
+    await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveValue('2024-03-01 Non-Disclosure Agreement with Acme Corp.docx'));
     expect(screen.getByRole('complementary', { name: 'Review item' })).toBeVisible();
   });
 
@@ -173,7 +173,7 @@ describe('queue interactions', () => {
     await selectRow(screen.getByRole('row', { name: /Lease Agreement - 123 Main St/i }));
     finish?.();
 
-    await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveValue('Lease Agreement - 123 Main St - 2023-09-15.pdf'));
+    await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveValue('2023-09-15 Lease Agreement between ABC Properties LLC and TenantCo Inc.pdf'));
     expect(screen.getByRole('complementary', { name: 'Review item' })).toBeVisible();
   });
 
@@ -272,7 +272,7 @@ describe('queue interactions', () => {
     await selectRow(await screen.findByRole('row', { name: /Lease Agreement - 123 Main St.pdf/i }));
 
     expect(screen.getByRole('complementary', { name: 'Review item' })).toBeVisible();
-    expect(screen.getByLabelText('Filename')).toHaveValue('Lease Agreement - 123 Main St - 2023-09-15.pdf');
+    expect(screen.getByLabelText('Filename')).toHaveValue('2023-09-15 Lease Agreement between ABC Properties LLC and TenantCo Inc.pdf');
   });
 
   it('filters the table from Queue to Completed navigation', async () => {
