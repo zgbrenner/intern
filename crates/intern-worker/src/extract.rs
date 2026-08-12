@@ -356,10 +356,10 @@ pub fn extract_pdf(
         let result = ocr.recognize(&rendered, cancel)?;
         let vision_escalated = vision_candidate.is_none()
             && (result.mean_confidence < 75.0 || page_needs_vision(&inspection));
-        if result.mean_confidence < 75.0 {
-            if !warnings.contains(&ExtractionWarning::LowOcrConfidence) {
-                warnings.push(ExtractionWarning::LowOcrConfidence);
-            }
+        if result.mean_confidence < 75.0
+            && !warnings.contains(&ExtractionWarning::LowOcrConfidence)
+        {
+            warnings.push(ExtractionWarning::LowOcrConfidence);
         }
         if vision_escalated {
             vision_candidate = Some(normalize_vision_image(
@@ -600,11 +600,10 @@ where
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod snapshot_tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn snapshot_stays_bound_to_open_file_when_source_path_is_replaced() {
         let directory = tempfile::tempdir().unwrap();

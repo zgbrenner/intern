@@ -134,6 +134,9 @@ fn read_protocol_line<B: BufRead>(reader: &mut B) -> io::Result<Option<Result<St
     }))
 }
 
+// Keeping the concrete wire error here lets frame parsing and request decoding
+// share one error type without allocating every protocol failure.
+#[allow(clippy::result_large_err)]
 pub fn decode_request(line: &str) -> Result<Request, Response> {
     let request: Request = serde_json::from_str(line).map_err(|error| {
         Response::new(
