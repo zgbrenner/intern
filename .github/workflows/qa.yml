@@ -136,8 +136,10 @@ jobs:
         run: |
           $Installer = Get-ChildItem target\release\bundle\nsis\*.exe | Select-Object -First 1
           if (-not $Installer) { throw "NSIS installer was not produced" }
+          # smoke-installer.ps1 throws on any failure; it drives everything via
+          # Start-Process/.NET, so $LASTEXITCODE stays $null and must not be
+          # used as a success check here.
           & ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName -EvidencePath docs\qa\installed-core-smoke.json 2>&1 | Tee-Object -FilePath docs\qa\logs\installer-smoke.log
-          if ($LASTEXITCODE -ne 0) { throw "Installer smoke failed" }
       - name: Run Q4 and Q8 production prompt evaluation over every signed fixture
         shell: pwsh
         run: |
