@@ -143,7 +143,7 @@ fn selective_ocr_threshold_boundaries_are_exact() {
 fn clean_mixed_page_preserves_native_text() {
     let (document, renders) = route(
         vec![page(
-            "Native text remains authoritative on a mixed page.",
+            "Native text remains authoritative on a mixed page because the complete business document text is already present and does not require visual interpretation.",
             0.8,
         )],
         vec![OcrResult::new("unused", 0.0)],
@@ -194,11 +194,15 @@ fn large_non_text_page_under_one_hundred_characters_routes_first_page_to_vision(
 
 #[test]
 fn exactly_seventy_five_confidence_does_not_escalate_but_below_does() {
-    let (exactly, _) = route(vec![page("", 1.0)], vec![OcrResult::new("readable", 75.0)]);
+    let replacement_text = "abcdefghijklmnopqrst��";
+    let (exactly, _) = route(
+        vec![page(replacement_text, 0.1)],
+        vec![OcrResult::new("readable", 75.0)],
+    );
     assert!(exactly.optional_image.is_none());
 
     let (below, _) = route(
-        vec![page("", 1.0)],
+        vec![page(replacement_text, 0.1)],
         vec![OcrResult::new("uncertain", 74.99)],
     );
     assert_eq!(below.optional_image.unwrap().page_number, 1);
