@@ -243,7 +243,7 @@ try {
             }
     )
     if ($BundledFiles.Count -lt 7) { throw "Runtime asset staging produced an unexpectedly small signed file set" }
-    $DuplicateInstallPaths = @($BundledFiles | Group-Object install_path | Where-Object Count -gt 1)
+    $DuplicateInstallPaths = @($BundledFiles | Group-Object { [string]$_['install_path'] } | Where-Object Count -gt 1)
     if ($DuplicateInstallPaths.Count -gt 0) { throw "Runtime assets collide in the package: $($DuplicateInstallPaths.Name -join ', ')" }
     $LicenseFiles = @(
         Get-ChildItem -LiteralPath $LicensesDirectory -Recurse -File | Sort-Object FullName | ForEach-Object {
