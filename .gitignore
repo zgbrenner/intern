@@ -1,0 +1,15 @@
+.worktrees/
+.superpowers/
+node_modules/
+dist/
+*.tsbuildinfo
+target/
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/
+coverage/
+playwright-report/
+test-results/
+fixtures/generated/
+*.log
+.DS_Store

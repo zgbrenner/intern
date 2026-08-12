@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Intern document icon">
+  <rect width="1024" height="1024" rx="224" fill="#0b5cff"/>
+  <path d="M286 170h302l150 150v534H286z" fill="#fff"/>
+  <path d="M588 170v150h150z" fill="#bfd0ff"/>
+  <path d="M396 438h232v62H396zm0 124h232v62H396zm0 124h150v62H396z" fill="#0b5cff"/>
+  <circle cx="748" cy="766" r="92" fill="#14804a" stroke="#fff" stroke-width="34"/>
+</svg>

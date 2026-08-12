@@ -1,0 +1,29 @@
+[package]
+name = "intern-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "intern-worker"
+path = "src/main.rs"
+
+[features]
+default = []
+native-pdfium = ["dep:pdfium-render"]
+native-tesseract = []
+windows-native = ["native-pdfium", "native-tesseract"]
+
+[dependencies]
+anydoc = "=0.1.8"
+base64 = "=0.22.1"
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+pdfium-render = { version = "=0.9.3", optional = true, default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+thiserror = "=2.0.17"
+zip = { version = "=4.6.1", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "=3.23.0"

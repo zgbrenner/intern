@@ -1,0 +1,633 @@
+{
+  "schema_version": 2,
+  "status": "pending",
+  "selected_model": null,
+  "generated_at": null,
+  "commit": null,
+  "release_inputs_sha256": null,
+  "runner": null,
+  "models": {
+    "q4": {
+      "model_id": "qwen2.5-vl-3b-instruct-q4-k-m",
+      "filename": "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+      "size": 1929901056,
+      "model_sha256": "d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12",
+      "projector_sha256": "b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e"
+    },
+    "q8": {
+      "model_id": "qwen2.5-vl-3b-instruct-q8-0",
+      "filename": "Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
+      "size": 3285474304,
+      "model_sha256": "fa8aeb3b6bf6152774e87d13e09892aa065f4e0c4abe90806cd8ab18ff72d9fe",
+      "projector_sha256": "b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e"
+    }
+  },
+  "runtime": {
+    "llama_cpp_build": "b10361",
+    "archive_sha256": "36da9e9c1c094bf7842fab69e6cc0921125a67fa2611ba8f329a00804350302a"
+  },
+  "prompt": {
+    "path": "src-tauri/src/model/prompt.rs",
+    "sha256": "29f2bcfb498a71792b164abab5a31083acfa2b970abfc0bc39e780c1f1a667c6"
+  },
+  "corpus": {
+    "manifest_path": "fixtures/manifest.json",
+    "manifest_sha256": "c9d32ed4f0d4b0a22e7150c550c45454cd981fc38aed0daf70aab5e5696b848a",
+    "expected_path": "fixtures/expected.json",
+    "expected_sha256": "912735049332a9c9068dd4620602d2fe631e1ef503c316952095504a4676a0ac"
+  },
+  "records": {
+    "employment-agreement.pdf": {
+      "fixture_sha256": "d83903ea30792b28d23295c0ca68d2309d1df43d00877c50d941da2c06fbf0a4",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "scanned-lease.pdf": {
+      "fixture_sha256": "00279cc6f51d27778190cd00f33bcef8f6595cf49172c5d3745c6d3717763821",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "mixed-signature.pdf": {
+      "fixture_sha256": "85938de97a273d5d50c01509678431c4138502feb9e527e6252b54b761d2693d",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "nda.docx": {
+      "fixture_sha256": "a531fd8df1f303d6d6faabbb35931d748f58b4a887e46515b50f6a40574a3569",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "multi-date-invoice.pdf": {
+      "fixture_sha256": "dc2c9ed2c8c27ca1d081bd54729af128f7a2cfe2b93f49f6646f9439a121f70c",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "meeting-minutes.md": {
+      "fixture_sha256": "1537b6cfae1f0cf9ac537f0f1254f8bf009ad38d1e655350633d12928286a72f",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "rotated-low-resolution-scan.png": {
+      "fixture_sha256": "990141b57acf47d96415695959c8c583be5810828c9486a12d981f22bcc5d0f7",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "encrypted.pdf": {
+      "fixture_sha256": "ab5b7def0666acb728dbd750823901d81b445a10e53a5af80d37325443b39b35",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "malformed.pdf": {
+      "fixture_sha256": "4c031cd4d7870d6f18d9db38d80aaf5ce8b9b364b0a973b3baf5c73fc8dc9dc3",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "long-document-100-pages.pdf": {
+      "fixture_sha256": "0a451f66f7d665617d939f3e9427577b6fac9de378e0f0041f14beff49ebc867",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "document-image.png": {
+      "fixture_sha256": "3581da8a5018524713b74353a7866b413fc177e8c36b1302ea67c2880e07b900",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "document-image.jpg": {
+      "fixture_sha256": "72fb556d97f4496ba416fc4659d5d2ec3134addb3626dcbcb1b029b51c3b1a59",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    },
+    "document-image.tiff": {
+      "fixture_sha256": "0d092e8da079b04807700b8881b5ae120b3a13294012b46d91f8c80b9b30d53b",
+      "q4": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      },
+      "q8": {
+        "status": "pending",
+        "model_invoked": null,
+        "response_valid": null,
+        "parser_error": null,
+        "model_error": null,
+        "readiness": null,
+        "input_packet_sha256": null,
+        "proposal_sha256": null,
+        "validation_sha256": null,
+        "proposal": null,
+        "validated_proposal": null,
+        "field_results": null,
+        "unsupported_facts": [],
+        "timings_ms": {
+          "extraction": null,
+          "inference": null,
+          "total": null
+        },
+        "peak_rss_bytes": null
+      }
+    }
+  },
+  "summary": null,
+  "acceptance": {
+    "status": "pending",
+    "reasons": [
+      "Q4_K_M and Q8_0 have not been run across the signed corpus with the production Windows runtime."
+    ]
+  }
+}

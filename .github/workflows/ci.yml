@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend checks (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require committed Rust dependency lock
+        run: test -f Cargo.lock || { echo "Cargo.lock must be committed; CI never resolves release dependencies implicitly" >&2; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json', 'src-tauri/resources/runtime-assets.json') }}
+      - run: npm ci
+      - run: npm run fixtures
+      - run: npm run check
+      - run: npx playwright install chromium
+      - run: npm run test:e2e
+
+  windows-release-gates:
+    name: Windows Rust, assets, E2E, and NSIS
+    runs-on: windows-latest
+    env:
+      CARGO_TERM_COLOR: always
+      INTERN_REQUIRE_GENERATED_FIXTURES: "1"
+      INTERN_PDFIUM_DIR: ${{ github.workspace }}\src-tauri\resources\native\pdfium
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require committed Rust dependency lock
+        shell: pwsh
+        run: if (-not (Test-Path -LiteralPath Cargo.lock -PathType Leaf)) { throw "Cargo.lock must be committed; CI never resolves release dependencies implicitly" }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - name: Install pinned Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
+          rustup default 1.88.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~\.cargo\registry
+            ~\.cargo\git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'src-tauri/resources/runtime-assets.json') }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\intern-assets-cache
+          key: runtime-assets-${{ runner.os }}-${{ hashFiles('src-tauri/resources/runtime-assets.json', 'scripts/fetch-windows-assets.ps1') }}
+      - run: npm ci
+      - run: npm run fixtures
+      - run: npm run check
+      - run: npx playwright install chromium
+      - run: npm run test:e2e
+      - name: Stage parser worker for desktop compile checks
+        shell: pwsh
+        run: |
+          cargo build --locked -p intern-worker
+          New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
+          Copy-Item target\debug\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
+          New-Item -ItemType File src-tauri\binaries\llama-server-x86_64-pc-windows-msvc.exe -Force | Out-Null
+          New-Item -ItemType File src-tauri\binaries\tesseract-x86_64-pc-windows-msvc.exe -Force | Out-Null
+          New-Item -ItemType Directory src-tauri\resources\licenses -Force | Out-Null
+          New-Item -ItemType Directory src-tauri\resources\tessdata -Force | Out-Null
+          New-Item -ItemType Directory src-tauri\resources\native\pdfium -Force | Out-Null
+          New-Item -ItemType Directory src-tauri\resources\native\sidecars -Force | Out-Null
+          New-Item -ItemType File src-tauri\resources\licenses\compile-placeholder.txt -Force | Out-Null
+          New-Item -ItemType File src-tauri\resources\tessdata\compile-placeholder.traineddata -Force | Out-Null
+          New-Item -ItemType File src-tauri\resources\native\pdfium\compile-placeholder.dll -Force | Out-Null
+          New-Item -ItemType File src-tauri\resources\native\sidecars\compile-placeholder.dll -Force | Out-Null
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace --all-targets
+      - name: Build parser worker sidecar
+        shell: pwsh
+        run: |
+          cargo build --locked -p intern-worker --release --features windows-native
+          New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
+          Copy-Item target\release\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
+      - name: Fetch and verify pinned Windows assets
+        shell: pwsh
+        run: |
+          Remove-Item src-tauri\resources\licenses\compile-placeholder.txt -Force
+          Remove-Item src-tauri\resources\tessdata\compile-placeholder.traineddata -Force
+          Remove-Item src-tauri\resources\native\pdfium\compile-placeholder.dll -Force
+          Remove-Item src-tauri\resources\native\sidecars\compile-placeholder.dll -Force
+          ./scripts/fetch-windows-assets.ps1 -CacheDirectory "${{ runner.temp }}\intern-assets-cache"
+      - run: npm run assets:verify -- --require-bundled
+      - name: Run generated-fixture parser integration with native assets
+        run: cargo test --locked -p intern-worker --test generated_fixtures --features windows-native
+      - name: Run package-shaped worker PDF/OCR integration
+        shell: pwsh
+        run: |
+          $Stage = Join-Path $env:RUNNER_TEMP "intern-runtime-stage"
+          ./scripts/stage-windows-runtime.ps1 -Destination $Stage
+          ./scripts/smoke-worker.ps1 -WorkerPath (Join-Path $Stage "intern-worker.exe") -RuntimeDirectory $Stage
+      - run: npm run tauri build -- --bundles nsis -- --locked
+      - name: Smoke test per-user installer
+        shell: pwsh
+        run: |
+          $Installer = Get-ChildItem target\release\bundle\nsis\*.exe | Select-Object -First 1
+          if (-not $Installer) { throw "NSIS installer was not produced" }
+          ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: intern-v0.1.0-alpha.1-windows
+          if-no-files-found: error
+          path: |
+            target/release/bundle/nsis/*.exe
+            src-tauri/resources/THIRD_PARTY_NOTICES.md
+            src-tauri/resources/runtime-assets.json

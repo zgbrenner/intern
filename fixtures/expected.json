@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "generated_at": "2000-01-01T00:00:00.000Z",
+  "notice": "All names, organizations, addresses, account numbers, and events are fictional.",
+  "fixtures": [
+    {
+      "file": "employment-agreement.pdf",
+      "kind": "text_pdf",
+      "document_date": "2025-02-14",
+      "document_type": "Employment Agreement",
+      "subject": "Mira Vale",
+      "parties": [
+        "Northstar Lantern Works LLC",
+        "Mira Vale"
+      ],
+      "expected_readiness": "ready",
+      "ambiguity": [],
+      "acceptable_description_facts": [
+        "employment",
+        "February 14, 2025",
+        "Northstar Lantern Works LLC",
+        "Mira Vale"
+      ],
+      "expected_routing": "native_text"
+    },
+    {
+      "file": "scanned-lease.pdf",
+      "kind": "image_only_pdf",
+      "document_date": "2024-09-01",
+      "document_type": "Lease Agreement",
+      "subject": "47 Juniper Loop",
+      "parties": [
+        "Cedar Finch Properties LLC",
+        "Orion Glass Studio Inc."
+      ],
+      "expected_readiness": "needs_review",
+      "ambiguity": [
+        "image_only",
+        "ocr_required"
+      ],
+      "acceptable_description_facts": [
+        "lease",
+        "September 1, 2024",
+        "47 Juniper Loop"
+      ],
+      "expected_routing": "ocr"
+    },
+    {
+      "file": "mixed-signature.pdf",
+      "kind": "mixed_pdf",
+      "document_date": "2025-01-08",
+      "document_type": "Services Agreement",
+      "subject": "Aurora Catalog Project",
+      "parties": [
+        "Lumen Kite Cooperative",
+        "Solstice Index LLC"
+      ],
+      "expected_readiness": "needs_review",
+      "ambiguity": [
+        "mixed_native_and_scanned_pages"
+      ],
+      "acceptable_description_facts": [
+        "services",
+        "January 8, 2025",
+        "Aurora Catalog Project"
+      ],
+      "expected_routing": "mixed_native_ocr"
+    },
+    {
+      "file": "nda.docx",
+      "kind": "docx",
+      "document_date": "2025-03-03",
+      "document_type": "Mutual Non-Disclosure Agreement",
+      "subject": "Project Marigold",
+      "parties": [
+        "Fable Harbor Labs LLC",
+        "Copper Wren Design Inc."
+      ],
+      "expected_readiness": "ready",
+      "ambiguity": [],
+      "acceptable_description_facts": [
+        "non-disclosure",
+        "March 3, 2025",
+        "Project Marigold"
+      ],
+      "expected_routing": "anydoc"
+    },
+    {
+      "file": "multi-date-invoice.pdf",
+      "kind": "text_pdf",
+      "document_date": "2025-04-30",
+      "document_type": "Invoice",
+      "subject": "INV-2048",
+      "parties": [
+        "Nimbus Orchard Supply Co.",
+        "Atlas Threadworks LLC"
+      ],
+      "expected_readiness": "needs_review",
+      "ambiguity": [
+        "invoice_and_due_dates"
+      ],
+      "acceptable_description_facts": [
+        "invoice",
+        "INV-2048",
+        "April 30, 2025",
+        "$1,248.00"
+      ],
+      "expected_routing": "native_text"
+    },
+    {
+      "file": "meeting-minutes.md",
+      "kind": "markdown",
+      "document_date": "2025-05-07",
+      "document_type": "Meeting Minutes",
+      "subject": "Quarterly Operations Review",
+      "parties": [
+        "Fictional Meridian Committee"
+      ],
+      "expected_readiness": "ready",
+      "ambiguity": [],
+      "acceptable_description_facts": [
+        "meeting minutes",
+        "May 7, 2025",
+        "Quarterly Operations Review"
+      ],
+      "expected_routing": "text"
+    },
+    {
+      "file": "rotated-low-resolution-scan.png",
+      "kind": "rotated_scan",
+      "document_date": "2025-06-12",
+      "document_type": "Delivery Receipt",
+      "subject": "Receipt DR-771",
+      "parties": [
+        "Pine Echo Couriers LLC",
+        "Violet Cartography Studio"
+      ],
+      "expected_readiness": "needs_review",
+      "ambiguity": [
+        "rotated",
+        "low_resolution"
+      ],
+      "acceptable_description_facts": [
+        "delivery receipt",
+        "DR-771",
+        "June 12, 2025"
+      ],
+      "expected_routing": "ocr"
+    },
+    {
+      "file": "encrypted.pdf",
+      "kind": "encrypted_pdf",
+      "expected_error": "PARSE_FAILED",
+      "expected_readiness": "failed",
+      "ambiguity": [
+        "password_required"
+      ],
+      "acceptable_description_facts": [],
+      "expected_routing": "error"
+    },
+    {
+      "file": "malformed.pdf",
+      "kind": "malformed_pdf",
+      "expected_error": "PARSE_FAILED",
+      "expected_readiness": "failed",
+      "ambiguity": [
+        "malformed_container"
+      ],
+      "acceptable_description_facts": [],
+      "expected_routing": "error"
+    },
+    {
+      "file": "long-document-100-pages.pdf",
+      "kind": "long_pdf",
+      "document_date": "2025-07-01",
+      "document_type": "Project Journal",
+      "subject": "Moonlit Archive",
+      "expected_readiness": "ready",
+      "ambiguity": [],
+      "acceptable_description_facts": [
+        "project journal",
+        "July 1, 2025",
+        "Moonlit Archive"
+      ],
+      "expected_routing": "native_text"
+    },
+    {
+      "file": "document-image.png",
+      "kind": "png",
+      "document_date": "2025-07-14",
+      "document_type": "Purchase Order",
+      "subject": "PO-310",
+      "expected_readiness": "needs_review",
+      "ambiguity": [
+        "ocr_required"
+      ],
+      "acceptable_description_facts": [
+        "purchase order",
+        "PO-310",
+        "July 14, 2025"
+      ],
+      "expected_routing": "ocr"
+    },
+    {
+      "file": "document-image.jpg",
+      "kind": "jpeg",
+      "document_date": "2025-07-15",
+      "document_type": "Packing Slip",
+      "subject": "PS-311",
+      "expected_readiness": "needs_review",
+      "ambiguity": [
+        "ocr_required"
+      ],
+      "acceptable_description_facts": [
+        "packing slip",
+        "PS-311",
+        "July 15, 2025"
+      ],
+      "expected_routing": "ocr"
+    },
+    {
+      "file": "document-image.tiff",
+      "kind": "tiff",
+      "document_date": "2025-07-16",
+      "document_type": "Work Order",
+      "subject": "WO-312",
+      "expected_readiness": "needs_review",
+      "ambiguity": [
+        "ocr_required"
+      ],
+      "acceptable_description_facts": [
+        "work order",
+        "WO-312",
+        "July 16, 2025"
+      ],
+      "expected_routing": "ocr"
+    }
+  ]
+}

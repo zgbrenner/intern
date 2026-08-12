@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "status": "pending",
+  "release_inputs_sha256": null,
+  "screenshot_path": "docs/qa/latest-implementation.png",
+  "screenshot_sha256": null,
+  "reviewer": null,
+  "reviewed_at": null,
+  "notes": "A reviewer must inspect the hosted 1536x1024 implementation capture against the accepted concept and bind this record to the release-input and screenshot SHA-256 values."
+}

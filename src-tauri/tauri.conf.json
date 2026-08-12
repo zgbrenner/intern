@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Intern",
+  "version": "0.1.0-alpha.1",
+  "identifier": "com.intern.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Intern",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "externalBin": [
+      "binaries/intern-worker",
+      "binaries/llama-server",
+      "binaries/tesseract"
+    ],
+    "resources": {
+      "resources/*.json": "resources/",
+      "resources/*.md": "resources/",
+      "resources/licenses/": "licenses/",
+      "resources/tessdata/*.traineddata": "tessdata/",
+      "resources/native/pdfium/*.dll": "",
+      "resources/native/sidecars/*.dll": ""
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}
