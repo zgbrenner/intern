@@ -178,6 +178,11 @@ impl OcrResult {
     }
 }
 
+/// Mean word confidence at or above which a page is considered read. Below it a
+/// page earns a `LowOcrConfidence` warning, may escalate to vision, and is worth
+/// re-reading in another orientation before any of that.
+pub const CONFIDENT_READING: f32 = 75.0;
+
 pub fn apply_detected_rotation(
     image: DynamicImage,
     rotation_degrees: u16,
@@ -358,8 +363,10 @@ pub fn extract_pdf(
         limits.validate_page_pixels(render_width, render_height)?;
         timed_check(cancel, started, limits)?;
         let result = ocr.recognize(&rendered, cancel)?;
-        let vision_escalated = vision_candidate.is_none() && result.mean_confidence < 75.0;
-        if result.mean_confidence < 75.0 && !warnings.contains(&ExtractionWarning::LowOcrConfidence)
+        let vision_escalated =
+            vision_candidate.is_none() && result.mean_confidence < CONFIDENT_READING;
+        if result.mean_confidence < CONFIDENT_READING
+            && !warnings.contains(&ExtractionWarning::LowOcrConfidence)
         {
             warnings.push(ExtractionWarning::LowOcrConfidence);
         }

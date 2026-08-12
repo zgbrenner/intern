@@ -6,34 +6,51 @@ This checklist separates evidence produced on the current Linux host from gates 
 
 ## Evidence context
 
-- Source baseline: `48bd32aa9745f1d52454d428b0af1bc94ce1e589` plus the Task 8 working-tree changes described by this document.
-- Local runner: Linux x86-64, Node `v24.14.0`, npm `11.9.0`.
-- Required release runner: GitHub-hosted `windows-latest`, Node `24.15.0`, Rust `1.88.0`, pinned runtime assets, Q4 and Q8 weights.
+- Source baseline: current `main`. The pipeline redesign replaced the extraction
+  window, prompt, validation, and naming code this document originally described,
+  and grew the corpus from 13 fixtures to 20.
+- Required release runner: GitHub-hosted `windows-latest`, Node `24.15.0`, Rust
+  `1.88.0`, pinned runtime assets, and the single pinned Q4_K_M text model named by
+  `src-tauri/resources/model-manifest.json`.
 - Accepted concept: `docs/design/intern-primary-screen.png`, 1536×1024, SHA-256 `c8cf322da777d77bc490b855fd18c5a70fe24192a343505e677d34d925a30de8`.
-- Production prompt SHA-256: `08dc85b2565e7bb49219e41535158c10de168cf5b897129c825035c26ec5072c`.
-- Fixture manifest SHA-256: `c9d32ed4f0d4b0a22e7150c550c45454cd981fc38aed0daf70aab5e5696b848a`.
-- Gold expectations SHA-256: `912735049332a9c9068dd4620602d2fe631e1ef503c316952095504a4676a0ac`.
+- Fixture manifest SHA-256: `5c56ebb466b3bd43e920d2a56b572f98b4ef3cfc1e7605b84d9730d3b67e332a`.
+- Gold expectations SHA-256: `7b26b2715fbb312230c8ec8cab928bc4bbf7d566ec97870ea98853896a67675a`.
+
+An earlier revision of this document also pinned a "production prompt SHA-256". No
+script produced or checked that value, and the prompt has since been rewritten, so
+it is removed rather than left to look verified: the prompt lives in
+`crates/intern-engine/src/prompt.rs` under version control.
 
 ## Fresh local evidence
 
+Runner: Windows 11 Pro 26100, Node `24.15.0`, Rust `1.88.0` on the
+`x86_64-pc-windows-gnu` toolchain (this machine has no MSVC toolchain, so
+`intern-app` is compile-checked rather than linked here; CI covers MSVC).
+
 | Status | Command | Exact result | Scope / limitation |
 |---|---|---|---|
-| pass | `npm run fixtures` | exit 0; generated 13 deterministic gold fixtures | Generator and canonical corpus comparison ran locally. Native parsing did not. |
-| pass | `npm run check` | exit 0; TypeScript passed; 13 Vitest files and 53 tests passed; Vite built 1,811 modules | Frontend/unit/config tests and production web bundle only. |
-| pass | `npm run assets:verify` | exit 0; 4 pinned downloads verified; 0 bundled runtime files and 0 license files present | Verifies acquisition metadata only on this host. `--require-bundled` is pending Windows staging. |
-| pass | `node scripts/validate-model-evaluation.mjs docs/qa/model-evaluation.json --allow-pending` | exit 0; 13 signed records recognized; `release_blocked: true` | Schema/pins/hashes are valid; this is not model acceptance. |
-| failed | `node scripts/validate-model-evaluation.mjs docs/qa/model-evaluation.json` | exit 1; `model evaluation is pending; release is blocked` | Expected fail-closed behavior for the unexecuted report. |
-| failed | `npm run test:e2e` | exit 1; 3 of 3 tests could not launch Chromium because `chromium_headless_shell-1234` is absent | No browser assertion or interaction body executed. The gate remains pending, not passed. |
-| failed | Playwright Chromium installation | exit 1 after repeated 0-byte/truncated downloads with `End of central directory record signature not found` | Prevented local screenshot, accessibility, responsive, and core-path browser evidence. |
+| pass | `node fixtures/generate-fixtures.mjs --update-gold` | exit 0; 20 deterministic gold fixtures | Byte-identical under pinned Node 24.15.0. |
+| pass | `npm run check` | exit 0; TypeScript passed; 15 Vitest files and 97 tests passed | Includes the canonical corpus comparison and the PowerShell parse check. |
+| pass | `cargo fmt --all -- --check` | exit 0 | — |
+| pass | `cargo clippy --locked -p intern-worker --all-targets --features windows-native -- -D warnings` | exit 0 | Lints the PDFium/Tesseract paths the default feature set never compiles. |
+| pass | `cargo test --locked -p intern-engine -p intern-core -p intern-queue -p intern-worker --all-targets` | exit 0; all suites passed | Excludes `intern-app`, which cannot link without MSVC. |
+| pass | `cargo test -p intern-worker --features windows-native --test generated_fixtures --test native_assets` | exit 0; 4 + 3 tests passed | Real pinned PDFium chromium/7881, verified by size and SHA-256. |
+| pass | `scripts/smoke-worker.ps1` | exit 0; hello, native PDF, OCR, DOCX, image, and both invalid fixtures | Real PDFium and real Tesseract. **Local Tesseract is UB-Mannheim 5.4.0, not the pinned vcpkg 5.5.2**, so OCR text may differ slightly on the release runner. |
+
+CI on `windows-latest` with the MSVC toolchain has separately passed `cargo fmt`,
+`cargo clippy --workspace`, `cargo test --locked --workspace --all-targets`, the
+pinned asset fetch and `--require-bundled` verification, and the native-asset
+fixture integration. The most recent run failed only on a transient upstream `503`
+while vcpkg fetched libjpeg-turbo sources; the fetch script now retries that.
 
 ## Required release gates
 
 | Gate | Status | Required evidence / producer |
 |---|---|---|
-| Rust formatting | pending | `cargo fmt --all -- --check` on Rust 1.88.0 |
-| Rust lint | pending | `cargo clippy --locked --workspace --all-targets -- -D warnings` |
-| Rust workspace tests | pending | `cargo test --locked --workspace --all-targets` |
-| Native PDFium/Tesseract fixture integration | pending | Windows `generated_fixtures` test with `windows-native` and the staged worker smoke |
+| Rust formatting | pass | `cargo fmt --all -- --check` on Rust 1.88.0, locally and on CI |
+| Rust lint | pass | `cargo clippy --locked --workspace --all-targets -- -D warnings` on CI, plus the `windows-native` feature locally and on CI |
+| Rust workspace tests | pass | `cargo test --locked --workspace --all-targets` on CI with MSVC |
+| Native PDFium/Tesseract fixture integration | pass | Windows `generated_fixtures` with `windows-native` on CI; `scripts/smoke-worker.ps1` against real PDFium and Tesseract locally, pending its first CI execution |
 | Browser core interaction path | pending | Playwright mixed-batch add/review/edit/approve/undo test |
 | Automated accessibility and 1024-pixel layout | pending | `tests/e2e/qa.spec.ts` in Chromium |
 | 1536×1024 implementation capture | pending | Real Playwright screenshot at `docs/qa/latest-implementation.png`; no file is checked in because no qualifying capture was produced |

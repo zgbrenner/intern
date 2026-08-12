@@ -38,6 +38,36 @@ other `acceptable_dates`, and the `forbidden_dates` and `forbidden_parties` that
 a careless reading would produce. `intern-evaluate` scores against all of them,
 so "picked a date" and "picked the right date" are measured separately.
 
+## What the scanned fixtures can and cannot prove
+
+The image fixtures are drawn with a 5×7 bitmap font defined in the generator, so
+the corpus needs no font files and stays byte-identical everywhere. Tesseract
+reads that font imperfectly. Measured through the packaged worker with the pinned
+runtime:
+
+| Fixture | Mean OCR confidence | Representative misreadings |
+| --- | --- | --- |
+| `document-image.jpg` | 95.4 | none |
+| `document-image.tiff` | 86.3 | `2025` as `26275` |
+| `document-image.png` | 82.7 | `PO-310` as `PO-31i`, `2025` as `2625` |
+| `scanned-lease.pdf` | 80.4 | `EFFECTIVE` as `EFFECTIWE`, `CEDAR` as `LEDAR`, `2024` as `24h24` |
+| `rotated-low-resolution-scan.png` | 76.1 | `DR-771` as `OR-?771`, `COURIERS` as `COURTERS` |
+| `mixed-signature.pdf` page 2 | 61.8 | `KITE` as `BRITE`, `SIGNATURE` as `SIGHATURE` |
+
+Digits and narrow glyphs suffer most. So these fixtures prove routing, page
+assembly, orientation handling, and that a poor scan is sent to review — which is
+what `expected.json` marks them `needs_review` for. They do not prove that Intern
+names scanned documents accurately, and no assertion should imply they do.
+`scripts/smoke-worker.ps1` therefore asserts the multi-word alphabetic content
+that survives OCR rather than dates or identifiers, and asserts a confidence floor
+on the rotated fixture, because a page read in the wrong orientation returns a
+full page of plausible-looking gibberish that only confidence distinguishes from a
+real reading.
+
+The font has no comma glyph, and unmapped characters render as blank space.
+Assertions written against the generator's prose rather than its rasterised output
+are unsatisfiable by construction.
+
 ## Updating the reviewed answers
 
 To intentionally revise them, edit the generator definition, review the new

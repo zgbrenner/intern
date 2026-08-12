@@ -178,7 +178,7 @@ fn nested_image_pdf() -> Vec<u8> {
         object
     }
 
-    let objects = vec![
+    let objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
         concat!(

@@ -191,8 +191,20 @@ try {
     & (Join-Path $VcpkgDirectory "bootstrap-vcpkg.bat") -disableMetrics
     if ($LASTEXITCODE -ne 0) { throw "Failed to bootstrap pinned vcpkg" }
     $InstallRoot = Join-Path $WorkDirectory "vcpkg-installed"
-    & (Join-Path $VcpkgDirectory "vcpkg.exe") install "tesseract:$($Manifest.vcpkg.triplet)" "--x-install-root=$InstallRoot" --clean-after-build --disable-metrics
-    if ($LASTEXITCODE -ne 0) { throw "Failed to build pinned Tesseract runtime" }
+    # vcpkg fetches each port's sources from upstream release URLs, and those
+    # transiently return 503. One such response after twenty minutes of building
+    # fails the whole job, so retry the install: it resumes from what it already
+    # built rather than starting over, and every source it downloads is still
+    # checked against the pinned baseline's own hashes.
+    $BuildAttempts = 0
+    while ($true) {
+        $BuildAttempts += 1
+        & (Join-Path $VcpkgDirectory "vcpkg.exe") install "tesseract:$($Manifest.vcpkg.triplet)" "--x-install-root=$InstallRoot" --clean-after-build --disable-metrics
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($BuildAttempts -ge 3) { throw "Failed to build pinned Tesseract runtime" }
+        Write-Warning "vcpkg install failed on attempt $BuildAttempts; retrying"
+        Start-Sleep -Seconds (30 * $BuildAttempts)
+    }
     $Installed = (& (Join-Path $VcpkgDirectory "vcpkg.exe") list "--x-install-root=$InstallRoot") -join "`n"
     if ($Installed -notmatch "(?m)^tesseract:$([regex]::Escape($Manifest.vcpkg.triplet))\s+$([regex]::Escape($Manifest.vcpkg.packages.tesseract))\b") {
         throw "Pinned vcpkg baseline did not produce Tesseract $($Manifest.vcpkg.packages.tesseract)"

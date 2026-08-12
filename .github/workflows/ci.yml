@@ -87,6 +87,11 @@ jobs:
           New-Item -ItemType File src-tauri\resources\native\sidecars\compile-placeholder.dll -Force | Out-Null
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      # The default feature set never compiles the PDFium and Tesseract code, so
+      # nothing had ever linted the paths that only run on a packaged Windows
+      # install. Lint them here, where the crate is built with those features
+      # anyway.
+      - run: cargo clippy --locked -p intern-worker --all-targets --features windows-native -- -D warnings
       - run: cargo test --locked --workspace --all-targets
       - name: Build parser worker sidecar
         shell: pwsh
