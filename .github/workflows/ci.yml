@@ -60,7 +60,19 @@ jobs:
             ~\.cargo\git
             target
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'src-tauri/resources/runtime-assets.json') }}
-      - uses: actions/cache@v4
+      # Restore and save separately, because actions/cache declares
+      # `post-if: success()` and therefore saves nothing when a later step fails.
+      # This step builds Tesseract from a pinned vcpkg baseline, and vcpkg pulls
+      # each port's sources from GitHub archive URLs that have been returning 503
+      # and curl error 56 - which vcpkg classifies as non-transient and refuses to
+      # retry. Discarding every tarball on failure guaranteed the next run started
+      # from zero against the same failing endpoint. Saving on failure means a run
+      # keeps whatever it managed to fetch. Nothing here is trusted on the strength
+      # of being cached: pinned downloads are still checked against their committed
+      # size and SHA-256, and vcpkg verifies every archive against the baseline's
+      # own hashes.
+      - uses: actions/cache/restore@v4
+        id: assets-cache
         with:
           path: ${{ runner.temp }}\intern-assets-cache
           key: runtime-assets-${{ runner.os }}-${{ hashFiles('src-tauri/resources/runtime-assets.json', 'scripts/fetch-windows-assets.ps1') }}
@@ -107,6 +119,13 @@ jobs:
           Remove-Item src-tauri\resources\native\pdfium\compile-placeholder.dll -Force
           Remove-Item src-tauri\resources\native\sidecars\compile-placeholder.dll -Force
           ./scripts/fetch-windows-assets.ps1 -CacheDirectory "${{ runner.temp }}\intern-assets-cache"
+      # Save even when the asset step above failed, so a partial fetch is progress
+      # rather than wasted. Skipped on a cache hit, where the key already exists.
+      - uses: actions/cache/save@v4
+        if: always() && steps.assets-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}\intern-assets-cache
+          key: runtime-assets-${{ runner.os }}-${{ hashFiles('src-tauri/resources/runtime-assets.json', 'scripts/fetch-windows-assets.ps1') }}
       - run: npm run assets:verify -- --require-bundled
       - name: Run generated-fixture parser integration with native assets
         run: cargo test --locked -p intern-worker --test generated_fixtures --features windows-native
