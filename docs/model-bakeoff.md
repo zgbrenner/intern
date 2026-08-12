@@ -29,8 +29,11 @@ prefill and was never a candidate for a laptop that has to stay usable.
 
 ## Quality
 
-Twelve scored documents. `dates` counts the reviewed answer or a listed
-acceptable alternative; `trap dates` counts documents filed under a date the
+The bake-off below compares models and pipelines over the same twelve text
+documents, which is what makes the rows comparable. The full corpus, including the
+six scanned fixtures, is measured separately in
+[the section after it](#the-full-corpus). `dates` counts the reviewed answer or a
+listed acceptable alternative; `trap dates` counts documents filed under a date the
 corpus explicitly marks as wrong (a referenced master agreement's date, a
 signature date where an effective date exists, a payment due date).
 
@@ -73,6 +76,44 @@ recover it. An earlier revision of this table showed the correct-looking
 `2026-01-05 Invoice from Acme Corporation.pdf`, which the pipeline does not
 produce.
 
+### The full corpus
+
+Eighteen documents scored with real inference, including the six scanned fixtures,
+which had never been scored at all because the machine had no Tesseract build:
+
+| | Result |
+| --- | ---: |
+| Date correct, text documents | 13/13 |
+| Date correct, whole corpus | 13/17 |
+| Date correct where Intern named the file | **9/9** |
+| Filed under a corpus-marked trap date | **0** |
+| Document type | 13/17 |
+| Parties | 13/18 |
+| Named a party the corpus marks as not defining | 1/18 |
+| Description specific | 18/18 |
+| Agreed with the corpus on review-or-name | 16/18 |
+| Review rate | 50% |
+| Date *role* correct | **6/13** |
+
+Two of these deserve to be read carefully rather than skimmed.
+
+**The four corpus-wide date misses are all scans, and all four are the product
+working.** On the lease, the model read `SEPTEMBER 1 24h24` and inferred September
+1, 2024 - which is right - and validation threw it out, because "2024" appears
+nowhere in the document literally. No date was invented and the file went to
+review. Corpus-wide date accuracy therefore has a ceiling set by OCR fidelity, not
+by document understanding, which is why the release gate holds the narrower and
+absolute promise instead: every file Intern actually renamed carried the right
+date.
+
+**The date role is mostly wrong, and it is the one place the model is not
+understanding what it reads.** It answers `effective` for every document and has
+never once used `notice`, `amendment`, `invoice`, or `issuance`, though all four
+are in its grammar. It picks the defining date correctly and cannot say why. The
+role never reaches the filename, so no output is wrong because of it, but it was
+included as evidence of understanding and it does not currently serve that
+purpose. It is now scored on every run rather than being invisible.
+
 The statement of work and the order form are the two documents built to punish a
 pipeline that reaches for the easiest date. The old pipeline took the signature
 date on both. The new one takes the effective date buried on page five of a
@@ -85,14 +126,23 @@ Measured over the same runs, per document, including extraction:
 
 | | Qwen2.5-VL-3B, old pipeline | Qwen3.5-2B, new pipeline |
 | --- | ---: | ---: |
-| Median total time | 23.6 s | 12.4-16.6 s |
-| Slowest document | 115 s | 51 s |
-| Peak model process memory | 4,215 MB | 2,590 MB |
+| Median total time | 23.6 s | 12.4-27.7 s |
+| Slowest document | 115 s | 51-56 s |
+| Peak model process memory | 4,215 MB | 2,470-2,590 MB |
 | First-run download | 3.05 GiB *(model + projector)* | 1.19 GiB *(text model only)* |
 
+The new pipeline's spread is wide because it is a laptop measurement, not a
+benchmark: repeated runs of the same corpus on the same machine produced medians
+of 12.4, 16.6, 19.6, and 27.7 seconds depending on what else was running. The
+slowest run was the one taken while other work was competing for the same eight
+threads. Quote the range, never one figure.
+
 Extraction is not the cost. A one-page invoice extracts in 13 ms, a 14-page
-contract in 33 ms, a 100-page journal in 29 ms. Distillation is 0.3–9 ms.
-Essentially all the time is the model:
+contract in 33 ms, a 100-page journal in 29 ms. Distillation is 0.3–9 ms. Across
+the full 18-document corpus the median extraction is 38 ms. The exception is a
+scanned page: OCR is seconds, and the slowest document in the corpus spends 6.6 s
+there because a page that will not read confidently is re-read in other
+orientations. Essentially all the time is the model:
 
 | Document | Pages | Source chars | Digest chars | Distill | Inference |
 | --- | ---: | ---: | ---: | ---: | ---: |
