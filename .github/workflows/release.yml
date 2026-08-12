@@ -12,6 +12,12 @@ concurrency:
 
 permissions:
   contents: write
+  # Keyless provenance for the installer. `id-token` lets the runner prove its own
+  # identity to Sigstore, `attestations` lets it record the result against this
+  # repository. No signing key or certificate is stored anywhere; there is nothing
+  # to leak and nothing to rotate.
+  id-token: write
+  attestations: write
 
 jobs:
   release_target:
@@ -206,6 +212,23 @@ jobs:
           Get-ChildItem release -File | Where-Object Name -ne "SHA256SUMS.txt" | ForEach-Object {
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Sort-Object | Set-Content release\SHA256SUMS.txt -Encoding ascii
+      # Provenance for the one file a user downloads and runs, recorded only after
+      # the evidence manifest above has already been accepted, so a rejected build
+      # is never attested.
+      #
+      # This is not Authenticode. Windows and SmartScreen cannot read it, so an
+      # unsigned installer still warns on first run. What it gives a downloader is
+      # the ability to prove which repository, workflow, and commit produced the
+      # exact bytes they hold:
+      #
+      #   gh attestation verify Intern_0.1.0-alpha.1_x64-setup.exe --repo zgbrenner/intern
+      #
+      # It needs no certificate and stores no key: the runner proves its own
+      # identity through OIDC, so there is nothing to leak or rotate.
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/*_x64-setup.exe
       - name: Create or verify exact annotated release tag
         shell: pwsh
         run: |

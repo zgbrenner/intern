@@ -50,3 +50,22 @@ it('gates the exact main commit before creating its annotated tag and publishing
   expect(workflow).toContain('--screenshot=release/latest-implementation.png');
   expect(workflow).toContain('--fidelity-signoff=release/rendered-fidelity-signoff.json');
 });
+
+it('attests the installer, and only after its evidence has been accepted', async () => {
+  const workflow = await readFile('.github/workflows/release.yml', 'utf8');
+  // Provenance is keyless, so there is no certificate or secret to store, and the
+  // permissions have to be granted explicitly for the OIDC token to exist.
+  expect(workflow).toContain('id-token: write');
+  expect(workflow).toContain('attestations: write');
+  expect(workflow).toContain('actions/attest-build-provenance@v2');
+  expect(workflow).toContain('subject-path: release/*_x64-setup.exe');
+  // Ordering is the substance of this test. Attesting before validation would
+  // publish a signed claim about a build that failed its own gates, and
+  // attesting after publication would leave the downloadable file unattested.
+  expect(workflow.indexOf('validate-release-evidence.mjs')).toBeLessThan(
+    workflow.indexOf('actions/attest-build-provenance@v2'),
+  );
+  expect(workflow.indexOf('actions/attest-build-provenance@v2')).toBeLessThan(
+    workflow.indexOf('gh release create'),
+  );
+});
