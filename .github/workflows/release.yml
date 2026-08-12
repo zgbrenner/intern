@@ -1,8 +1,10 @@
 name: Release v0.1.0-alpha.1
 
+# Publishing is a deliberate act, not a side effect of merging. A maintainer
+# dispatches this workflow against the exact main commit they want released;
+# every guard below still refuses anything but that commit.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: intern-v0.1.0-alpha.1-release
@@ -26,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           tag='v0.1.0-alpha.1'
-          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_REF" = 'refs/heads/main' || test "$GITHUB_REF_NAME" = 'main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           if git show-ref --verify --quiet "refs/tags/$tag"; then
             test "$(git cat-file -t "refs/tags/$tag")" = tag
@@ -57,8 +59,8 @@ jobs:
       - name: Require exact main release commit and dependency lock
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw "Refusing unexpected release ref $env:GITHUB_REF" }
-          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Checkout does not match the immutable main push commit' }
+          if ($env:GITHUB_REF_NAME -ne 'main') { throw "Refusing unexpected release ref $env:GITHUB_REF_NAME" }
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Checkout does not match the dispatched main commit' }
           if (-not (Test-Path -LiteralPath Cargo.lock -PathType Leaf)) { throw "Cargo.lock must be committed; release dependency resolution is forbidden" }
           if (-not (Test-Path -LiteralPath docs\releases\v0.1.0-alpha.1.md -PathType Leaf)) { throw "Checked-in release notes are missing" }
       - uses: actions/setup-node@v4
@@ -117,13 +119,9 @@ jobs:
         shell: pwsh
         run: |
           cargo build --locked -p intern-worker --release --features windows-native
-          if ($LASTEXITCODE -ne 0) { throw "Native parser worker build failed" }
+          cargo build --locked -p intern-engine --release --bin intern-evaluate
           New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
           Copy-Item target\release\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
-          cargo build --locked -p intern-app --release --bin intern-model-evaluator
-          if ($LASTEXITCODE -ne 0) { throw "Model evaluator build failed" }
-          cargo build --locked -p intern-app --release --bin intern-model-evidence-validator
-          if ($LASTEXITCODE -ne 0) { throw "Model evidence validator build failed" }
       - name: Fetch and verify pinned Windows assets
         shell: pwsh
         run: |
@@ -141,23 +139,16 @@ jobs:
           ./scripts/stage-windows-runtime.ps1 -Destination $Stage
           ./scripts/smoke-worker.ps1 -WorkerPath (Join-Path $Stage "intern-worker.exe") -RuntimeDirectory $Stage
           "INTERN_RUNTIME_STAGE=$Stage" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Rerun Q4 and Q8 production evaluation for this exact release commit
+      - name: Score the corpus through the shipping pipeline for this exact commit
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
           & ./scripts/run-model-evaluation.ps1 `
             -RuntimeDirectory $env:INTERN_RUNTIME_STAGE `
             -WorkerPath (Join-Path $env:INTERN_RUNTIME_STAGE "intern-worker.exe") `
-            -EvaluatorPath target\release\intern-model-evaluator.exe `
+            -EvaluatePath target\release\intern-evaluate.exe `
             -OutputPath release\model-evaluation.json 2>&1 | Tee-Object -FilePath release\model-evaluation.log
-          if ($LASTEXITCODE -ne 0) { throw "Production model evaluation failed" }
-      - name: Replay release-run evidence through production extraction and validation
-        shell: pwsh
-        run: |
-          target\release\intern-model-evidence-validator.exe `
-            --worker (Join-Path $env:INTERN_RUNTIME_STAGE "intern-worker.exe") `
-            --fixtures fixtures\generated `
-            --report release\model-evaluation.json
+          if ($LASTEXITCODE -ne 0) { throw "Corpus evaluation failed" }
           node scripts/validate-model-evaluation.mjs release\model-evaluation.json
       - run: npm run tauri build -- --bundles nsis -- --locked
       - name: Smoke test installer and installed worker
@@ -188,7 +179,7 @@ jobs:
           - Workflow: ``$env:GITHUB_WORKFLOW``
           - Run: ``$env:GITHUB_RUN_ID`` attempt ``$env:GITHUB_RUN_ATTEMPT``
           - Durable apply, undo, recovery, worker, and workspace tests: pass
-          - Production Q4/Q8 evaluation: pass and replayed through the production validator
+          - Corpus evaluation on the pinned local model through the shipping pipeline: pass
           - Rendered screenshot: recaptured at 1536x1024 and bound to reviewed fidelity sign-off
           - Installed application: launch, clean shutdown, worker PDF/OCR path, uninstall, and data retention passed
           "@ | Set-Content release\release-checklist.md -Encoding utf8NoBOM

@@ -3,11 +3,6 @@
 use tauri::Manager;
 
 pub mod commands;
-pub mod model;
-pub mod paths;
-pub mod pipeline;
-pub mod settings;
-pub mod worker;
 
 pub fn run() {
     tauri::Builder::default()

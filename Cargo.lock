@@ -2011,20 +2011,15 @@ dependencies = [
 name = "intern-app"
 version = "0.1.0-alpha.1"
 dependencies = [
- "base64 0.22.1",
- "fs4",
  "intern-core",
- "rand 0.8.5",
- "reqwest 0.12.15",
- "rusqlite",
+ "intern-engine",
+ "intern-queue",
  "serde",
  "serde_json",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tempfile",
- "tokio",
 ]
 
 [[package]]
@@ -2035,9 +2030,36 @@ dependencies = [
  "serde",
  "sha2",
  "tempfile",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "intern-engine"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "base64 0.22.1",
+ "fs4",
+ "rand 0.8.5",
+ "reqwest 0.12.15",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
  "unicode-casefold",
  "unicode-normalization",
- "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "intern-queue"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "intern-core",
+ "intern-engine",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

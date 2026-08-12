@@ -13,3 +13,6 @@ test-results/
 fixtures/generated/
 *.log
 .DS_Store
+src-tauri/resources/licenses/
+src-tauri/resources/tessdata/
+src-tauri/resources/native/

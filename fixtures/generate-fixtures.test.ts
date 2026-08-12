@@ -45,6 +45,13 @@ describe('clean-room fixture generator', () => {
       'document-image.png',
       'document-image.jpg',
       'document-image.tiff',
+      'statement-of-work.pdf',
+      'termination-notice.pdf',
+      'consulting-amendment.pdf',
+      'vendor-invoice.pdf',
+      'settlement-agreement.pdf',
+      'ambiguous-note.pdf',
+      'order-form.docx',
       'mixed-batch/duplicate-invoice-a.pdf',
       'mixed-batch/duplicate-invoice-b.pdf',
       'mixed-batch/unsupported.csv',
@@ -65,7 +72,7 @@ describe('clean-room fixture generator', () => {
     const root = await mkdtemp(join(tmpdir(), 'intern-fixtures-cleanroom-'));
     const gold = await generateFixtures(root);
 
-    expect(gold.schema_version).toBe(1);
+    expect(gold.schema_version).toBe(2);
     expect(gold.fixtures.find((fixture) => fixture.file === 'employment-agreement.pdf')?.parties)
       .toEqual(['Northstar Lantern Works LLC', 'Mira Vale']);
     for (const fixture of gold.fixtures) {
@@ -76,6 +83,19 @@ describe('clean-room fixture generator', () => {
         expected_routing: expect.stringMatching(/^(native_text|ocr|mixed_native_ocr|anydoc|text|error)$/),
       });
     }
+
+    // The traps are the point of the corpus: dates and names that are easy to
+    // extract and wrong to file under.
+    const sow = gold.fixtures.find((fixture) => fixture.file === 'statement-of-work.pdf');
+    expect(sow?.document_date).toBe('2026-04-01');
+    expect(sow?.forbidden_dates).toEqual(expect.arrayContaining(['2023-06-02', '2026-04-09']));
+    const notice = gold.fixtures.find((fixture) => fixture.file === 'termination-notice.pdf');
+    expect(notice?.acceptable_dates).toContain('2027-01-31');
+    expect(notice?.forbidden_parties).toContain('Marcus Reyes');
+    const amendment = gold.fixtures.find((fixture) => fixture.file === 'consulting-amendment.pdf');
+    expect(amendment?.forbidden_dates).toContain('2023-01-12');
+    const invoice = gold.fixtures.find((fixture) => fixture.file === 'vendor-invoice.pdf');
+    expect(invoice?.forbidden_dates).toContain('2026-02-04');
     expect(gold.fixtures.find((fixture) => fixture.file === 'multi-date-invoice.pdf')?.ambiguity)
       .toContain('invoice_and_due_dates');
     expect(gold.fixtures.find((fixture) => fixture.file === 'rotated-low-resolution-scan.png')?.expected_routing)

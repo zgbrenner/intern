@@ -1,5 +1,8 @@
 # Intern v1 Design Specification
 
+> **Superseded.** This records the v0.1 design as built on 2026-08-11. The document-understanding pipeline was redesigned shortly afterwards; see `docs/architecture.md` for what Intern actually does now.
+
+
 **Status:** Approved product direction, pending written-spec review
 
 **Date:** 2026-08-11

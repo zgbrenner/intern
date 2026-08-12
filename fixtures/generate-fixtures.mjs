@@ -8,24 +8,38 @@ const FIXED_DOS_TIME = 0;
 const FIXED_DOS_DATE = 0x21;
 const FIXTURE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 
+/// The reviewed answer for every fixture.
+///
+/// `document_date` is the single best answer and `acceptable_dates` lists any
+/// other date a careful person could defend. `forbidden_dates` and
+/// `forbidden_parties` are the traps: dates and names that are easy to extract
+/// and wrong to file under, so an evaluation run can score "picked the date it
+/// understood" separately from "picked a date."
 const GOLD = {
-  schema_version: 1,
+  schema_version: 2,
   generated_at: '2000-01-01T00:00:00.000Z',
   notice: 'All names, organizations, addresses, account numbers, and events are fictional.',
   fixtures: [
-    { file: 'employment-agreement.pdf', kind: 'text_pdf', document_date: '2025-02-14', document_type: 'Employment Agreement', subject: 'Mira Vale', parties: ['Northstar Lantern Works LLC', 'Mira Vale'], expected_readiness: 'ready', ambiguity: [], acceptable_description_facts: ['employment', 'February 14, 2025', 'Northstar Lantern Works LLC', 'Mira Vale'], expected_routing: 'native_text' },
-    { file: 'scanned-lease.pdf', kind: 'image_only_pdf', document_date: '2024-09-01', document_type: 'Lease Agreement', subject: '47 Juniper Loop', parties: ['Cedar Finch Properties LLC', 'Orion Glass Studio Inc.'], expected_readiness: 'needs_review', ambiguity: ['image_only', 'ocr_required'], acceptable_description_facts: ['lease', 'September 1, 2024', '47 Juniper Loop'], expected_routing: 'ocr' },
-    { file: 'mixed-signature.pdf', kind: 'mixed_pdf', document_date: '2025-01-08', document_type: 'Services Agreement', subject: 'Aurora Catalog Project', parties: ['Lumen Kite Cooperative', 'Solstice Index LLC'], expected_readiness: 'needs_review', ambiguity: ['mixed_native_and_scanned_pages'], acceptable_description_facts: ['services', 'January 8, 2025', 'Aurora Catalog Project'], expected_routing: 'mixed_native_ocr' },
-    { file: 'nda.docx', kind: 'docx', document_date: '2025-03-03', document_type: 'Mutual Non-Disclosure Agreement', subject: 'Project Marigold', parties: ['Fable Harbor Labs LLC', 'Copper Wren Design Inc.'], expected_readiness: 'ready', ambiguity: [], acceptable_description_facts: ['non-disclosure', 'March 3, 2025', 'Project Marigold'], expected_routing: 'anydoc' },
-    { file: 'multi-date-invoice.pdf', kind: 'text_pdf', document_date: '2025-04-30', document_type: 'Invoice', subject: 'INV-2048', parties: ['Nimbus Orchard Supply Co.', 'Atlas Threadworks LLC'], expected_readiness: 'needs_review', ambiguity: ['invoice_and_due_dates'], acceptable_description_facts: ['invoice', 'INV-2048', 'April 30, 2025', '$1,248.00'], expected_routing: 'native_text' },
-    { file: 'meeting-minutes.md', kind: 'markdown', document_date: '2025-05-07', document_type: 'Meeting Minutes', subject: 'Quarterly Operations Review', parties: ['Fictional Meridian Committee'], expected_readiness: 'ready', ambiguity: [], acceptable_description_facts: ['meeting minutes', 'May 7, 2025', 'Quarterly Operations Review'], expected_routing: 'text' },
-    { file: 'rotated-low-resolution-scan.png', kind: 'rotated_scan', document_date: '2025-06-12', document_type: 'Delivery Receipt', subject: 'Receipt DR-771', parties: ['Pine Echo Couriers LLC', 'Violet Cartography Studio'], expected_readiness: 'needs_review', ambiguity: ['rotated', 'low_resolution'], acceptable_description_facts: ['delivery receipt', 'DR-771', 'June 12, 2025'], expected_routing: 'ocr' },
+    { file: 'employment-agreement.pdf', kind: 'text_pdf', document_type: 'Employment Agreement', document_date: '2025-02-14', acceptable_dates: [], forbidden_dates: [], date_role: 'effective', parties: ['Northstar Lantern Works LLC', 'Mira Vale'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'ready', ambiguity: [], acceptable_description_facts: ['employment', 'Mira Vale'], expected_routing: 'native_text' },
+    { file: 'scanned-lease.pdf', kind: 'image_only_pdf', document_type: 'Lease Agreement', document_date: '2024-09-01', acceptable_dates: [], forbidden_dates: [], date_role: 'effective', parties: ['Cedar Finch Properties LLC', 'Orion Glass Studio Inc.'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'needs_review', ambiguity: ['image_only', 'ocr_required'], acceptable_description_facts: ['lease'], expected_routing: 'ocr' },
+    { file: 'mixed-signature.pdf', kind: 'mixed_pdf', document_type: 'Services Agreement', document_date: '2025-01-08', acceptable_dates: [], forbidden_dates: [], date_role: 'effective', parties: ['Lumen Kite Cooperative', 'Solstice Index LLC'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'needs_review', ambiguity: ['mixed_native_and_scanned_pages'], acceptable_description_facts: ['services'], expected_routing: 'mixed_native_ocr' },
+    { file: 'nda.docx', kind: 'docx', document_type: 'Mutual Non-Disclosure Agreement', document_date: '2025-03-03', acceptable_dates: [], forbidden_dates: [], date_role: 'effective', parties: ['Fable Harbor Labs LLC', 'Copper Wren Design Inc.'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'ready', ambiguity: [], acceptable_description_facts: ['disclosure', 'Marigold'], expected_routing: 'anydoc' },
+    { file: 'multi-date-invoice.pdf', kind: 'text_pdf', document_type: 'Invoice', document_date: '2025-04-30', acceptable_dates: [], forbidden_dates: ['2025-05-30'], date_role: 'invoice', parties: ['Nimbus Orchard Supply Co.'], forbidden_parties: [], party_relation: 'from', expected_readiness: 'ready', ambiguity: ['invoice_and_due_dates'], acceptable_description_facts: ['invoice'], expected_routing: 'native_text' },
+    { file: 'meeting-minutes.md', kind: 'markdown', document_type: 'Meeting Minutes', document_date: '2025-05-07', acceptable_dates: [], forbidden_dates: [], date_role: 'issuance', parties: [], forbidden_parties: [], party_relation: 'none', expected_readiness: 'ready', ambiguity: [], acceptable_description_facts: ['minutes'], expected_routing: 'text' },
+    { file: 'rotated-low-resolution-scan.png', kind: 'rotated_scan', document_type: 'Delivery Receipt', document_date: '2025-06-12', acceptable_dates: [], forbidden_dates: [], date_role: 'issuance', parties: ['Pine Echo Couriers LLC'], forbidden_parties: [], party_relation: 'from', expected_readiness: 'needs_review', ambiguity: ['rotated', 'low_resolution'], acceptable_description_facts: ['receipt'], expected_routing: 'ocr' },
     { file: 'encrypted.pdf', kind: 'encrypted_pdf', expected_error: 'PARSE_FAILED', expected_readiness: 'failed', ambiguity: ['password_required'], acceptable_description_facts: [], expected_routing: 'error' },
     { file: 'malformed.pdf', kind: 'malformed_pdf', expected_error: 'PARSE_FAILED', expected_readiness: 'failed', ambiguity: ['malformed_container'], acceptable_description_facts: [], expected_routing: 'error' },
-    { file: 'long-document-100-pages.pdf', kind: 'long_pdf', document_date: '2025-07-01', document_type: 'Project Journal', subject: 'Moonlit Archive', expected_readiness: 'ready', ambiguity: [], acceptable_description_facts: ['project journal', 'July 1, 2025', 'Moonlit Archive'], expected_routing: 'native_text' },
-    { file: 'document-image.png', kind: 'png', document_date: '2025-07-14', document_type: 'Purchase Order', subject: 'PO-310', expected_readiness: 'needs_review', ambiguity: ['ocr_required'], acceptable_description_facts: ['purchase order', 'PO-310', 'July 14, 2025'], expected_routing: 'ocr' },
-    { file: 'document-image.jpg', kind: 'jpeg', document_date: '2025-07-15', document_type: 'Packing Slip', subject: 'PS-311', expected_readiness: 'needs_review', ambiguity: ['ocr_required'], acceptable_description_facts: ['packing slip', 'PS-311', 'July 15, 2025'], expected_routing: 'ocr' },
-    { file: 'document-image.tiff', kind: 'tiff', document_date: '2025-07-16', document_type: 'Work Order', subject: 'WO-312', expected_readiness: 'needs_review', ambiguity: ['ocr_required'], acceptable_description_facts: ['work order', 'WO-312', 'July 16, 2025'], expected_routing: 'ocr' },
+    { file: 'long-document-100-pages.pdf', kind: 'long_pdf', document_type: 'Project Journal', document_date: '2025-07-01', acceptable_dates: [], forbidden_dates: [], date_role: 'issuance', parties: [], forbidden_parties: [], party_relation: 'none', expected_readiness: 'ready', ambiguity: [], acceptable_description_facts: ['journal'], expected_routing: 'native_text' },
+    { file: 'document-image.png', kind: 'png', document_type: 'Purchase Order', document_date: '2025-07-14', acceptable_dates: [], forbidden_dates: [], date_role: 'issuance', parties: ['Ember Post Manufacturing LLC'], forbidden_parties: [], party_relation: 'from', expected_readiness: 'needs_review', ambiguity: ['ocr_required'], acceptable_description_facts: ['order'], expected_routing: 'ocr' },
+    { file: 'document-image.jpg', kind: 'jpeg', document_type: 'Packing Slip', document_date: '2025-07-15', acceptable_dates: [], forbidden_dates: [], date_role: 'issuance', parties: ['Quartz Meadow Retail LLC'], forbidden_parties: [], party_relation: 'from', expected_readiness: 'needs_review', ambiguity: ['ocr_required'], acceptable_description_facts: ['slip'], expected_routing: 'ocr' },
+    { file: 'document-image.tiff', kind: 'tiff', document_type: 'Work Order', document_date: '2025-07-16', acceptable_dates: [], forbidden_dates: [], date_role: 'issuance', parties: ['Harbor Comet Repairs LLC'], forbidden_parties: [], party_relation: 'from', expected_readiness: 'needs_review', ambiguity: ['ocr_required'], acceptable_description_facts: ['order'], expected_routing: 'ocr' },
+    { file: 'statement-of-work.pdf', kind: 'long_contract_pdf', document_type: 'Statement of Work', document_date: '2026-04-01', acceptable_dates: [], forbidden_dates: ['2023-06-02', '2026-04-09', '2026-10-01', '2027-03-31'], date_role: 'effective', parties: ['Ridgeline Cartography LLC', 'Vistage Worldwide, Inc.'], forbidden_parties: ['Dana Ruiz', 'Priya Nandakumar'], party_relation: 'between', expected_readiness: 'ready', ambiguity: ['effective_date_in_document_middle', 'signature_date_differs_from_effective_date', 'references_older_master_agreement'], acceptable_description_facts: ['work'], expected_routing: 'native_text' },
+    { file: 'termination-notice.pdf', kind: 'text_pdf', document_type: 'Notice of Termination', document_date: '2026-12-29', acceptable_dates: ['2027-01-31'], forbidden_dates: ['2024-03-03', '2027-02-14', '2027-02-28', '2025-05-12'], date_role: 'notice', parties: ['John Smith'], forbidden_parties: ['Marcus Reyes', 'Reyes and Tolliver LLP', 'Harriet Voss'], party_relation: 'for', expected_readiness: 'ready', ambiguity: ['notice_date_and_termination_date', 'response_deadlines', 'lawyer_copied'], acceptable_description_facts: ['termination'], expected_routing: 'native_text' },
+    { file: 'consulting-amendment.pdf', kind: 'text_pdf', document_type: 'First Amendment to Consulting Agreement', document_date: '2025-09-14', acceptable_dates: [], forbidden_dates: ['2023-01-12', '2026-12-31'], date_role: 'amendment', parties: ['Vistage Worldwide, Inc.', 'Jane Ellery'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'ready', ambiguity: ['original_agreement_date_repeated'], acceptable_description_facts: ['amendment'], expected_routing: 'native_text' },
+    { file: 'vendor-invoice.pdf', kind: 'text_pdf', document_type: 'Invoice', document_date: '2026-01-05', acceptable_dates: [], forbidden_dates: ['2026-02-04'], date_role: 'invoice', parties: ['Acme Corporation'], forbidden_parties: [], party_relation: 'from', expected_readiness: 'ready', ambiguity: ['invoice_and_due_dates'], acceptable_description_facts: ['invoice'], expected_routing: 'native_text' },
+    { file: 'settlement-agreement.pdf', kind: 'long_contract_pdf', document_type: 'Settlement Agreement', document_date: '2026-07-22', acceptable_dates: [], forbidden_dates: ['2026-08-21', '2024-02-09'], date_role: 'effective', parties: ['Harborline Freight Systems LLC', 'Quill and Vane Advisory Group, Inc.'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'ready', ambiguity: ['boilerplate_heavy', 'payment_date_differs_from_effective_date'], acceptable_description_facts: ['settlement'], expected_routing: 'native_text' },
+    { file: 'ambiguous-note.pdf', kind: 'text_pdf', acceptable_dates: [], forbidden_dates: [], parties: [], forbidden_parties: ['Rowan', 'Priya', 'Dana', 'Ridgeline'], party_relation: 'none', expected_readiness: 'needs_review', ambiguity: ['no_document_type', 'no_defining_date'], acceptable_description_facts: [], expected_routing: 'native_text' },
+    { file: 'order-form.docx', kind: 'docx', document_type: 'Order Form', document_date: '2026-02-01', acceptable_dates: [], forbidden_dates: ['2026-01-14', '2022-08-08', '2028-01-31'], date_role: 'effective', parties: ['Tessellate Analytics Ltd.', 'Vistage Worldwide, Inc.'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'ready', ambiguity: ['start_date_differs_from_signature_date'], acceptable_description_facts: ['subscription'], expected_routing: 'anydoc' },
   ],
 };
 
@@ -87,7 +101,7 @@ function pdfStream(dictionary, bytes) {
 }
 
 function textCommands(lines) {
-  return `BT\n/F1 14 Tf\n50 742 Td\n18 TL\n${lines.map((line, index) => `${index ? 'T*\n' : ''}(${pdfEscape(line)}) Tj`).join('\n')}\nET`;
+  return `BT\n/F1 11 Tf\n50 750 Td\n14 TL\n${lines.map((line, index) => `${index ? 'T*\n' : ''}(${pdfEscape(line)}) Tj`).join('\n')}\nET`;
 }
 
 function buildPdf(pages, { encrypted = false } = {}) {
@@ -134,6 +148,66 @@ function buildPdf(pages, { encrypted = false } = {}) {
   const trailer = `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R${encryptionId ? ` /Encrypt ${encryptionId} 0 R /ID [<00112233445566778899aabbccddeeff><00112233445566778899aabbccddeeff>]` : ''} >>\nstartxref\n${xref}\n%%EOF\n`;
   chunks.push(Buffer.from(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}${trailer}`));
   return Buffer.concat(chunks);
+}
+
+/// Clause bodies that appear in every commercial contract and identify none of
+/// them. The corpus needs a lot of this so the distiller has something real to
+/// throw away.
+const BOILERPLATE_CLAUSES = [
+  ['Governing Law', 'This Agreement is governed by the laws of the State of Delaware without regard to any conflict of laws principles, and each party irrevocably submits to the exclusive jurisdiction of the state and federal courts located in that State for any proceeding arising out of it.'],
+  ['Severability', 'If any provision of this Agreement is held invalid or unenforceable by a court of competent jurisdiction, that provision is modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force and effect.'],
+  ['Entire Agreement', 'This Agreement, together with its exhibits and any documents it incorporates by reference, is the entire agreement of the parties on its subject matter and supersedes all prior and contemporaneous understandings, whether written or oral.'],
+  ['Counterparts', 'This Agreement may be executed in counterparts, each of which is deemed an original and all of which together constitute one instrument, and signatures delivered electronically have the same effect as original signatures.'],
+  ['No Waiver', 'No failure or delay by either party in exercising any right under this Agreement operates as a waiver of that right, and no single or partial exercise of any right precludes any other or further exercise of it.'],
+  ['Force Majeure', 'Neither party is liable for any failure or delay in performance caused by circumstances beyond its reasonable control, including acts of God, labor disputes, utility failures, and governmental action, provided it gives prompt written notice.'],
+  ['Assignment', 'Neither party may assign this Agreement without the prior written consent of the other party, except to a successor in connection with a merger or a sale of substantially all of its assets, and any other attempted assignment is void.'],
+  ['Independent Contractor Status', 'The parties are independent contractors, and nothing in this Agreement creates a partnership, joint venture, agency, or employment relationship between them or between either party and the personnel of the other.'],
+  ['Limitation of Liability', 'Neither party is liable for indirect, incidental, special, consequential, or punitive damages, and each party total aggregate liability is limited to the amounts paid or payable under this Agreement in the twelve months preceding the claim.'],
+  ['Notices', 'All notices under this Agreement must be in writing and are effective when delivered by hand, by nationally recognized overnight courier, or by certified mail, return receipt requested, to the addresses set out in the signature block.'],
+  ['Survival', 'The provisions of this Agreement that by their nature should survive termination, including confidentiality, limitation of liability, and governing law, survive any expiration or termination of this Agreement.'],
+  ['Compliance with Law', 'Each party will comply with all laws, rules, and regulations applicable to its performance under this Agreement, including those governing data protection, anti-corruption, export control, and workplace safety.'],
+  ['Further Assurances', 'Each party will execute and deliver any further documents and take any further actions that the other party reasonably requests to give effect to the purposes and intent of this Agreement.'],
+  ['Headings', 'Section headings in this Agreement are for convenience of reference only, do not form part of it, and do not affect the interpretation of any provision of this Agreement.'],
+  ['Third-Party Beneficiaries', 'This Agreement is for the sole benefit of the parties and their permitted successors and assigns, and nothing in it confers any right or remedy on any other person or entity.'],
+  ['Dispute Resolution', 'The parties will attempt in good faith to resolve any dispute through escalation to their respective executives before commencing litigation, and each party bears its own costs of that escalation process.'],
+];
+
+/// Emits `count` numbered boilerplate clauses starting at `start`, wrapped so
+/// each page of the generated PDF is realistically dense.
+function boilerplate(start, count, seed = 0) {
+  const lines = [];
+  for (let index = 0; index < count; index += 1) {
+    const [heading, body] = BOILERPLATE_CLAUSES[(index + seed) % BOILERPLATE_CLAUSES.length];
+    lines.push(`${start + index}. ${heading}.`);
+    lines.push(...wrap(body, 72));
+    lines.push('');
+  }
+  return lines;
+}
+
+function wrap(text, width) {
+  const lines = [];
+  let current = '';
+  for (const word of text.split(' ')) {
+    if (current && current.length + word.length + 1 > width) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current ? `${current} ${word}` : word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/// Splits a flat line list into fixed-size pages, so a fixture's page count and
+/// character offsets are predictable and can be asserted against.
+function paginate(lines, perPage = 50) {
+  const pages = [];
+  for (let index = 0; index < lines.length; index += perPage) {
+    pages.push({ lines: lines.slice(index, index + perPage) });
+  }
+  return pages;
 }
 
 function raster(width, height, seed = 7) {
@@ -295,6 +369,219 @@ function docx() {
   ]);
 }
 
+/// A dense eight-page statement of work whose defining date is on page five.
+///
+/// The three dates are placed so that the answer cannot be reached by reading
+/// the front or the back of the file: the referenced master agreement date is
+/// on page one, the signature date is on the last page, and the effective date
+/// that actually defines the document sits past the first fourteen thousand
+/// characters and before the last eight thousand.
+function statementOfWork() {
+  const lines = [
+    'STATEMENT OF WORK NO. 4',
+    'Issued under the Master Services Agreement dated June 2, 2023',
+    '',
+    ...wrap('This Statement of Work ("SOW") is entered into by and between Ridgeline Cartography LLC, a Delaware limited liability company ("Provider"), and Vistage Worldwide, Inc., a California corporation ("Client"). Capitalized terms used but not defined in this SOW have the meanings given to them in the Master Services Agreement dated June 2, 2023 between the same parties.', 72),
+    '',
+    'Provider engagement director: Dana Ruiz',
+    'Client program sponsor: Priya Nandakumar, Director of Revenue Operations',
+    'Provider billing contact: accounts@ridgeline-cartography.example',
+    'Reference: SOW-2026-004',
+    '',
+    '1. Purpose.',
+    ...wrap('Provider will implement and configure the Client customer relationship management platform, migrate historical records from the legacy system, and deliver enablement training to the Client revenue operations team.', 72),
+    '',
+    '2. Deliverables.',
+    ...wrap('Provider will deliver a solution design document, a configured production environment, a validated data migration of no fewer than four hundred thousand historical records, four enablement workshops, and thirty days of hypercare support after go-live.', 72),
+    '',
+    ...boilerplate(3, 65, 0),
+    '4. TERM.',
+    '4.1 Effective Date.',
+    ...wrap('This Statement of Work is effective as of April 1, 2026 and continues through March 31, 2027 unless terminated earlier in accordance with Section 11 of the Master Services Agreement. The parties may extend the term only by a written amendment signed by both of them.', 72),
+    '',
+    '4.2 Milestones.',
+    ...wrap('Solution design is due May 15, 2026. Data migration validation is due August 31, 2026. Go-live is scheduled for October 1, 2026. Hypercare ends thirty days after go-live.', 72),
+    '',
+    '5. FEES.',
+    ...wrap('Client will pay Provider a fixed fee of $248,000 for the services described in this Statement of Work, invoiced in four equal installments on the first business day of each calendar quarter during the term. Invoices are payable within thirty days of receipt.', 72),
+    '',
+    ...boilerplate(68, 45, 5),
+    '',
+    'IN WITNESS WHEREOF, the parties have executed this Statement of Work.',
+    'Executed on April 9, 2026.',
+    '',
+    'RIDGELINE CARTOGRAPHY LLC',
+    'By: /s/ Dana Ruiz',
+    'Name: Dana Ruiz',
+    'Title: Engagement Director',
+    '',
+    'VISTAGE WORLDWIDE, INC.',
+    'By: /s/ Priya Nandakumar',
+    'Name: Priya Nandakumar',
+    'Title: Director of Revenue Operations',
+  ];
+  return buildPdf(paginate(lines, 50));
+}
+
+/// A termination notice carrying a notice date, a termination-effective date,
+/// two response deadlines, the date of the agreement being terminated, and a
+/// lawyer who is not a party.
+function terminationNotice() {
+  const lines = [
+    'NOTICE OF TERMINATION',
+    'Delivered by certified mail and electronic mail',
+    '',
+    'Date of this Notice: December 29, 2026',
+    '',
+    'To: John Smith, 1420 Fielder Lane, Cedar Rapids, IA 52402',
+    'From: Harriet Voss, Vice President of People Operations',
+    '      Northstar Lantern Works LLC, 88 Harbour Street, Cedar Rapids, IA 52401',
+    'cc: Marcus Reyes, Esq., Reyes and Tolliver LLP, outside counsel to the Company',
+    '',
+    'Re: Termination of the Employment Agreement dated March 3, 2024',
+    '',
+    ...wrap('This letter constitutes formal notice under Section 9.2 of the Employment Agreement between you and Northstar Lantern Works LLC dated March 3, 2024 (the "Employment Agreement") that the Company is terminating the Employment Agreement without cause.', 72),
+    '',
+    ...wrap('Your employment with the Company will end effective January 31, 2027 (the "Separation Date"). You will remain on the payroll through the Separation Date and will continue to receive your base salary and benefits through that date.', 72),
+    '',
+    ...wrap('Final expense reimbursements must be submitted no later than February 14, 2027. Any severance election form must be returned to the Company by February 28, 2027. Company property, including the laptop assigned to you on May 12, 2025, must be returned on or before the Separation Date.', 72),
+    '',
+    'Sincerely,',
+    '/s/ Harriet Voss',
+    'Harriet Voss, Vice President of People Operations',
+    'Northstar Lantern Works LLC',
+  ];
+  return buildPdf(paginate(lines, 50));
+}
+
+/// An amendment that names the original agreement's date nine times, so that
+/// picking "the date that appears most often" gets the wrong answer.
+function consultingAmendment() {
+  const original = 'the Consulting Agreement dated January 12, 2023';
+  const lines = [
+    'FIRST AMENDMENT TO CONSULTING AGREEMENT',
+    '',
+    ...wrap(`This First Amendment to Consulting Agreement (this "Amendment") is dated as of September 14, 2025, and amends ${original} (the "Consulting Agreement") by and between Vistage Worldwide, Inc. ("Company") and Jane Ellery ("Consultant").`, 72),
+    '',
+    'RECITALS',
+    ...wrap(`WHEREAS the parties entered into ${original}; and WHEREAS ${original} provides for amendment only in writing; and WHEREAS the parties wish to amend ${original} as set out below;`, 72),
+    '',
+    '1. Amendment to Fees.',
+    ...wrap(`Section 4.1 of ${original} is deleted and replaced with the following: "Company will pay Consultant a monthly retainer of $9,500, payable in arrears within fifteen days after the end of each calendar month."`, 72),
+    '',
+    '2. Amendment to Term.',
+    ...wrap(`Section 2.1 of ${original} is amended to extend the term through December 31, 2026. All renewal notices required by ${original} remain due sixty days before the end of the then-current term.`, 72),
+    '',
+    '3. No Other Changes.',
+    ...wrap(`Except as expressly amended by this Amendment, ${original} remains in full force and effect, and all references in ${original} to "this Agreement" mean ${original} as amended by this Amendment.`, 72),
+    '',
+    ...boilerplate(4, 6, 3),
+    'IN WITNESS WHEREOF, the parties have executed this Amendment.',
+    'VISTAGE WORLDWIDE, INC.   By: /s/ R. Alvarado   Title: General Counsel',
+    'JANE ELLERY   By: /s/ Jane Ellery',
+  ];
+  return buildPdf(paginate(lines, 50));
+}
+
+/// An invoice whose invoice date and payment due date are both prominent.
+function vendorInvoice() {
+  return buildPdf([{
+    lines: [
+      'INVOICE',
+      'Acme Corporation, 500 Foundry Road, Providence, RI 02903',
+      '',
+      'Invoice Number: INV-7741',
+      'Invoice Date: January 5, 2026',
+      'Payment Due Date: February 4, 2026',
+      'Purchase Order: PO-2025-8834',
+      '',
+      'Bill To: Vistage Worldwide, Inc., Accounts Payable',
+      'Remit To: Acme Corporation, Account 4471-9920',
+      '',
+      'Description                                   Qty      Rate       Amount',
+      'Annual platform subscription, 2026 term         1   $42,000     $42,000',
+      'Onboarding and configuration services          40      $210      $8,400',
+      'Premium support uplift                          1    $6,300      $6,300',
+      '',
+      'Subtotal: $56,700',
+      'Tax: $0.00',
+      'Total Due: $56,700',
+      '',
+      'Late payments accrue interest at 1.5% per month from the Payment Due Date.',
+      'Questions: billing@acme-corporation.example',
+    ],
+  }]);
+}
+
+/// A settlement agreement with an effective date stated in the preamble and a
+/// separate, later, payment date.
+function settlementAgreement() {
+  const lines = [
+    'SETTLEMENT AGREEMENT AND MUTUAL RELEASE',
+    '',
+    ...wrap('This Settlement Agreement and Mutual Release (this "Agreement") is made effective as of July 22, 2026, by and between Harborline Freight Systems LLC ("Harborline") and Quill and Vane Advisory Group, Inc. ("Quill and Vane"), each a "Party" and together the "Parties."', 72),
+    '',
+    'RECITALS',
+    ...wrap('WHEREAS the Parties are involved in a dispute concerning invoices issued under a logistics services agreement dated February 9, 2024; and WHEREAS the Parties wish to resolve that dispute without admission of liability;', 72),
+    '',
+    '1. Settlement Payment.',
+    ...wrap('Harborline will pay Quill and Vane the sum of $312,500 in full and final settlement, payable in a single wire transfer no later than August 21, 2026.', 72),
+    '',
+    '2. Mutual Release.',
+    ...wrap('Effective upon receipt of the Settlement Payment, each Party releases the other from all claims, demands, and causes of action arising out of or relating to the dispute described in the Recitals.', 72),
+    '',
+    '3. No Admission.',
+    ...wrap('This Agreement is a compromise of disputed claims and is not an admission of liability or wrongdoing by any Party.', 72),
+    '',
+    ...boilerplate(4, 30, 6),
+    ...boilerplate(34, 25, 1),
+    'IN WITNESS WHEREOF, the Parties have executed this Agreement.',
+    'HARBORLINE FREIGHT SYSTEMS LLC   By: /s/ T. Okafor',
+    'QUILL AND VANE ADVISORY GROUP, INC.   By: /s/ L. Bergstrom',
+  ];
+  return buildPdf(paginate(lines, 50));
+}
+
+/// An internal note with no document type, no defining date, and several names
+/// in no clear role. It exists to be sent to review.
+function ambiguousNote() {
+  return buildPdf([{
+    lines: [
+      'Notes',
+      '',
+      'Talked with Rowan and Priya about the thing from last week. Still open.',
+      'Rowan thinks we should wait until after the offsite. Priya disagrees.',
+      'Someone should check whether Ridgeline already sent theirs.',
+      'Numbers looked closer to 40 than 60 but nobody wrote them down.',
+      'Follow up: ask Dana.',
+    ],
+  }]);
+}
+
+/// An Office order form whose parties sit in a table and whose start date is
+/// separate from its signature date.
+function orderFormDocx() {
+  const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Order Form</w:t></w:r></w:p>
+<w:p><w:r><w:t>This Order Form is entered into by and between Tessellate Analytics Ltd. and Vistage Worldwide, Inc. under the Master Subscription Agreement dated August 8, 2022.</w:t></w:r></w:p>
+<w:tbl>
+<w:tr><w:tc><w:p><w:r><w:t>Subscription Start Date</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>February 1, 2026</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Subscription End Date</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>January 31, 2028</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Annual Fee</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>$96,000</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Invoice Due</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Net 45 from invoice date</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+<w:p><w:r><w:t>Signed on January 14, 2026 by authorized representatives of both parties.</w:t></w:r></w:p>
+</w:body></w:document>`;
+  return zip([
+    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`],
+    ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`],
+    ['word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`],
+    ['word/styles.xml', `<?xml version="1.0" encoding="UTF-8"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:outlineLvl w:val="0"/></w:style></w:styles>`],
+    ['word/document.xml', document],
+  ]);
+}
+
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -324,6 +611,13 @@ export async function generateFixtures(outputDirectory) {
     ['document-image.png', png(purchaseOrder, 'Purchase Order PO-310 dated July 14, 2025 for Ember Post Manufacturing LLC')],
     ['document-image.jpg', jpeg(packingSlip)],
     ['document-image.tiff', tiff(workOrder, 'Work Order WO-312 dated July 16, 2025 for Harbor Comet Repairs LLC')],
+    ['statement-of-work.pdf', statementOfWork()],
+    ['termination-notice.pdf', terminationNotice()],
+    ['consulting-amendment.pdf', consultingAmendment()],
+    ['vendor-invoice.pdf', vendorInvoice()],
+    ['settlement-agreement.pdf', settlementAgreement()],
+    ['ambiguous-note.pdf', ambiguousNote()],
+    ['order-form.docx', orderFormDocx()],
     ['mixed-batch/duplicate-invoice-a.pdf', invoice],
     ['mixed-batch/duplicate-invoice-b.pdf', invoice],
     ['mixed-batch/unsupported.csv', Buffer.from('fictional_id,status\nX-001,unsupported\n')],

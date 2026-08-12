@@ -7,33 +7,29 @@ use std::{
     time::Duration,
 };
 
-use intern_core::{ModelProposal, OperationDirection, OperationStage, QueueStatus};
+use intern_core::{OperationDirection, OperationStage, QueueStatus};
+use intern_engine::{
+    DocumentAnalysis, DocumentSource, Engine, LlamaServer, ModelClient, ModelManifest,
+    ServerOptions, SupervisedWorker, engine::wants_vision, prepare_worker_temp_root,
+};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::{
-    model::{
-        client::{DocumentInput, ModelClient},
-        download::{
-            CancellationToken, Downloader, ReqwestHttpTransport, SetupProgress, SystemDiskSpace,
-        },
-        manifest::ModelManifest,
-        server::LlamaServer,
-        setup::{
-            ExistingModelSelection, SetupOperationGate, install_existing_model_files,
-            semantic_probes, validate_semantic_probe,
-        },
-    },
+use intern_engine::download::{
+    CancellationToken, Downloader, ReqwestHttpTransport, SetupProgress, SystemDiskSpace,
+    validate_selected_file,
+};
+use intern_engine::setup::{
+    ExistingModelSelection, SetupOperationGate, install_existing_model_files, semantic_probes,
+    validate_semantic_probe,
+};
+use intern_queue::{
+    AnalyzerBoundary, AppSettings, ModelFailure, Pipeline, PipelineError, PipelineEventSink,
+    PipelineItem, PipelineProgress, SettingsStore,
     paths::{
         canonical_file, canonical_folder, canonical_model_file, collect_supported_files,
         parse_item_id,
     },
-    pipeline::{
-        ModelBoundary, ModelFailure, Pipeline, PipelineError, PipelineEventSink, PipelineItem,
-        PipelineProgress,
-    },
-    settings::{AppSettings, SettingsStore},
-    worker::{SupervisedWorker, prepare_worker_temp_root},
 };
 
 #[derive(Clone, Debug, Deserialize)]
@@ -73,8 +69,8 @@ impl From<PipelineError> for CommandError {
     }
 }
 
-impl From<crate::model::ModelError> for CommandError {
-    fn from(error: crate::model::ModelError) -> Self {
+impl From<intern_engine::EngineError> for CommandError {
+    fn from(error: intern_engine::EngineError) -> Self {
         Self {
             code: error.code().as_str().into(),
             message: "local model operation failed".into(),
@@ -149,8 +145,10 @@ impl PipelineEventSink for TauriPipelineEvents {
 struct RuntimeModel {
     executable: PathBuf,
     model_directory: PathBuf,
-    client: RwLock<Option<ModelClient>>,
+    engine: RwLock<Option<Engine>>,
     server: Mutex<Option<LlamaServer>>,
+    /// Whether the currently running server has the vision projector loaded.
+    vision_loaded: AtomicBool,
 }
 
 impl RuntimeModel {
@@ -158,52 +156,87 @@ impl RuntimeModel {
         Self {
             executable,
             model_directory,
-            client: RwLock::new(None),
+            engine: RwLock::new(None),
             server: Mutex::new(None),
+            vision_loaded: AtomicBool::new(false),
         }
     }
 
     fn installed(&self, manifest: &ModelManifest) -> bool {
         manifest.files.iter().all(|file| {
-            crate::model::download::validate_selected_file(
-                &self.model_directory.join(&file.name),
-                file,
-            )
-            .is_ok()
+            validate_selected_file(&self.model_directory.join(&file.name), file).is_ok()
         })
     }
 
     fn start(&self, manifest: &ModelManifest) -> Result<(), CommandError> {
+        self.start_mode(manifest, false)
+    }
+
+    /// Starts the local server, loading the vision projector only when asked.
+    ///
+    /// Text-only is the normal mode: essentially every business document has
+    /// usable text, and the projector costs hundreds of megabytes of resident
+    /// memory that a 16 GB laptop would rather keep.
+    fn start_mode(&self, manifest: &ModelManifest, vision: bool) -> Result<(), CommandError> {
         if !self.installed(manifest) {
             return Err(CommandError {
                 code: "MODEL_NOT_READY".into(),
                 message: "model files are not installed".into(),
             });
         }
+        let model = manifest.model().ok_or_else(|| CommandError {
+            code: "MODEL_MANIFEST_INVALID".into(),
+            message: "model manifest names no text model".into(),
+        })?;
+        let projector = vision
+            .then(|| manifest.projector())
+            .flatten()
+            .map(|file| self.model_directory.join(&file.name));
         let server = LlamaServer::start(
             &self.executable,
-            &self.model_directory.join(&manifest.files[0].name),
-            &self.model_directory.join(&manifest.files[1].name),
-            Duration::from_secs(120),
+            &self.model_directory.join(&model.name),
+            projector.as_deref(),
+            &ServerOptions::default(),
         )?;
-        let client = ModelClient::new(&server.completion_endpoint(), server.api_key().to_owned())?;
+        let client = ModelClient::new(
+            &server.completion_endpoint(),
+            server.api_key().to_owned(),
+            manifest.served_model_name.clone(),
+        )?;
         let mut server_state = self.server.lock().map_err(|_| CommandError {
             code: "MODEL_NOT_READY".into(),
             message: "model process state is unavailable".into(),
         })?;
-        let mut client_state = self.client.write().map_err(|_| CommandError {
+        let mut engine_state = self.engine.write().map_err(|_| CommandError {
             code: "MODEL_NOT_READY".into(),
             message: "model state is unavailable".into(),
         })?;
-        if server_state.is_some() || client_state.is_some() {
+        if server_state.is_some() || engine_state.is_some() {
             return Err(CommandError {
                 code: "MODEL_ALREADY_RUNNING".into(),
                 message: "local model process is already running".into(),
             });
         }
         *server_state = Some(server);
-        *client_state = Some(client);
+        *engine_state = Some(Engine::new(client));
+        self.vision_loaded.store(vision, Ordering::SeqCst);
         Ok(())
+    }
+
+    /// Reloads the model with its vision projector the first time a document
+    /// genuinely cannot be read as text, and leaves it loaded afterwards.
+    fn ensure_vision(&self) -> Result<(), ModelFailure> {
+        if self.vision_loaded.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let manifest =
+            ModelManifest::embedded().map_err(|_| ModelFailure::fatal("MODEL_NOT_READY"))?;
+        if manifest.projector().is_none() {
+            return Ok(());
+        }
+        self.stop_runtime()?;
+        self.start_mode(&manifest, true)
+            .map_err(|error| ModelFailure::fatal(error.code))
     }
 
     fn start_verified(
@@ -231,25 +264,25 @@ impl RuntimeModel {
             if cancellation.is_canceled() {
                 return Err(setup_canceled_error());
             }
-            let proposal = {
-                let client = self.client.read().map_err(|_| CommandError {
+            let analysis = {
+                let engine = self.engine.read().map_err(|_| CommandError {
                     code: "MODEL_SELF_TEST_FAILED".into(),
                     message: "local model state is unavailable during self-test".into(),
                 })?;
-                let client = client.as_ref().ok_or_else(|| CommandError {
+                let engine = engine.as_ref().ok_or_else(|| CommandError {
                     code: "MODEL_SELF_TEST_FAILED".into(),
                     message: "local model is unavailable during self-test".into(),
                 })?;
-                client.propose(&probe.document)
+                engine.analyze(&probe.document, "pdf", &[])
             };
             if cancellation.is_canceled() {
                 return Err(setup_canceled_error());
             }
-            let proposal = proposal.map_err(|_| CommandError {
+            let analysis = analysis.map_err(|_| CommandError {
                 code: "MODEL_SELF_TEST_FAILED".into(),
                 message: "local model semantic self-test request failed".into(),
             })?;
-            validate_semantic_probe(&probe, &proposal)?;
+            validate_semantic_probe(&probe, &analysis)?;
         }
         Ok(())
     }
@@ -262,7 +295,7 @@ impl RuntimeModel {
                 .map_err(|_| ModelFailure::fatal("MODEL_CANCEL_FAILED"))?;
             server
                 .take()
-                .map(|mut server| {
+                .map(|server| {
                     server
                         .stop()
                         .map_err(|_| ModelFailure::fatal("MODEL_CANCEL_FAILED"))
@@ -270,24 +303,33 @@ impl RuntimeModel {
                 .unwrap_or(Ok(()))
         };
         *self
-            .client
+            .engine
             .write()
             .map_err(|_| ModelFailure::fatal("MODEL_CANCEL_FAILED"))? = None;
+        self.vision_loaded.store(false, Ordering::SeqCst);
         stop_result
     }
 }
 
-impl ModelBoundary for RuntimeModel {
-    fn propose(&self, document: &DocumentInput) -> Result<ModelProposal, ModelFailure> {
-        let client = self
-            .client
+impl AnalyzerBoundary for RuntimeModel {
+    fn analyze(
+        &self,
+        source: &DocumentSource,
+        extension: &str,
+        existing_names: &[&str],
+    ) -> Result<DocumentAnalysis, ModelFailure> {
+        if wants_vision(source) {
+            self.ensure_vision()?;
+        }
+        let engine = self
+            .engine
             .read()
             .map_err(|_| ModelFailure::fatal("MODEL_NOT_READY"))?;
-        let client = client
+        let engine = engine
             .as_ref()
             .ok_or_else(|| ModelFailure::fatal("MODEL_NOT_READY"))?;
-        client
-            .propose_once(document)
+        engine
+            .analyze(source, extension, existing_names)
             .map_err(|error| ModelFailure::retryable(error.code().as_str()))
     }
 
@@ -327,7 +369,7 @@ struct SetupManager {
 
 impl SetupManager {
     fn new(app: AppHandle, runtime: Arc<RuntimeModel>, manifest: &ModelManifest) -> Self {
-        let total_bytes = manifest.files.iter().map(|file| file.size).sum();
+        let total_bytes = manifest.total_bytes();
         let installed = runtime.installed(manifest);
         let state = SetupStateDto {
             state: if installed {
@@ -439,7 +481,7 @@ impl SetupManager {
         cancellation: &CancellationToken,
     ) -> Result<u64, CommandError> {
         let manifest = ModelManifest::embedded()?;
-        let total = manifest.files.iter().map(|file| file.size).sum::<u64>();
+        let total = manifest.total_bytes();
         match source {
             SetupSource::Download => {
                 let downloader = Downloader::new(ReqwestHttpTransport::new()?, SystemDiskSpace);
@@ -646,7 +688,7 @@ impl AppState {
         ));
         if runtime.installed(&manifest) {
             if let Err(error) = runtime.start_verified(&manifest, &CancellationToken::new()) {
-                let installed_bytes = manifest.files.iter().map(|file| file.size).sum();
+                let installed_bytes = manifest.total_bytes();
                 setup.set_state(SetupStatus::Failed, installed_bytes, Some(error.code));
             }
         }
@@ -855,10 +897,10 @@ pub fn history_clear(state: State<'_, AppState>) -> Result<(), CommandError> {
 fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
     let proposal = item.proposal.as_ref();
     let evidence = proposal.map(|record| EvidenceDto {
-        date: record.outcome.proposal.evidence.date.clone(),
-        r#type: record.outcome.proposal.evidence.document_type.clone(),
-        parties: (!record.outcome.proposal.parties.is_empty())
-            .then(|| record.outcome.proposal.parties.join("; ")),
+        date: record.analysis.proposal.evidence.date.clone(),
+        r#type: record.analysis.proposal.evidence.document_type.clone(),
+        parties: (!record.analysis.proposal.parties.is_empty())
+            .then(|| record.analysis.proposal.parties.join("; ")),
     });
     let reconciliation = item
         .receipt
@@ -884,7 +926,7 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
             .to_owned(),
         status: item.status,
         proposed_filename: proposal.map(|record| record.filename.clone()),
-        confidence: proposal.map(|record| record.outcome.proposal.confidence),
+        confidence: proposal.map(|record| record.analysis.proposal.confidence),
         description: proposal.map(|record| record.description.clone()),
         evidence,
         reason: proposal

@@ -10,8 +10,7 @@ it('runs non-publishing browser, Windows, model, and installer QA and uploads ev
   expect(workflow).not.toContain('git push');
   expect(workflow).toContain('INTERN_QA_CAPTURE: "1"');
   expect(workflow).toContain('docs/qa/latest-implementation.png');
-  expect(workflow).toContain('intern-model-evaluator');
-  expect(workflow).toContain('intern-model-evidence-validator');
+  expect(workflow).toContain('intern-evaluate');
   expect(workflow).toContain('run-model-evaluation.ps1');
   expect(workflow).toContain('smoke-installer.ps1');
   expect(workflow).toContain('validate-model-evaluation.mjs');
@@ -22,12 +21,18 @@ it('runs non-publishing browser, Windows, model, and installer QA and uploads ev
   expect(workflow).toContain('actions/upload-artifact@v4');
 });
 
-it('gates the main release commit before creating its annotated tag and publishing', async () => {
+it('never publishes as a side effect of merging to main', async () => {
   const workflow = await readFile('.github/workflows/release.yml', 'utf8');
-  expect(workflow).toContain('branches: [main]');
+  // Releasing is dispatched deliberately; a merge must not tag or publish.
+  expect(workflow).toContain('workflow_dispatch:');
+  expect(workflow).not.toContain('branches: [main]');
   expect(workflow).toContain('group: intern-v0.1.0-alpha.1-release');
   expect(workflow).toContain('release_target:');
-  expect(workflow).toContain('cargo build --locked -p intern-app --release --bin intern-model-evaluator');
+});
+
+it('gates the exact main commit before creating its annotated tag and publishing', async () => {
+  const workflow = await readFile('.github/workflows/release.yml', 'utf8');
+  expect(workflow).toContain('cargo build --locked -p intern-engine --release --bin intern-evaluate');
   expect(workflow).toContain('run-model-evaluation.ps1');
   expect(workflow).toContain('-OutputPath release\\model-evaluation.json');
   expect(workflow).toContain('create-release-evidence.mjs');

@@ -1,10 +1,64 @@
 # Intern
 
-Intern is a local-first Windows 10/11 utility for reviewing safe document rename
-and move proposals. Documents, extracted text, OCR output, and model prompts stay
-on the device. Intern has no telemetry, cloud fallback, or remote document
-processing; the only network activity is an explicit, user-started download of
-the pinned local model files.
+Intern reads a document and tells you what to call it.
+
+```text
+Scanned_20260401_0003.pdf   ->  2026-04-01 Statement of Work between Ridgeline Cartography and Vistage.pdf
+doc1.pdf                    ->  2026-12-29 Notice of Termination for John Smith.pdf
+INV_7741.pdf                ->  2026-01-05 Invoice from Acme Corporation.pdf
+```
+
+Alongside the name it produces one sentence saying what the document actually
+concerns, the verbatim excerpts behind every fact it used, and a confidence. If
+anything is unsupported, the document goes to review instead of being renamed.
+
+Everything happens on the machine. Document text, extracted pages, OCR output,
+and model prompts never leave it. There is no telemetry, no cloud fallback, and
+no remote processing; the only network traffic is one explicit, user-started
+download of the pinned model file.
+
+## How a document becomes a filename
+
+```text
+document
+  -> text/Markdown extraction (native text first; OCR only when there is none)
+  -> whole-document distillation (every page read, redundancy removed)
+  -> one local inference
+  -> evidence validation
+  -> filename + description + review decision
+```
+
+The distillation stage is the part that matters. Intern does **not** send the
+model the first few pages and the last few pages. It reads every block on every
+page, scores each one for how much it helps answer "what is this, when does it
+take effect, who is it between", and keeps the best blocks **in document order**
+under a character budget, marking elisions with `[...]`. A statement of work
+whose effective date is on page five reaches the model exactly as well as one
+whose date is on page one.
+
+Kept text is verbatim, which is what makes the safety check real: the model has
+to quote the document, and Intern checks the quoted facts against the document
+before they can rename anything.
+
+Full details, thresholds, and measurements are in
+[`docs/architecture.md`](docs/architecture.md).
+
+## The filename
+
+```text
+YYYY-MM-DD <what the document is> <the party or parties>.<original extension>
+```
+
+The date is the one that *defines* the document, not the first, last, or
+easiest one to find: an agreement's effective date, a notice's notice date, an
+invoice's invoice date, an amendment's own date rather than the date of the
+agreement it amends. Payment due dates, renewal deadlines, and response
+deadlines are never used. If no defining date can be established, the document
+goes to review rather than getting an invented one.
+
+Names are sanitised for Windows, keep the original extension, shed the least
+identifying detail first when they would be too long to scan, and get a numeric
+suffix on collision.
 
 ## Development
 
@@ -14,8 +68,8 @@ npm run dev
 ```
 
 Use the pinned Node 24.15.0 (`.nvmrc`), Rust 1.88.0, and the committed
-`Cargo.lock`. Run the deterministic clean-room
-corpus generator and frontend gates with:
+`Cargo.lock`. Run the deterministic clean-room corpus generator and the frontend
+gates with:
 
 ```sh
 npm run fixtures
@@ -24,15 +78,38 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-The browser development and Playwright builds use the real in-memory bridge; no
-document content or test data is sent to a service. Fixture contents and gold
-fields are documented in `fixtures/README.md` and `fixtures/expected.json`.
+The browser development and Playwright builds use the in-memory bridge; no
+document content or test data is sent to a service. Fixture contents and
+reviewed answers are documented in `fixtures/README.md` and
+`fixtures/expected.json`.
 
 Run Rust tests with:
 
 ```sh
 cargo test --locked --workspace --all-targets
 ```
+
+### Crates
+
+| Crate | What it owns |
+| --- | --- |
+| `intern-engine` | Document understanding: distillation, prompt, local model client and server, evidence validation, filename composition, and model installation. |
+| `intern-queue` | The durable queue: ordering, leases, retries, and the review/apply workflow. |
+| `intern-core` | Crash-safe queue storage and journalled file operations. |
+| `intern-worker` | The out-of-process parser: PDFium, OCR, and Office extraction. |
+| `intern-app` | The Tauri desktop shell. |
+
+The engine is usable without the desktop app:
+
+```sh
+intern-analyze --file contract.pdf --worker intern-worker.exe \
+  --endpoint http://127.0.0.1:8080/v1/chat/completions --api-key KEY
+```
+
+It prints the proposed filename, the description, the evidence, the review
+reasons, and local timings as one JSON object. `--distill-only` prints the
+digest without running a model. This is the same code path the app uses, so a
+watched folder, a script, or a future connector gets identical results.
 
 ## Windows runtime assets and installer
 
@@ -61,9 +138,9 @@ Tauri produces a per-user NSIS installer. To smoke-test a clean installer:
 ```
 
 The installer includes third-party notices and the generated `licenses/`
-inventory but never includes `.gguf` model
-files. Local model weights are installed separately under the user's local
-application data only after explicit setup.
+inventory but never includes `.gguf` model files. Local model weights are
+installed separately under the user's local application data only after explicit
+setup.
 
 ## CI and release
 
@@ -72,12 +149,11 @@ Clippy with warnings denied, workspace tests, native fixture integration, asset
 verification, the Windows Tauri build, and the installer smoke test. Runtime and
 dependency caches are keyed by lockfiles and the runtime asset manifest.
 
-The release workflow is deliberately limited to the exact annotated testing tag
-`v0.1.0-alpha.1`. It requires accepted `docs/qa/model-evaluation.json` evidence,
-runs the exact Q4 pair through llama.cpp b10361 in a temporary directory, and
-publishes the NSIS executable, `THIRD_PARTY_NOTICES.md`, Microsoft SBOM Tool
-4.1.5-generated and validated SPDX 2.2 documents for every actual vcpkg/native
-runtime package, and `SHA256SUMS.txt` using the
-repository token. It uses the checked-in release notes, refuses lightweight or
-unexpected tags, and checks that temporary model files never become release
-assets.
+`scripts/run-model-evaluation.ps1` scores the whole gold corpus through the
+shipping pipeline with the exact pinned model and real inference, and
+`scripts/validate-model-evaluation.mjs` gates on date, type, party, and
+description accuracy, on never filing a document under a date the corpus marks
+as a trap, and on the review rate. Publishing is a deliberate
+`workflow_dispatch` against a chosen main commit, never a side effect of
+merging; the release job still refuses any commit but the one it was dispatched
+for.
