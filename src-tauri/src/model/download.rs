@@ -820,7 +820,7 @@ where
 {
     let mut file = File::open(path).map_err(|_| download_failed())?;
     let (copied, _) = hash_reader_cancelable(
-        &mut file.by_ref().take(expected_length),
+        &mut Read::by_ref(&mut file).take(expected_length),
         cancellation,
         progress,
     )?;
