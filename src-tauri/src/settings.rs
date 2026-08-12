@@ -7,23 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::pipeline::{PipelineError, PipelineResult};
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub destination: String,
     pub start_minimized: bool,
     #[serde(default)]
     pub automatic_rename: bool,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            destination: String::new(),
-            start_minimized: false,
-            automatic_rename: false,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]

@@ -22,14 +22,22 @@ it('runs non-publishing browser, Windows, model, and installer QA and uploads ev
   expect(workflow).toContain('actions/upload-artifact@v4');
 });
 
-it('reruns production model evidence at the tag and gates publishing on the release-run manifest', async () => {
+it('gates the main release commit before creating its annotated tag and publishing', async () => {
   const workflow = await readFile('.github/workflows/release.yml', 'utf8');
+  expect(workflow).toContain('branches: [main]');
+  expect(workflow).toContain('group: intern-v0.1.0-alpha.1-release');
+  expect(workflow).toContain('release_target:');
   expect(workflow).toContain('cargo build --locked -p intern-app --release --bin intern-model-evaluator');
   expect(workflow).toContain('run-model-evaluation.ps1');
   expect(workflow).toContain('-OutputPath release\\model-evaluation.json');
   expect(workflow).toContain('create-release-evidence.mjs');
   expect(workflow).toContain('validate-release-evidence.mjs');
+  expect(workflow).toContain('git tag -a $Tag $env:GITHUB_SHA');
+  expect(workflow).toContain('git push origin "refs/tags/$Tag"');
+  expect(workflow.indexOf('validate-release-evidence.mjs')).toBeLessThan(workflow.indexOf('git tag -a $Tag $env:GITHUB_SHA'));
   expect(workflow.indexOf('validate-release-evidence.mjs')).toBeLessThan(workflow.indexOf('gh release create'));
+  expect(workflow.indexOf('git tag -a $Tag $env:GITHUB_SHA')).toBeLessThan(workflow.indexOf('gh release create'));
+  expect(workflow).toContain('gh release view $Tag --json isDraft');
   expect(workflow).toContain('INTERN_QA_CAPTURE: "1"');
   expect(workflow).toContain('release\\cargo-test.log');
   expect(workflow).toContain('--log=release/cargo-test.log');

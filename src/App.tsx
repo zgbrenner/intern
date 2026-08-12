@@ -77,7 +77,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const drawerOpen = Boolean(selected && narrowInspector);
   const readyItems = items.filter((item) => item.status === 'ready' && item.proposedFilename);
   const queueStatus = queueStatusAnnouncement(items, paused);
-  const select = (item: QueueItem, trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; reviewTrigger.current = { element: trigger, itemId: item.id }; setSelectedId(item.id); };
+  const select = (item: QueueItem, trigger: HTMLButtonElement) => { seededSelection.current = true; focusRestoreVersion.current += 1; reviewTrigger.current = { element: trigger, itemId: item.id }; setSelectedId(item.id); };
   const restoreQueueFocus = () => {
     const invocation = reviewTrigger.current;
     const version = ++focusRestoreVersion.current;

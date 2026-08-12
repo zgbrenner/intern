@@ -2,17 +2,48 @@ name: Release v0.1.0-alpha.1
 
 on:
   push:
-    tags:
-      - v0.1.0-alpha.1
+    branches: [main]
+
+concurrency:
+  group: intern-v0.1.0-alpha.1-release
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
+  release_target:
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.target.outputs.eligible }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='v0.1.0-alpha.1'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            test "$(git cat-file -t "refs/tags/$tag")" = tag
+            if test "$(git rev-parse "refs/tags/$tag^{commit}")" != "$GITHUB_SHA"; then
+              echo 'eligible=false' >> "$GITHUB_OUTPUT"
+              echo "$tag is already bound to an earlier main commit; this push is a no-op."
+              exit 0
+            fi
+          fi
+          echo 'eligible=true' >> "$GITHUB_OUTPUT"
+
   release:
-    if: github.ref == 'refs/tags/v0.1.0-alpha.1'
+    needs: release_target
+    if: needs.release_target.outputs.eligible == 'true'
     runs-on: windows-latest
     env:
+      RELEASE_TAG: v0.1.0-alpha.1
       CARGO_TERM_COLOR: always
       INTERN_QA_CAPTURE: "1"
       INTERN_REQUIRE_GENERATED_FIXTURES: "1"
@@ -22,12 +53,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Require exact annotated release tag and dependency lock
+          ref: ${{ github.sha }}
+      - name: Require exact main release commit and dependency lock
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_NAME -ne "v0.1.0-alpha.1") { throw "Refusing unexpected release ref $env:GITHUB_REF_NAME" }
-          if ((git cat-file -t $env:GITHUB_REF_NAME).Trim() -ne "tag") { throw "Release ref must be an annotated tag object" }
-          if ((git rev-parse "$($env:GITHUB_REF_NAME)^{commit}").Trim() -ne $env:GITHUB_SHA) { throw "Annotated tag does not resolve to the checked-out commit" }
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw "Refusing unexpected release ref $env:GITHUB_REF" }
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Checkout does not match the immutable main push commit' }
           if (-not (Test-Path -LiteralPath Cargo.lock -PathType Leaf)) { throw "Cargo.lock must be committed; release dependency resolution is forbidden" }
           if (-not (Test-Path -LiteralPath docs\releases\v0.1.0-alpha.1.md -PathType Leaf)) { throw "Checked-in release notes are missing" }
       - uses: actions/setup-node@v4
@@ -107,7 +138,7 @@ jobs:
           ./scripts/stage-windows-runtime.ps1 -Destination $Stage
           ./scripts/smoke-worker.ps1 -WorkerPath (Join-Path $Stage "intern-worker.exe") -RuntimeDirectory $Stage
           "INTERN_RUNTIME_STAGE=$Stage" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Rerun Q4 and Q8 production evaluation for this exact tag run
+      - name: Rerun Q4 and Q8 production evaluation for this exact release commit
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
@@ -117,7 +148,7 @@ jobs:
             -EvaluatorPath target\release\intern-model-evaluator.exe `
             -OutputPath release\model-evaluation.json 2>&1 | Tee-Object -FilePath release\model-evaluation.log
           if ($LASTEXITCODE -ne 0) { throw "Production model evaluation failed" }
-      - name: Replay tag-run evidence through production extraction and validation
+      - name: Replay release-run evidence through production extraction and validation
         shell: pwsh
         run: |
           target\release\intern-model-evidence-validator.exe `
@@ -181,10 +212,47 @@ jobs:
           Get-ChildItem release -File | Where-Object Name -ne "SHA256SUMS.txt" | ForEach-Object {
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Sort-Object | Set-Content release\SHA256SUMS.txt -Encoding ascii
+      - name: Create or verify exact annotated release tag
+        shell: pwsh
+        run: |
+          $Tag = $env:RELEASE_TAG
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Refusing to tag a commit other than this workflow commit' }
+          git fetch --force --tags origin
+          if ($LASTEXITCODE -ne 0) { throw 'Could not refresh remote tags' }
+          git show-ref --verify --quiet "refs/tags/$Tag"
+          $ShowRefExit = $LASTEXITCODE
+          if ($ShowRefExit -eq 1) {
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag -a $Tag $env:GITHUB_SHA -m "Intern $Tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create annotated release tag' }
+            git push origin "refs/tags/$Tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not push annotated release tag' }
+          } elseif ($ShowRefExit -ne 0) {
+            throw 'Could not inspect release tag'
+          }
+          if ((git cat-file -t "refs/tags/$Tag").Trim() -ne 'tag') { throw 'Release ref must be an annotated tag object' }
+          if ((git rev-parse "refs/tags/$Tag^{commit}").Trim() -ne $env:GITHUB_SHA) { throw 'Annotated tag does not resolve to this workflow commit' }
       - name: Publish exact-tag GitHub release
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_NAME -ne "v0.1.0-alpha.1") { throw "Refusing to publish unexpected tag $env:GITHUB_REF_NAME" }
-          if ((git cat-file -t $env:GITHUB_REF_NAME).Trim() -ne "tag") { throw "Release ref is not an annotated tag object" }
+          $Tag = $env:RELEASE_TAG
+          if ((git cat-file -t "refs/tags/$Tag").Trim() -ne 'tag') { throw 'Release ref is not an annotated tag object' }
+          if ((git rev-parse "refs/tags/$Tag^{commit}").Trim() -ne $env:GITHUB_SHA) { throw 'Release tag does not resolve to this workflow commit' }
           $Assets = Get-ChildItem release -File | ForEach-Object FullName
-          gh release create v0.1.0-alpha.1 $Assets --verify-tag --prerelease --notes-file docs/releases/v0.1.0-alpha.1.md --title "Intern v0.1.0-alpha.1"
+          $Draft = gh release view $Tag --json isDraft --jq '.isDraft' 2>$null
+          $ViewExit = $LASTEXITCODE
+          if ($ViewExit -eq 0 -and $Draft.Trim() -eq 'false') {
+            Write-Host "$Tag is already published; idempotent no-op."
+            exit 0
+          }
+          if ($ViewExit -eq 0 -and $Draft.Trim() -eq 'true') {
+            gh release upload $Tag $Assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Could not repair draft release assets' }
+            gh release edit $Tag --draft=false --prerelease --verify-tag --notes-file docs/releases/v0.1.0-alpha.1.md --title 'Intern v0.1.0-alpha.1'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not publish repaired draft release' }
+            exit 0
+          }
+          if ($ViewExit -notin @(0, 1)) { throw 'Could not inspect existing release' }
+          gh release create $Tag $Assets --verify-tag --prerelease --notes-file docs/releases/v0.1.0-alpha.1.md --title 'Intern v0.1.0-alpha.1'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish GitHub release' }

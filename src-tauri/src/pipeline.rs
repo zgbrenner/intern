@@ -523,7 +523,11 @@ impl Pipeline {
             .lock()
             .map_err(|_| PipelineError::new("STATE_CONFLICT", "pipeline lock is unavailable"))?;
         self.apply_pending_automatic_ready()?;
-        while !self.paused.load(Ordering::SeqCst) && self.run_next_inner()? {}
+        while !self.paused.load(Ordering::SeqCst) {
+            if !self.run_next_inner()? {
+                break;
+            }
+        }
         Ok(())
     }
 
