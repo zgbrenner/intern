@@ -356,8 +356,7 @@ pub fn extract_pdf(
         let result = ocr.recognize(&rendered, cancel)?;
         let vision_escalated = vision_candidate.is_none()
             && (result.mean_confidence < 75.0 || page_needs_vision(&inspection));
-        if result.mean_confidence < 75.0
-            && !warnings.contains(&ExtractionWarning::LowOcrConfidence)
+        if result.mean_confidence < 75.0 && !warnings.contains(&ExtractionWarning::LowOcrConfidence)
         {
             warnings.push(ExtractionWarning::LowOcrConfidence);
         }
