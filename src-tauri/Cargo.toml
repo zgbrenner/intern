@@ -5,9 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 build = "build.rs"
-# The crate ships three binaries (the app plus the QA model evaluator and
-# validator); Tauri needs to know which one is the application.
-default-run = "intern"
 
 [lib]
 name = "intern_app"

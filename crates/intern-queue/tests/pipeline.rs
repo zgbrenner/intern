@@ -265,8 +265,10 @@ impl BlockingModel {
     }
 
     fn wait_for_cancel(&self) {
-        // Generous deadline: the poll exits as soon as cancel starts, but a
-        // cold, loaded CI runner can take well over two seconds to get there.
+        // Thirty seconds, not two. The loop exits as soon as the flag is set, so a
+        // healthy run is no slower; the deadline only decides how much scheduling
+        // delay on a loaded runner counts as a failure, and two seconds of it is
+        // ordinary rather than broken.
         let deadline = Instant::now() + Duration::from_secs(30);
         while !self.cancel_started.load(Ordering::SeqCst) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(2));

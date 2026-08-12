@@ -13,7 +13,7 @@
     {
       "id": "llama.cpp-license",
       "version": "b10361",
-      "archive": "llama.cpp-b10361-LICENSE.txt",
+      "archive": "llama.cpp-LICENSE.txt",
       "url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/b10361/LICENSE",
       "size": 1078,
       "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"

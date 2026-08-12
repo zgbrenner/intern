@@ -34,6 +34,22 @@ use crate::temp::TempWorkspace;
 #[cfg(feature = "native-tesseract")]
 const TSV_RENDERER: [&str; 2] = ["-c", "tessedit_create_tsv=1"];
 
+/// Page segmentation for the recognition pass: automatic, **without** orientation
+/// detection.
+///
+/// Mode 1 is "automatic with OSD", which re-runs orientation detection inside every
+/// recognition pass. That fights the orientation search in `recognize`: each
+/// candidate could be silently re-rotated by Tesseract, so the rotation this code
+/// reports need not be the rotation that produced the text. Measured on the
+/// corpus's rotated receipt, mode 1 scored 23 / 14 / 14 / 76 across the four
+/// orientations while mode 3 scored 76 / 14 / 14 / 76 - the internal detector was
+/// degrading the correctly-oriented read. On upright pages the two modes are
+/// identical to the decimal (95.2, 75.2, 86.3 on the three image fixtures), so
+/// this gives up nothing and makes the explicit search the only thing deciding
+/// orientation.
+#[cfg(feature = "native-tesseract")]
+const RECOGNITION_SEGMENTATION: &str = "3";
+
 #[cfg(feature = "native-tesseract")]
 #[derive(Clone, Debug)]
 pub struct TesseractOcr {
@@ -206,7 +222,7 @@ impl TesseractOcr {
             // exists to score exactly the orientation it was given, and psm 1
             // would let recognition rotate the page again on its own.
             .arg("--psm")
-            .arg("3")
+            .arg(RECOGNITION_SEGMENTATION)
             .args(TSV_RENDERER)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -216,14 +232,17 @@ impl TesseractOcr {
             })?;
         Self::require_success(self.wait_for_child(child, cancel)?)?;
         let output_path = output_base.with_extension("tsv");
-        workspace.register_existing(&output_path).map_err(|error| {
+        workspace.register_existing(&output_path)?;
+        // Name the file. Tesseract can exit 0 having written a different renderer's
+        // output, and a bare "The system cannot find the file specified (os error
+        // 2)" gives a reader nothing to go on - that exact message, with no path,
+        // is what made the missing `tessdata/configs/tsv` take a package build to
+        // diagnose.
+        let output = std::fs::read(&output_path).map_err(|error| {
             ExtractionError::parse_failed(format!(
-                "Tesseract reported success but its TSV output at {} is unusable ({error})",
+                "Tesseract produced no {} ({error})",
                 output_path.display()
             ))
-        })?;
-        let output = std::fs::read(&output_path).map_err(|error| {
-            Self::io_context("failed to read Tesseract TSV output", &output_path, error)
         })?;
         Ok(self.parse_tsv(&output)?.with_rotation(rotation))
     }
@@ -350,7 +369,7 @@ impl OcrBackend for TesseractOcr {
 
 #[cfg(all(test, feature = "native-tesseract"))]
 mod tests {
-    use super::{TSV_RENDERER, TesseractOcr};
+    use super::{RECOGNITION_SEGMENTATION, TSV_RENDERER, TesseractOcr};
     use crate::extract::OcrResult;
     use std::path::{Path, PathBuf};
 
@@ -378,6 +397,19 @@ mod tests {
     /// requested as a parameter. Naming the `tsv` config instead made Tesseract
     /// write a `.txt` and succeed, and every scanned document then failed to
     /// parse.
+    /// Nothing else pins this, and mode 1 looks equally reasonable in isolation.
+    /// It is not: it re-runs orientation detection inside every recognition pass,
+    /// which makes `better_reading` compare candidates Tesseract may already have
+    /// re-rotated behind its back.
+    #[test]
+    fn recognition_does_not_re_run_orientation_detection() {
+        assert_eq!(RECOGNITION_SEGMENTATION, "3");
+        assert_ne!(
+            RECOGNITION_SEGMENTATION, "1",
+            "mode 1 is auto-with-OSD and would fight the orientation search"
+        );
+    }
+
     #[test]
     fn tsv_output_is_requested_by_parameter_not_by_a_config_file() {
         assert_eq!(TSV_RENDERER, ["-c", "tessedit_create_tsv=1"]);

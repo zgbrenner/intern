@@ -132,9 +132,9 @@ jobs:
         run: |
           $Installer = Get-ChildItem target\release\bundle\nsis\*.exe | Select-Object -First 1
           if (-not $Installer) { throw "NSIS installer was not produced" }
-          # smoke-installer.ps1 throws on any failure; it drives everything via
-          # Start-Process/.NET, so $LASTEXITCODE stays $null and must not be
-          # used as a success check here.
+          # See the matching step in release.yml: this step runs no native command,
+          # so $LASTEXITCODE is undefined and the old guard threw even when the
+          # smoke test succeeded. The script's own `throw` fails the step.
           & ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName -EvidencePath docs\qa\installed-core-smoke.json 2>&1 | Tee-Object -FilePath docs\qa\logs\installer-smoke.log
       - name: Score the whole corpus through the shipping pipeline with real inference
         shell: pwsh

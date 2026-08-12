@@ -35,13 +35,13 @@ test('mixed batch can be reviewed, approved, and undone entirely in memory', asy
 
   await page.getByRole('button', { name: 'Needs Review' }).click();
   await page.getByRole('button', { name: 'Select duplicate-invoice-a.pdf' }).click();
-  await page.getByLabel('Filename').fill('2025-04-30 - Invoice - INV-2048 reviewed.pdf');
+  await page.getByLabel('Filename').fill('2025-04-30 Invoice INV-2048 from Nimbus Orchard Supply Co.pdf');
   await page.getByLabel('Description').fill('Invoice INV-2048 dated April 30, 2025 for Atlas Threadworks LLC.');
   await page.getByRole('button', { name: 'Approve & rename' }).click();
 
   await page.getByRole('button', { name: 'Completed' }).click();
   const completed = page.getByRole('row', { name: /duplicate-invoice-a\.pdf/i });
-  await expect(completed).toContainText('2025-04-30 - Invoice - INV-2048 reviewed.pdf');
+  await expect(completed).toContainText('2025-04-30 Invoice INV-2048 from Nimbus Orchard Supply Co.pdf');
   await completed.getByRole('button', { name: /Select/ }).click();
   await page.getByRole('button', { name: 'Undo' }).click();
 

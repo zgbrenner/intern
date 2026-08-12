@@ -43,10 +43,34 @@ it('gates the exact main commit before creating its annotated tag and publishing
   expect(workflow.indexOf('validate-release-evidence.mjs')).toBeLessThan(workflow.indexOf('gh release create'));
   expect(workflow.indexOf('git tag -a $Tag $env:GITHUB_SHA')).toBeLessThan(workflow.indexOf('gh release create'));
   expect(workflow).toContain('gh release view $Tag --json isDraft');
-  expect(workflow).toContain('INTERN_QA_CAPTURE: "1"');
+  // The release ships the capture a reviewer inspected rather than taking a new
+  // one: a sign-off cannot carry the digest of an image that does not exist yet,
+  // and the image reviewed must be the image published. Fresh captures come from
+  // the QA workflow, which still sets INTERN_QA_CAPTURE.
+  expect(workflow).not.toContain('INTERN_QA_CAPTURE: "1"');
+  expect(workflow).toContain('docs/qa/latest-implementation.png is missing');
   expect(workflow).toContain('release\\cargo-test.log');
   expect(workflow).toContain('--log=release/cargo-test.log');
   expect(workflow).toContain('Copy-Item docs\\qa\\latest-implementation.png $Release');
   expect(workflow).toContain('--screenshot=release/latest-implementation.png');
   expect(workflow).toContain('--fidelity-signoff=release/rendered-fidelity-signoff.json');
+});
+
+it('attests the installer, and only after its evidence has been accepted', async () => {
+  const workflow = await readFile('.github/workflows/release.yml', 'utf8');
+  // Provenance is keyless, so there is no certificate or secret to store, and the
+  // permissions have to be granted explicitly for the OIDC token to exist.
+  expect(workflow).toContain('id-token: write');
+  expect(workflow).toContain('attestations: write');
+  expect(workflow).toContain('actions/attest-build-provenance@v2');
+  expect(workflow).toContain('subject-path: release/*_x64-setup.exe');
+  // Ordering is the substance of this test. Attesting before validation would
+  // publish a signed claim about a build that failed its own gates, and
+  // attesting after publication would leave the downloadable file unattested.
+  expect(workflow.indexOf('validate-release-evidence.mjs')).toBeLessThan(
+    workflow.indexOf('actions/attest-build-provenance@v2'),
+  );
+  expect(workflow.indexOf('actions/attest-build-provenance@v2')).toBeLessThan(
+    workflow.indexOf('gh release create'),
+  );
 });

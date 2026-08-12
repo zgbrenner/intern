@@ -64,6 +64,16 @@ test.describe('whole-product browser QA', () => {
     await filename.focus();
     await expect(filename).toBeFocused();
 
+    // Focusing a text input puts the caret at the end, which scrolls a long
+    // proposed name out of view: the field rendered as "etween ABC Properties LLC
+    // and TenantCo Inc.pdf". The focus assertion above is the accessibility check
+    // and stays; this only returns the field to the start so the capture shows the
+    // filename a reviewer is being asked to approve, rather than its tail.
+    await filename.evaluate((element: HTMLInputElement) => {
+      element.setSelectionRange(0, 0);
+      element.scrollLeft = 0;
+    });
+
     if (process.env.INTERN_QA_CAPTURE === '1') {
       const capture = resolve('docs/qa/latest-implementation.png');
       await mkdir(dirname(capture), { recursive: true });

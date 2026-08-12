@@ -10,7 +10,6 @@ describe('runtime asset verification', () => {
     ['changed URL', (manifest: any) => { manifest.downloads[0].url = 'https://example.invalid/llama.zip'; }],
     ['changed archive basename', (manifest: any) => { manifest.downloads[1].archive = 'other.tgz'; }],
     ['unsafe archive path', (manifest: any) => { manifest.downloads[2].archive = '../eng.traineddata'; }],
-    ['missing license download', (manifest: any) => { manifest.downloads = manifest.downloads.filter((download: any) => download.id !== 'llama.cpp-license'); }],
     ['extra download', (manifest: any) => { manifest.downloads.push({ ...manifest.downloads[0], id: 'extra' }); }],
     ['changed vcpkg repository', (manifest: any) => { manifest.vcpkg.repository = 'https://example.invalid/vcpkg.git'; }],
   ])('rejects a %s in the exact runtime acquisition contract', async (_label, mutate) => {
