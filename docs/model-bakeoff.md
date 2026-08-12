@@ -80,7 +80,7 @@ Measured over the same runs, per document, including extraction:
 | Median total time | 23.6 s | 12.4-16.6 s |
 | Slowest document | 115 s | 51 s |
 | Peak model process memory | 4,215 MB | 2,590 MB |
-| Installed model size | 3.05 GiB *(model + projector, both resident)* | 1.19 GiB *(projector installed but not loaded)* |
+| First-run download | 3.05 GiB *(model + projector)* | 1.19 GiB *(text model only)* |
 
 Extraction is not the cost. A one-page invoice extracts in 13 ms, a 14-page
 contract in 33 ms, a 100-page journal in 29 ms. Distillation is 0.3–9 ms.

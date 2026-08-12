@@ -50,7 +50,7 @@ describe('TauriBridge', () => {
     await bridge.getSetup();
     await bridge.startModelDownload();
     await bridge.setupCancel();
-    await bridge.setupChooseExisting({ modelPath: 'C:\\Models\\intern-q4.gguf', projectorPath: 'C:\\Models\\mmproj.gguf' });
+    await bridge.setupChooseExisting({ modelPath: 'C:\\Models\\intern-q4.gguf' });
     await bridge.clearHistory();
 
     expect(fake.calls).toEqual([
@@ -70,7 +70,7 @@ describe('TauriBridge', () => {
       { command: 'setup_get', args: undefined },
       { command: 'setup_start', args: undefined },
       { command: 'setup_cancel', args: undefined },
-      { command: 'setup_choose_existing', args: { files: { modelPath: 'C:\\Models\\intern-q4.gguf', projectorPath: 'C:\\Models\\mmproj.gguf' } } },
+      { command: 'setup_choose_existing', args: { files: { modelPath: 'C:\\Models\\intern-q4.gguf' } } },
       { command: 'history_clear', args: undefined },
     ]);
   });
@@ -160,37 +160,32 @@ describe('TauriBridge', () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it('selects native model and projector paths using two clearly labeled GGUF dialogs', async () => {
-    const responses: unknown[] = ['C:\\Models\\intern-q8.gguf', 'C:\\Models\\mmproj-f16.gguf'];
+  it('asks for the model GGUF once and never for a projector', async () => {
     const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
     const transport: TauriTransport = {
       invoke: async <T>(command: string, args?: Record<string, unknown>) => {
         calls.push({ command, args });
-        return responses.shift() as T;
+        return 'C:\\Models\\intern-q4.gguf' as T;
       },
       listen: async () => () => undefined,
     };
 
     const files = await createTauriSelectionBoundary(transport).pickExistingModelFiles();
 
-    expect(files).toEqual({ modelPath: 'C:\\Models\\intern-q8.gguf', projectorPath: 'C:\\Models\\mmproj-f16.gguf' });
+    expect(files).toEqual({ modelPath: 'C:\\Models\\intern-q4.gguf' });
+    // Exactly one dialog. Intern loads no vision projector, so asking for one
+    // would make the user hunt for a file it would then never read.
     expect(calls).toEqual([
       { command: 'plugin:dialog|open', args: { options: {
         multiple: false,
         directory: false,
-        title: 'Choose a Q4 or Q8 model GGUF',
+        title: 'Choose the model GGUF',
         filters: [{ name: 'GGUF model files', extensions: ['gguf'] }],
-      } } },
-      { command: 'plugin:dialog|open', args: { options: {
-        multiple: false,
-        directory: false,
-        title: 'Choose the matching mmproj GGUF',
-        filters: [{ name: 'GGUF projector files', extensions: ['gguf'] }],
       } } },
     ]);
   });
 
-  it('does not request a projector when model selection is canceled', async () => {
+  it('returns nothing when model selection is canceled', async () => {
     const fake = fakeTransport({ 'plugin:dialog|open': null });
     const selection = createTauriSelectionBoundary(fake.transport);
 

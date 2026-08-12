@@ -5,13 +5,12 @@
 
 use std::time::Duration;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use reqwest::{Url, blocking::Client};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::domain::{DateRole, Evidence, ModelProposal, PageImage, PartyRelation};
+use crate::domain::{DateRole, Evidence, ModelProposal, PartyRelation};
 use crate::error::{EngineError, EngineErrorCode, EngineResult};
 use crate::evidence::is_valid_iso_date;
 use crate::prompt::{RESPONSE_GRAMMAR, SYSTEM_INSTRUCTION, build_prompt};
@@ -21,17 +20,19 @@ use crate::prompt::{RESPONSE_GRAMMAR, SYSTEM_INSTRUCTION, build_prompt};
 const MAX_REPLY_TOKENS: u32 = 420;
 
 /// What actually gets sent to the model for one document.
+///
+/// Text only, by construction. Intern reads documents as text and the local
+/// server runs without a vision projector, so there is no field here that could
+/// ask it for something it cannot do.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModelRequest {
     pub prompt: String,
-    pub image: Option<PageImage>,
 }
 
 impl ModelRequest {
-    pub fn from_digest(digest: &crate::distill::DocumentDigest, image: Option<PageImage>) -> Self {
+    pub fn from_digest(digest: &crate::distill::DocumentDigest) -> Self {
         Self {
             prompt: build_prompt(digest),
-            image,
         }
     }
 
@@ -39,12 +40,6 @@ impl ModelRequest {
     pub fn sha256(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.prompt.as_bytes());
-        if let Some(image) = &self.image {
-            hasher.update([0]);
-            hasher.update(image.media_type.as_bytes());
-            hasher.update([0]);
-            hasher.update(&image.bytes);
-        }
         format!("{:x}", hasher.finalize())
     }
 }
@@ -117,22 +112,11 @@ impl ModelClient {
     }
 
     fn completion_request(&self, request: &ModelRequest) -> Value {
-        let content = if let Some(image) = &request.image {
-            json!([
-                {"type": "text", "text": request.prompt},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": format!("data:{};base64,{}", image.media_type, STANDARD.encode(&image.bytes))}
-                }
-            ])
-        } else {
-            json!(request.prompt)
-        };
         json!({
             "model": self.model_id,
             "messages": [
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
-                {"role": "user", "content": content}
+                {"role": "user", "content": request.prompt}
             ],
             "stream": false,
             "temperature": 0,
@@ -363,48 +347,31 @@ mod tests {
     #[test]
     fn the_request_carries_the_grammar_and_no_thinking() {
         let client = ModelClient::new("http://127.0.0.1:9/v1/chat/completions", "k", "m").unwrap();
-        let request = ModelRequest {
-            prompt: "p".into(),
-            image: None,
-        };
-        let body = client.completion_request(&request);
+        let body = client.completion_request(&ModelRequest { prompt: "p".into() });
         assert_eq!(body["grammar"], serde_json::json!(RESPONSE_GRAMMAR));
         assert_eq!(body["temperature"], serde_json::json!(0));
         assert_eq!(
             body["chat_template_kwargs"]["enable_thinking"],
             serde_json::json!(false)
         );
-        assert!(body["messages"][1]["content"].is_string());
     }
 
+    /// The local server runs without a vision projector. A request that carried
+    /// an image would be rejected by it, so the request must always be plain
+    /// text - never a multimodal content array.
     #[test]
-    fn an_image_request_uses_multimodal_content_parts() {
+    fn every_request_is_plain_text() {
         let client = ModelClient::new("http://127.0.0.1:9/v1/chat/completions", "k", "m").unwrap();
-        let body = client.completion_request(&ModelRequest {
-            prompt: "p".into(),
-            image: Some(PageImage {
-                page_number: 1,
-                media_type: "image/png".into(),
-                bytes: vec![1, 2, 3],
-            }),
-        });
-        assert!(body["messages"][1]["content"].is_array());
+        let body = client.completion_request(&ModelRequest { prompt: "p".into() });
+        assert!(body["messages"][1]["content"].is_string());
+        assert!(!body.to_string().contains("image_url"));
     }
 
     #[test]
-    fn the_request_identity_covers_the_image() {
-        let text_only = ModelRequest {
-            prompt: "p".into(),
-            image: None,
-        };
-        let with_image = ModelRequest {
-            prompt: "p".into(),
-            image: Some(PageImage {
-                page_number: 1,
-                media_type: "image/png".into(),
-                bytes: vec![1],
-            }),
-        };
-        assert_ne!(text_only.sha256(), with_image.sha256());
+    fn the_request_identity_follows_the_prompt() {
+        assert_ne!(
+            ModelRequest { prompt: "a".into() }.sha256(),
+            ModelRequest { prompt: "b".into() }.sha256()
+        );
     }
 }

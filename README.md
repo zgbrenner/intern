@@ -15,7 +15,13 @@ anything is unsupported, the document goes to review instead of being renamed.
 Everything happens on the machine. Document text, extracted pages, OCR output,
 and model prompts never leave it. There is no telemetry, no cloud fallback, and
 no remote processing; the only network traffic is one explicit, user-started
-download of the pinned model file.
+download of the pinned model file — 1.19 GiB, the text model and nothing else.
+
+Intern reads documents as text: native PDF text first, OCR when a page has none,
+and no vision model. A projector for this model would be another 637 MB that
+every user downloads before naming a single document, for a path almost nothing
+takes. A page that neither text extraction nor OCR can read goes to review
+rather than being guessed at.
 
 ## How a document becomes a filename
 

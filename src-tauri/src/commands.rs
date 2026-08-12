@@ -10,7 +10,7 @@ use std::{
 use intern_core::{OperationDirection, OperationStage, QueueStatus};
 use intern_engine::{
     DocumentAnalysis, DocumentSource, Engine, LlamaServer, ModelClient, ModelManifest,
-    ServerOptions, SupervisedWorker, engine::wants_vision, prepare_worker_temp_root,
+    ServerOptions, SupervisedWorker, prepare_worker_temp_root,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -50,7 +50,6 @@ pub struct FolderSelectionDto {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExistingModelFilesDto {
     pub model_path: String,
-    pub projector_path: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -147,8 +146,6 @@ struct RuntimeModel {
     model_directory: PathBuf,
     engine: RwLock<Option<Engine>>,
     server: Mutex<Option<LlamaServer>>,
-    /// Whether the currently running server has the vision projector loaded.
-    vision_loaded: AtomicBool,
 }
 
 impl RuntimeModel {
@@ -158,7 +155,6 @@ impl RuntimeModel {
             model_directory,
             engine: RwLock::new(None),
             server: Mutex::new(None),
-            vision_loaded: AtomicBool::new(false),
         }
     }
 
@@ -168,16 +164,13 @@ impl RuntimeModel {
         })
     }
 
-    fn start(&self, manifest: &ModelManifest) -> Result<(), CommandError> {
-        self.start_mode(manifest, false)
-    }
-
-    /// Starts the local server, loading the vision projector only when asked.
+    /// Starts the local server.
     ///
-    /// Text-only is the normal mode: essentially every business document has
-    /// usable text, and the projector costs hundreds of megabytes of resident
-    /// memory that a 16 GB laptop would rather keep.
-    fn start_mode(&self, manifest: &ModelManifest, vision: bool) -> Result<(), CommandError> {
+    /// Text only, and not as a mode: no vision projector is pinned, downloaded,
+    /// or loaded. Essentially every business document carries usable text, and a
+    /// projector would have cost every user a 637 MB download and hundreds of
+    /// megabytes of resident memory for a path almost nothing takes.
+    fn start(&self, manifest: &ModelManifest) -> Result<(), CommandError> {
         if !self.installed(manifest) {
             return Err(CommandError {
                 code: "MODEL_NOT_READY".into(),
@@ -188,14 +181,10 @@ impl RuntimeModel {
             code: "MODEL_MANIFEST_INVALID".into(),
             message: "model manifest names no text model".into(),
         })?;
-        let projector = vision
-            .then(|| manifest.projector())
-            .flatten()
-            .map(|file| self.model_directory.join(&file.name));
         let server = LlamaServer::start(
             &self.executable,
             &self.model_directory.join(&model.name),
-            projector.as_deref(),
+            None,
             &ServerOptions::default(),
         )?;
         let client = ModelClient::new(
@@ -219,24 +208,7 @@ impl RuntimeModel {
         }
         *server_state = Some(server);
         *engine_state = Some(Engine::new(client));
-        self.vision_loaded.store(vision, Ordering::SeqCst);
         Ok(())
-    }
-
-    /// Reloads the model with its vision projector the first time a document
-    /// genuinely cannot be read as text, and leaves it loaded afterwards.
-    fn ensure_vision(&self) -> Result<(), ModelFailure> {
-        if self.vision_loaded.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        let manifest =
-            ModelManifest::embedded().map_err(|_| ModelFailure::fatal("MODEL_NOT_READY"))?;
-        if manifest.projector().is_none() {
-            return Ok(());
-        }
-        self.stop_runtime()?;
-        self.start_mode(&manifest, true)
-            .map_err(|error| ModelFailure::fatal(error.code))
     }
 
     fn start_verified(
@@ -306,7 +278,6 @@ impl RuntimeModel {
             .engine
             .write()
             .map_err(|_| ModelFailure::fatal("MODEL_CANCEL_FAILED"))? = None;
-        self.vision_loaded.store(false, Ordering::SeqCst);
         stop_result
     }
 }
@@ -318,9 +289,6 @@ impl AnalyzerBoundary for RuntimeModel {
         extension: &str,
         existing_names: &[&str],
     ) -> Result<DocumentAnalysis, ModelFailure> {
-        if wants_vision(source) {
-            self.ensure_vision()?;
-        }
         let engine = self
             .engine
             .read()
@@ -881,11 +849,9 @@ pub fn setup_choose_existing(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let model_path = canonical_model_file(Path::new(&files.model_path))?;
-    let projector_path = canonical_model_file(Path::new(&files.projector_path))?;
-    state.setup.choose_existing(ExistingModelSelection {
-        model_path,
-        projector_path,
-    })
+    state
+        .setup
+        .choose_existing(ExistingModelSelection { model_path })
 }
 
 #[tauri::command]
@@ -956,26 +922,25 @@ mod scheduler_tests {
     }
 
     #[test]
-    fn existing_model_dto_is_a_strict_pair_of_backend_paths() {
+    fn existing_model_dto_is_exactly_one_backend_path() {
         let files: ExistingModelFilesDto = serde_json::from_value(serde_json::json!({
-            "modelPath": "C:\\Models\\model.gguf",
-            "projectorPath": "C:\\Models\\projector.gguf"
+            "modelPath": "C:\\Models\\model.gguf"
         }))
         .unwrap();
         assert!(files.model_path.ends_with("model.gguf"));
-        assert!(files.projector_path.ends_with("projector.gguf"));
         assert!(
             serde_json::from_value::<ExistingModelFilesDto>(serde_json::json!({
-                "modelPath": { "name": "model.gguf" },
-                "projectorPath": "projector.gguf"
+                "modelPath": { "name": "model.gguf" }
             }))
             .is_err()
         );
+        // A projector path is not merely unused now; offering one must be an
+        // error, so a stale caller cannot quietly ask for a file Intern will
+        // never load.
         assert!(
             serde_json::from_value::<ExistingModelFilesDto>(serde_json::json!({
                 "modelPath": "model.gguf",
-                "projectorPath": "projector.gguf",
-                "extra": true
+                "projectorPath": "projector.gguf"
             }))
             .is_err()
         );

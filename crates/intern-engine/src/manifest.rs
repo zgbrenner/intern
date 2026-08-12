@@ -11,13 +11,15 @@ use serde::{Deserialize, Serialize};
 use crate::error::{EngineError, EngineErrorCode, EngineResult};
 
 /// What a manifest file is for.
+///
+/// There is exactly one role. Intern reads documents as text, and the engine
+/// cannot send an image to the model at all, so pinning a vision projector
+/// would download hundreds of megabytes that nothing could ever load.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelRole {
-    /// The text model, always installed.
+    /// The text model.
     Model,
-    /// The vision projector, installed alongside and loaded only on demand.
-    Projector,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -56,11 +58,12 @@ impl ModelManifest {
     }
 
     pub fn validate(&self) -> EngineResult<()> {
+        // Exactly one file. A manifest that could name more would be a manifest
+        // that could make a user download something Intern never loads.
         if self.schema_version != 2
             || self.model_id.is_empty()
             || self.served_model_name.is_empty()
-            || self.files.is_empty()
-            || self.files.len() > 2
+            || self.files.len() != 1
         {
             return Err(invalid());
         }
@@ -94,12 +97,6 @@ impl ModelManifest {
 
     pub fn model(&self) -> Option<&ModelFile> {
         self.files.iter().find(|file| file.role == ModelRole::Model)
-    }
-
-    pub fn projector(&self) -> Option<&ModelFile> {
-        self.files
-            .iter()
-            .find(|file| file.role == ModelRole::Projector)
     }
 
     pub fn total_bytes(&self) -> u64 {
@@ -145,12 +142,26 @@ mod tests {
     }
 
     #[test]
-    fn the_text_model_is_small_enough_for_a_sixteen_gigabyte_laptop() {
+    fn the_whole_first_run_download_fits_a_sixteen_gigabyte_laptop() {
         let manifest = ModelManifest::embedded().unwrap();
+        assert_eq!(manifest.files.len(), 1);
+        // Everything a user must download before Intern will name a document.
+        // Nothing here may be a file the engine cannot load.
         assert!(
-            manifest.model().unwrap().size < 2 * 1024 * 1024 * 1024,
-            "the resident text model must stay under 2 GiB"
+            manifest.total_bytes() < 2 * 1024 * 1024 * 1024,
+            "first-run download must stay under 2 GiB, got {} bytes",
+            manifest.total_bytes()
         );
+    }
+
+    #[test]
+    fn a_manifest_naming_more_than_the_text_model_is_refused() {
+        let base = ModelManifest::embedded().unwrap();
+        let mut extra = base.clone();
+        let mut second = extra.files[0].clone();
+        second.name = "mmproj.gguf".into();
+        extra.files.push(second);
+        assert!(extra.validate().is_err());
     }
 
     #[test]

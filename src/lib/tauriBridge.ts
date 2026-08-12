@@ -166,10 +166,8 @@ export function createTauriSelectionBoundary(transport: TauriTransport = default
       return path ? { path, displayName: displayName(path) } : undefined;
     },
     pickExistingModelFiles: async () => {
-      const modelPath = await openGgufDialog(transport, 'Choose a Q4 or Q8 model GGUF', 'GGUF model files');
-      if (!modelPath) return undefined;
-      const projectorPath = await openGgufDialog(transport, 'Choose the matching mmproj GGUF', 'GGUF projector files');
-      return projectorPath ? { modelPath, projectorPath } : undefined;
+      const modelPath = await openGgufDialog(transport, 'Choose the model GGUF', 'GGUF model files');
+      return modelPath ? { modelPath } : undefined;
     },
     resolveDrop: async (payload: unknown): Promise<SelectionResult> => {
       const drop = payload as { paths?: unknown; kind?: unknown };

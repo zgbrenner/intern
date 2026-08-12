@@ -284,7 +284,6 @@ pub struct AnalysisTelemetry {
     pub compression_ratio: f32,
     pub distill_micros: u64,
     pub inference_millis: u64,
-    pub vision_used: bool,
 }
 
 /// Everything Intern knows about one document.

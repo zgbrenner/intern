@@ -125,7 +125,7 @@ fn run_current(
     let distill_started = Instant::now();
     let digest = engine.distill(source);
     let distill_micros = u64::try_from(distill_started.elapsed().as_micros()).unwrap_or(u64::MAX);
-    let request = ModelRequest::from_digest(&digest, None);
+    let request = ModelRequest::from_digest(&digest);
     match engine.analyze_digest(source, &digest, distill_micros, extension, &[]) {
         Ok(analysis) => Ok(json!({
             "pipeline": "new",

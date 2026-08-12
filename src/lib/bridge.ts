@@ -17,9 +17,9 @@ export interface SelectionResult {
   folder?: FolderSelection;
 }
 
+/** Intern needs one file: the text model. There is no vision projector. */
 export interface ExistingModelFiles {
   modelPath: string;
-  projectorPath: string;
 }
 
 /** Platform-specific selection is injected; the Tauri bridge remains path-only. */
