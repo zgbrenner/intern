@@ -20,6 +20,11 @@ use crate::limits::ResourceLimits;
 #[cfg(feature = "native-tesseract")]
 use crate::temp::TempWorkspace;
 
+/// A rotated OCR pass below this confidence is re-verified upright, because
+/// OSD misreads sparse pages and a wrong quarter-turn yields letter salad.
+#[cfg(feature = "native-tesseract")]
+const ROTATION_FALLBACK_MIN_CONFIDENCE: f32 = 60.0;
+
 #[cfg(feature = "native-tesseract")]
 #[derive(Clone, Debug)]
 pub struct TesseractOcr {
@@ -249,9 +254,34 @@ impl OcrBackend for TesseractOcr {
             )));
         };
 
+        let result = self.recognize_at_rotation(&workspace, page, rotation, "ocr", cancel)?;
+        if rotation == 0 || result.mean_confidence >= ROTATION_FALLBACK_MIN_CONFIDENCE {
+            return Ok(result);
+        }
+        // OSD misreads sparse pages: verify a low-confidence rotated read
+        // against the upright orientation and keep the stronger result.
+        let upright = self.recognize_at_rotation(&workspace, page, 0, "ocr-upright", cancel)?;
+        if upright.mean_confidence > result.mean_confidence {
+            Ok(upright)
+        } else {
+            Ok(result)
+        }
+    }
+}
+
+#[cfg(feature = "native-tesseract")]
+impl TesseractOcr {
+    fn recognize_at_rotation(
+        &self,
+        workspace: &TempWorkspace,
+        page: &RenderedPage,
+        rotation: u16,
+        base_name: &str,
+        cancel: &CancellationToken,
+    ) -> Result<OcrResult, ExtractionError> {
         let rotated = apply_detected_rotation(page.image.clone(), rotation)?;
-        let input = self.write_png(&workspace, "rotated.png", &rotated)?;
-        let output_base = workspace.path().join("ocr");
+        let input = self.write_png(workspace, &format!("{base_name}.png"), &rotated)?;
+        let output_base = workspace.path().join(base_name);
         let child = Command::new(&self.executable)
             .arg(&input)
             .arg(&output_base)
@@ -259,8 +289,11 @@ impl OcrBackend for TesseractOcr {
             .arg(&self.language)
             .arg("--tessdata-dir")
             .arg(&self.tessdata_directory)
+            // psm 3 segments automatically WITHOUT re-running OSD: orientation
+            // was already decided by the dedicated psm 0 pass above, and psm 1
+            // would let recognition rotate the page again on its own.
             .arg("--psm")
-            .arg("1")
+            .arg("3")
             // Request the TSV renderer via -c: the bundled tessdata ships only
             // traineddata files, and the `tsv` positional argument is a config
             // file Tesseract would silently fail to find in tessdata/configs.

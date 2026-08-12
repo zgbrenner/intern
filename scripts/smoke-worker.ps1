@@ -123,8 +123,10 @@ try {
     }
 
     Assert-ParsedFixture "employment-agreement.pdf" @("Mira Vale", "February 14, 2025") @("native")
-    Assert-ParsedFixture "scanned-lease.pdf" @("September 1, 2024", "47 Juniper Loop") @("ocr")
-    Assert-ParsedFixture "rotated-low-resolution-scan.png" @("DR-771", "June 12, 2025") @("ocr")
+    # The raster fixtures' pixel font has no comma glyph, so the printed dates
+    # are comma-less; assert exactly what the page shows.
+    Assert-ParsedFixture "scanned-lease.pdf" @("September 1 2024", "47 Juniper Loop") @("ocr")
+    Assert-ParsedFixture "rotated-low-resolution-scan.png" @("DR-771", "June 12 2025") @("ocr")
     Assert-ParsedFixture "mixed-signature.pdf" @("Aurora Catalog Project", "January 8, 2025") @("native", "ocr")
     Assert-ParsedFixture "nda.docx" @("Project Marigold", "March 3, 2025") @("any_doc")
     Assert-ParsedFixture "document-image.jpg" @("Packing Slip", "PS-311") @("ocr")
