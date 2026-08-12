@@ -195,11 +195,23 @@ specific type.
 
 ```text
 YYYY-MM-DD <document type> <relation> <party>[ and <party>].<ext>
-2026-04-01 Statement of Work between Acme and Vistage.pdf
-2026-12-29 Notice of Termination for John Smith.pdf
-2025-09-14 Amendment to Consulting Agreement with Jane Smith.pdf
-2026-01-05 Invoice from Acme Corporation.pdf
 ```
+
+`<relation>` is one of `between`, `for`, `with`, `from`, `to`, or — when the model
+declines to state one — a bare `-`, which keeps a validated party in the name
+without asserting a relationship the document never established. Only `between`
+takes two names; the others take the first. Real names from the scored corpus:
+
+```text
+2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf
+2026-12-29 Notice of Termination - John Smith.pdf
+2025-04-30 Invoice from Nimbus Orchard Supply Co.pdf
+Lease Agreement with ORION GLASS STUDIO INC.pdf
+```
+
+Those are outputs, not illustrations. The last one carries no date because the
+scan gave up no readable one, so it goes to review rather than borrowing a date
+from somewhere else in the page.
 
 The party clause is composed from a validated relation and validated names, not
 from free text, so every name in a filename has been found in the document.
@@ -220,11 +232,16 @@ preserved; collisions get a ` (2)` suffix.
 | Vision | none. No projector is pinned, downloaded, or loaded, and the request type has no field for an image |
 
 The model is text-first. Essentially every business document has usable text,
-and a permanently resident vision projector costs hundreds of megabytes for a
-capability that is used on a small minority of files. Intern starts the server
-with `--no-mmproj`, and if a document ever arrives with an image and fewer than
-200 characters of text, the runtime reloads once with the projector and keeps it
-for the rest of the session.
+and a vision projector costs hundreds of megabytes for a capability used on a
+small minority of files. Intern starts the server with `--no-mmproj` and never
+starts it any other way: `LlamaServer::start` has exactly one call site, and it
+passes `None` for the projector. A page that neither text extraction nor OCR can
+read goes to review.
+
+This paragraph used to describe the runtime reloading once with a projector when
+a document arrived with an image and little text. No such path exists — the
+manifest pins one file, `ModelRole` has one variant, and the table above already
+said so. Both statements could not be true.
 
 Threads are half the logical processors on purpose. llama.cpp scales with
 physical cores rather than SMT threads, and taking every core makes the rest of
