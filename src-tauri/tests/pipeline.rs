@@ -151,10 +151,7 @@ struct RecoveringModel {
 }
 
 impl RecoveringModel {
-    fn new(
-        responses: Vec<Result<ModelProposal, ModelFailure>>,
-        recovery_succeeds: bool,
-    ) -> Self {
+    fn new(responses: Vec<Result<ModelProposal, ModelFailure>>, recovery_succeeds: bool) -> Self {
         Self {
             responses: Mutex::new(responses.into()),
             calls: AtomicUsize::new(0),

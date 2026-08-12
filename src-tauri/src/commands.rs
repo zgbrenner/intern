@@ -297,8 +297,8 @@ impl ModelBoundary for RuntimeModel {
         }
         self.stop_runtime()
             .map_err(|_| ModelFailure::fatal("MODEL_RECOVERY_FAILED"))?;
-        let manifest = ModelManifest::embedded()
-            .map_err(|_| ModelFailure::fatal("MODEL_RECOVERY_FAILED"))?;
+        let manifest =
+            ModelManifest::embedded().map_err(|_| ModelFailure::fatal("MODEL_RECOVERY_FAILED"))?;
         self.start(&manifest)
             .map_err(|_| ModelFailure::fatal("MODEL_RECOVERY_FAILED"))
     }
@@ -395,11 +395,7 @@ impl SetupManager {
                             .get()
                             .map(|state| state.downloaded_bytes)
                             .unwrap_or(0);
-                        (
-                            SetupStatus::Required,
-                            completed,
-                            Some(error.code),
-                        )
+                        (SetupStatus::Required, completed, Some(error.code))
                     }
                     Err(error) => {
                         let completed = manager
@@ -473,11 +469,7 @@ impl SetupManager {
                     &SystemDiskSpace,
                     cancellation,
                     |progress| {
-                        self.set_state(
-                            SetupStatus::Downloading,
-                            progress.completed_bytes,
-                            None,
-                        );
+                        self.set_state(SetupStatus::Downloading, progress.completed_bytes, None);
                     },
                 )?;
             }
@@ -930,16 +922,20 @@ mod scheduler_tests {
         .unwrap();
         assert!(files.model_path.ends_with("model.gguf"));
         assert!(files.projector_path.ends_with("projector.gguf"));
-        assert!(serde_json::from_value::<ExistingModelFilesDto>(serde_json::json!({
-            "modelPath": { "name": "model.gguf" },
-            "projectorPath": "projector.gguf"
-        }))
-        .is_err());
-        assert!(serde_json::from_value::<ExistingModelFilesDto>(serde_json::json!({
-            "modelPath": "model.gguf",
-            "projectorPath": "projector.gguf",
-            "extra": true
-        }))
-        .is_err());
+        assert!(
+            serde_json::from_value::<ExistingModelFilesDto>(serde_json::json!({
+                "modelPath": { "name": "model.gguf" },
+                "projectorPath": "projector.gguf"
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ExistingModelFilesDto>(serde_json::json!({
+                "modelPath": "model.gguf",
+                "projectorPath": "projector.gguf",
+                "extra": true
+            }))
+            .is_err()
+        );
     }
 }

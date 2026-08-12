@@ -30,7 +30,10 @@ fn startup_sweep_is_bounded_and_only_removes_owned_workspace_names() {
         std::fs::read_dir(&root)
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with("intern-worker-"))
+            .filter(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("intern-worker-"))
             .count(),
         2
     );

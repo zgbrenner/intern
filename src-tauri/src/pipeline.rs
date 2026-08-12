@@ -623,12 +623,8 @@ impl Pipeline {
         self.ensure_lease(&lease)?;
         if self.paused.load(Ordering::SeqCst) {
             lease.stop_and_check()?;
-            self.store.transition(
-                item.id,
-                QueueStatus::Extracting,
-                QueueStatus::Queued,
-                None,
-            )?;
+            self.store
+                .transition(item.id, QueueStatus::Extracting, QueueStatus::Queued, None)?;
             self.active_item.store(0, Ordering::SeqCst);
             self.events.queue_changed();
             return Ok(true);
@@ -769,7 +765,8 @@ impl Pipeline {
                 break;
             }
             let Some(proposal) = item.proposal else {
-                self.repository.mark_needs_review(item.id, "PROPOSAL_MISSING")?;
+                self.repository
+                    .mark_needs_review(item.id, "PROPOSAL_MISSING")?;
                 continue;
             };
             let queue_item = self

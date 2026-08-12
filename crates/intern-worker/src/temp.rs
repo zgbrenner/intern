@@ -23,11 +23,7 @@ impl TempWorkspace {
         Self::create_in(&root, label, budget)
     }
 
-    pub fn create_in(
-        root: &Path,
-        label: &str,
-        budget: u64,
-    ) -> Result<Self, ExtractionError> {
+    pub fn create_in(root: &Path, label: &str, budget: u64) -> Result<Self, ExtractionError> {
         let safe_label: String = label
             .chars()
             .filter(|character| character.is_ascii_alphanumeric() || *character == '-')

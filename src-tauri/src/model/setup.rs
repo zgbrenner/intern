@@ -79,15 +79,12 @@ where
             "model and projector selections must be different files",
         ));
     }
-    let total = model
-        .size
-        .checked_add(projector.size)
-        .ok_or_else(|| {
-            ModelError::new(
-                ModelErrorCode::ManifestInvalid,
-                "model manifest size overflow",
-            )
-        })?;
+    let total = model.size.checked_add(projector.size).ok_or_else(|| {
+        ModelError::new(
+            ModelErrorCode::ManifestInvalid,
+            "model manifest size overflow",
+        )
+    })?;
     let selected = [&selection.model_path, &selection.projector_path];
     let expected = [model, projector];
     let mut completed_before = 0_u64;
@@ -151,10 +148,7 @@ pub fn semantic_probes() -> ModelResult<Vec<SemanticProbe>> {
     ])
 }
 
-pub fn validate_semantic_probe(
-    probe: &SemanticProbe,
-    proposal: &ModelProposal,
-) -> ModelResult<()> {
+pub fn validate_semantic_probe(probe: &SemanticProbe, proposal: &ModelProposal) -> ModelResult<()> {
     let marker = probe.expected_marker.to_lowercase();
     let facts = proposal
         .document_type
@@ -179,7 +173,10 @@ pub fn validate_semantic_probe(
 }
 
 const fn setup_busy() -> ModelError {
-    ModelError::new(ModelErrorCode::SetupBusy, "a model setup operation is already active")
+    ModelError::new(
+        ModelErrorCode::SetupBusy,
+        "a model setup operation is already active",
+    )
 }
 
 const fn download_canceled() -> ModelError {

@@ -28,7 +28,10 @@ fn canonical_model_file_accepts_only_nonempty_regular_gguf_without_following_lin
     fs::write(&wrong_extension, b"model").unwrap();
     fs::write(&empty, b"").unwrap();
 
-    assert_eq!(canonical_model_file(&model).unwrap(), model.canonicalize().unwrap());
+    assert_eq!(
+        canonical_model_file(&model).unwrap(),
+        model.canonicalize().unwrap()
+    );
     assert!(canonical_model_file(&wrong_extension).is_err());
     assert!(canonical_model_file(&empty).is_err());
     #[cfg(unix)]

@@ -191,17 +191,21 @@ fn unsupported_party_or_date_in_description_forces_review() {
     party.description = "An agreement between Acme Corporation and Globex Corporation.".into();
     let party_outcome = validate_proposal(party, &packet("Agreement with Acme Corporation."));
     assert_eq!(party_outcome.status, ProposalStatus::NeedsReview);
-    assert!(party_outcome
-        .reasons
-        .contains(&ReviewReason::DescriptionUnsupported));
+    assert!(
+        party_outcome
+            .reasons
+            .contains(&ReviewReason::DescriptionUnsupported)
+    );
 
     let mut date = proposal();
     date.description = "An agreement effective in 2037 for Acme Corporation.".into();
     let date_outcome = validate_proposal(date, &packet("Agreement with Acme Corporation."));
     assert_eq!(date_outcome.status, ProposalStatus::NeedsReview);
-    assert!(date_outcome
-        .reasons
-        .contains(&ReviewReason::DescriptionUnsupported));
+    assert!(
+        date_outcome
+            .reasons
+            .contains(&ReviewReason::DescriptionUnsupported)
+    );
 }
 
 #[test]
@@ -225,9 +229,11 @@ fn due_date_is_removed_and_never_ready_even_with_literal_evidence() {
     let kind_only_outcome =
         validate_proposal(kind_only, &packet("Agreement with Acme Corporation."));
     assert_eq!(kind_only_outcome.status, ProposalStatus::NeedsReview);
-    assert!(kind_only_outcome
-        .reasons
-        .contains(&ReviewReason::InvalidDate));
+    assert!(
+        kind_only_outcome
+            .reasons
+            .contains(&ReviewReason::InvalidDate)
+    );
 }
 
 #[test]

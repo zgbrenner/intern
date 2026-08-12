@@ -97,9 +97,9 @@ impl ModelClient {
                 ModelErrorCode::ModelRequestFailed,
             ));
         }
-        let completion: ChatCompletion = response.json().map_err(|_| {
-            ModelAttemptError::Retryable(ModelErrorCode::ModelResponseInvalid)
-        })?;
+        let completion: ChatCompletion = response
+            .json()
+            .map_err(|_| ModelAttemptError::Retryable(ModelErrorCode::ModelResponseInvalid))?;
         decode_completion(completion)
     }
 }

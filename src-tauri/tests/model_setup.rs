@@ -5,8 +5,8 @@ use intern_app::model::{
     download::{CancellationToken, DISK_RESERVE_BYTES, DiskSpace, SetupStage},
     manifest::{ModelFile, ModelManifest},
     setup::{
-        ExistingModelSelection, SetupOperationGate, install_existing_model_files,
-        semantic_probes, validate_semantic_probe,
+        ExistingModelSelection, SetupOperationGate, install_existing_model_files, semantic_probes,
+        validate_semantic_probe,
     },
 };
 use intern_core::{DateKind, Evidence, ModelProposal};
@@ -30,15 +30,13 @@ fn manifest() -> ModelManifest {
                 name: "model.gguf".into(),
                 url: "https://example.invalid/model.gguf".into(),
                 size: 11,
-                sha256: "357e5d6fafa34d27360fec24b4326d3534905e33c6acdee60198fb078b7b79e5"
-                    .into(),
+                sha256: "357e5d6fafa34d27360fec24b4326d3534905e33c6acdee60198fb078b7b79e5".into(),
             },
             ModelFile {
                 name: "projector.gguf".into(),
                 url: "https://example.invalid/projector.gguf".into(),
                 size: 15,
-                sha256: "b95a25c1f308da898c582dc7728f9c1157ab1f5b34c36109a5203f0ac71a2f85"
-                    .into(),
+                sha256: "b95a25c1f308da898c582dc7728f9c1157ab1f5b34c36109a5203f0ac71a2f85".into(),
             },
         ],
     }
@@ -83,7 +81,10 @@ fn existing_pair_install_validates_and_publishes_both_files_with_aggregate_progr
     .unwrap();
 
     assert_eq!(total, 26);
-    assert_eq!(fs::read(destination.join("model.gguf")).unwrap(), b"model-bytes");
+    assert_eq!(
+        fs::read(destination.join("model.gguf")).unwrap(),
+        b"model-bytes"
+    );
     assert_eq!(
         fs::read(destination.join("projector.gguf")).unwrap(),
         b"projector-bytes"
@@ -166,13 +167,15 @@ fn semantic_probes_require_grounded_text_and_visible_image_markers() {
     assert!(probes[0].document.image.is_none());
     assert!(probes[1].document.image.is_some());
     assert!(!probes[1].document.text.contains("VISION CALIBRATION 42"));
-    assert!(probes[1]
-        .document
-        .image
-        .as_ref()
-        .unwrap()
-        .bytes
-        .starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert!(
+        probes[1]
+            .document
+            .image
+            .as_ref()
+            .unwrap()
+            .bytes
+            .starts_with(b"\x89PNG\r\n\x1a\n")
+    );
 
     validate_semantic_probe(
         &probes[0],

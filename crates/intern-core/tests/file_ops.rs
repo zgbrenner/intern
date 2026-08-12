@@ -765,7 +765,10 @@ fn source_delete_failure_requires_explicit_reconciliation_before_source_deletion
     );
     assert_eq!(reopened.list().unwrap()[0].status, QueueStatus::NeedsReview);
     reopened.recover_interrupted().unwrap();
-    assert!(source.exists(), "periodic recovery must not silently delete source");
+    assert!(
+        source.exists(),
+        "periodic recovery must not silently delete source"
+    );
     reopened.claim_deferred_reconciliation(item_id).unwrap();
     let resolved = FileApplier::local(reopened.clone())
         .reconcile(item_id)
