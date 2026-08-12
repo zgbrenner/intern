@@ -222,6 +222,17 @@ jobs:
             --workflow="$env:GITHUB_WORKFLOW" `
             --run-id=$env:GITHUB_RUN_ID `
             --run-attempt=$env:GITHUB_RUN_ATTEMPT
+      - name: Export reviewable screenshot binding to the job log
+        if: success()
+        shell: pwsh
+        run: |
+          $Evaluation = Get-Content -LiteralPath docs\qa\model-evaluation.json -Raw | ConvertFrom-Json
+          $Screenshot = "docs\qa\latest-implementation.png"
+          Write-Host "INTERN_RELEASE_INPUTS_SHA256=$($Evaluation.release_inputs_sha256)"
+          Write-Host "INTERN_SCREENSHOT_SHA256=$((Get-FileHash -LiteralPath $Screenshot -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Write-Host "INTERN_SCREENSHOT_BASE64_BEGIN"
+          Write-Host ([Convert]::ToBase64String([IO.File]::ReadAllBytes($Screenshot)))
+          Write-Host "INTERN_SCREENSHOT_BASE64_END"
       - name: Upload QA evidence without publishing a release
         if: always()
         uses: actions/upload-artifact@v4
