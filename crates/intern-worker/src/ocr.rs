@@ -235,6 +235,12 @@ impl OcrBackend for TesseractOcr {
         let rotated = apply_detected_rotation(page.image.clone(), rotation)?;
         let input = self.write_png(&workspace, "rotated.png", &rotated)?;
         let output_base = workspace.path().join("ocr");
+        let ocr_stderr_path = workspace.write("ocr.stderr", b"")?;
+        let ocr_stderr = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&ocr_stderr_path)
+            .map_err(ExtractionError::io)?;
         let child = Command::new(&self.executable)
             .arg(&input)
             .arg(&output_base)
@@ -244,13 +250,42 @@ impl OcrBackend for TesseractOcr {
             .arg(&self.tessdata_directory)
             .arg("--psm")
             .arg("1")
-            .arg("tsv")
+            .arg("-c")
+            .arg("tessedit_create_tsv=1")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(ocr_stderr))
             .spawn()
+            .map_err(|error| {
+                ExtractionError::io(std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "could not launch Tesseract at {}: {error}",
+                        self.executable.display()
+                    ),
+                ))
+            })?;
+        let ocr_status = self.wait_for_child(child, cancel)?;
+        workspace.register_existing(&ocr_stderr_path)?;
+        let mut ocr_diagnostic = Vec::new();
+        std::fs::File::open(&ocr_stderr_path)
+            .map_err(ExtractionError::io)?
+            .take(64 * 1024)
+            .read_to_end(&mut ocr_diagnostic)
             .map_err(ExtractionError::io)?;
-        Self::require_success(self.wait_for_child(child, cancel)?)?;
+        let ocr_diagnostic = String::from_utf8_lossy(&ocr_diagnostic);
+        Self::require_success(ocr_status).map_err(|_| {
+            ExtractionError::parse_failed(format!(
+                "Tesseract OCR exited with {ocr_status}: {}",
+                Self::diagnostic_summary(&ocr_diagnostic)
+            ))
+        })?;
         let output_path = output_base.with_extension("tsv");
+        if !output_path.is_file() {
+            return Err(ExtractionError::parse_failed(format!(
+                "Tesseract OCR succeeded without producing TSV output: {}",
+                Self::diagnostic_summary(&ocr_diagnostic)
+            )));
+        }
         workspace.register_existing(&output_path)?;
         let output = std::fs::read(output_path).map_err(ExtractionError::io)?;
         Ok(self.parse_tsv(&output)?.with_rotation(rotation))
