@@ -110,7 +110,7 @@ function Assert-RejectedFixture {
     $Path = Join-Path $Fixtures $File
     $Result = Invoke-WorkerCommand -RequestId ("reject-" + [IO.Path]::GetFileNameWithoutExtension($File)) -Command @{ type = "parse"; path = $Path }
     if ($Result.type -ne "error" -or $Result.code -ne $Code) {
-        throw "Expected $File to fail with $Code: $($Result | ConvertTo-Json -Compress -Depth 8)"
+        throw "Expected $File to fail with ${Code}: $($Result | ConvertTo-Json -Compress -Depth 8)"
     }
 }
 
