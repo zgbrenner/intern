@@ -15,7 +15,7 @@ described by `model-manifest.json` directly to the user's local application data
 | Component | Pinned source | License | Copyright / project |
 | --- | --- | --- | --- |
 | llama.cpp | `b10361`, Windows CPU x64 archive | MIT | llama.cpp contributors |
-| PDFium binaries | `chromium/7999`, Windows x64 | BSD-3-Clause | The PDFium Authors / Chromium Authors |
+| PDFium binaries | `chromium/7881`, Windows x64 | BSD-3-Clause | The PDFium Authors / Chromium Authors |
 | Tesseract OCR | 5.5.2, built with vcpkg baseline `644588ca32576d86325fb3fe3b6020042bee61b8` | Apache-2.0 | Tesseract OCR contributors |
 | tessdata_fast English and OSD data | commit `87416418657359cb625c412a48b6e1d6d41c29bd` | Apache-2.0 | Tesseract OCR contributors |
 | vcpkg | baseline `644588ca32576d86325fb3fe3b6020042bee61b8` | MIT | Microsoft Corporation and contributors |
