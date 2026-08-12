@@ -1,6 +1,4 @@
 use std::path::Path;
-#[cfg(feature = "native-pdfium")]
-use std::path::PathBuf;
 
 use crate::extract::{
     CancellationToken, ExtractionError, PdfBackend, PdfPageInspection, RenderedPage,
@@ -13,7 +11,7 @@ use pdfium_render::prelude::*;
 
 #[cfg(feature = "native-pdfium")]
 pub struct PdfiumBackend {
-    library_path: PathBuf,
+    pdfium: Pdfium,
     render_dpi: f32,
 }
 
@@ -27,18 +25,14 @@ impl PdfiumBackend {
                 library_path.display()
             )));
         }
-        Pdfium::bind_to_library(&library_path)
+        // PDFium allows exactly one live binding per process, so the backend
+        // binds once and keeps the instance for every later inspect/render.
+        let bindings = Pdfium::bind_to_library(&library_path)
             .map_err(|error| ExtractionError::native_assets_missing(error.to_string()))?;
         Ok(Self {
-            library_path,
+            pdfium: Pdfium::new(bindings),
             render_dpi: 300.0,
         })
-    }
-
-    fn pdfium(&self) -> Result<Pdfium, ExtractionError> {
-        let bindings = Pdfium::bind_to_library(&self.library_path)
-            .map_err(|error| ExtractionError::native_assets_missing(error.to_string()))?;
-        Ok(Pdfium::new(bindings))
     }
 
     fn page_dimensions(&self, width_points: f32, height_points: f32) -> (u32, u32) {
@@ -90,7 +84,7 @@ impl PdfBackend for PdfiumBackend {
         cancel: &CancellationToken,
     ) -> Result<Vec<PdfPageInspection>, ExtractionError> {
         cancel.check()?;
-        let pdfium = self.pdfium()?;
+        let pdfium = &self.pdfium;
         let document = pdfium
             .load_pdf_from_file(path, None)
             .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
@@ -137,7 +131,7 @@ impl PdfBackend for PdfiumBackend {
         cancel: &CancellationToken,
     ) -> Result<RenderedPage, ExtractionError> {
         cancel.check()?;
-        let pdfium = self.pdfium()?;
+        let pdfium = &self.pdfium;
         let document = pdfium
             .load_pdf_from_file(path, None)
             .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;

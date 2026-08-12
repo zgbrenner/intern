@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use intern_worker::extract::{
     CancellationToken, ExtractedDocument, ExtractionError, OcrBackend, RenderedPage,
@@ -19,9 +20,14 @@ fn runtime_directory() -> Result<PathBuf, ExtractionError> {
     })
 }
 
-fn pdf_backend() -> Result<PdfiumBackend, ExtractionError> {
-    let runtime = runtime_directory()?;
-    PdfiumBackend::new(&runtime)
+fn pdf_backend() -> Result<&'static PdfiumBackend, ExtractionError> {
+    // PDFium supports exactly one live library binding per process, so every
+    // request shares one backend instead of re-binding per document.
+    static BACKEND: OnceLock<Result<PdfiumBackend, ExtractionError>> = OnceLock::new();
+    BACKEND
+        .get_or_init(|| runtime_directory().and_then(|runtime| PdfiumBackend::new(&runtime)))
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
 fn ocr_backend() -> Result<TesseractOcr, ExtractionError> {
@@ -47,7 +53,7 @@ fn extract_path(
         "pdf" => {
             let pdf = pdf_backend()?;
             let ocr = ocr_backend()?;
-            extract_pdf(path, &pdf, &ocr, &limits, &cancel)
+            extract_pdf(path, pdf, &ocr, &limits, &cancel)
         }
         "png" | "jpg" | "jpeg" | "tif" | "tiff" => {
             cancel.check()?;
