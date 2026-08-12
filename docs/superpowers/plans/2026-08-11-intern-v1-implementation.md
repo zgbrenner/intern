@@ -1,5 +1,8 @@
 # Intern v1 Implementation Plan
 
+> **Superseded.** This records the v0.1 design as built on 2026-08-11. The document-understanding pipeline was redesigned shortly afterwards; see `docs/architecture.md` for what Intern actually does now.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Tasks 2, 3, and 4 may run concurrently only in separate git worktrees because their owned paths do not overlap. Every production behavior follows red-green-refactor.
 
 **Goal:** Build, test, package, and release Intern as a local-first Windows utility that sequentially parses documents, obtains one structured Qwen2.5-VL 3B proposal, evidence-gates the result, and safely renames or moves approved files.

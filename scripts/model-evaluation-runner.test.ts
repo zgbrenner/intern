@@ -1,44 +1,47 @@
 import { readFile } from 'node:fs/promises';
 import { expect, it } from 'vitest';
 
-it('runs both pinned models through the production evaluator and llama.cpp settings', async () => {
-  const script = await readFile('scripts/run-model-evaluation.ps1', 'utf8');
-  expect(script).toContain('Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf');
-  expect(script).toContain('Qwen2.5-VL-3B-Instruct-Q8_0.gguf');
-  expect(script).toContain('d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12');
-  expect(script).toContain('fa8aeb3b6bf6152774e87d13e09892aa065f4e0c4abe90806cd8ab18ff72d9fe');
-  expect(script).toContain('intern-model-evaluator.exe');
-  for (const argument of ['--host', '--api-key', '--parallel', '--ctx-size', '--n-gpu-layers']) {
+it('scores the corpus with the exact model the app installs, text-only', async () => {
+  const [script, manifest] = await Promise.all([
+    readFile('scripts/run-model-evaluation.ps1', 'utf8'),
+    readFile('src-tauri/resources/model-manifest.json', 'utf8').then(JSON.parse),
+  ]);
+  // The evaluation must never pin a model of its own; it reads the manifest the
+  // application ships, so evidence always describes what users actually run.
+  expect(script).toContain('src-tauri/resources/model-manifest.json');
+  expect(script).toContain('$_.role -eq "model"');
+  expect(script).toContain('$Spec.sha256');
+  expect(script).toContain('intern-evaluate.exe');
+  expect(script).not.toContain('.gguf"');
+  for (const argument of ['--host', '--api-key', '--parallel', '--ctx-size', '--n-gpu-layers', '--no-mmproj']) {
     expect(script).toContain(`"${argument}"`);
   }
-  expect(script).toContain('PeakWorkingSet64');
+  expect(script).toContain('WorkingSet64');
   expect(script).toContain('docs/qa/model-evaluation.json');
+  expect(manifest.files.some((file: { role: string }) => file.role === 'model')).toBe(true);
 });
 
-it('the evaluator uses the production worker, prompt client, packet builder, and validator', async () => {
-  const source = await readFile('src-tauri/src/bin/intern-model-evaluator.rs', 'utf8');
+it('the evaluator drives the shipping extraction, distillation, and validation path', async () => {
+  const source = await readFile('crates/intern-engine/src/bin/intern-evaluate.rs', 'utf8');
   expect(source).toContain('SupervisedWorker');
-  expect(source).toContain('ModelClient');
-  expect(source).toContain('build_document_packet');
-  expect(source).toContain('validate_proposal');
-  expect(source).not.toContain('build_prompt(');
-  expect(source).toContain('.all(');
+  expect(source).toContain('Engine::new');
+  expect(source).toContain('analyze_digest');
+  // Scoring must compare against the reviewed corpus, including the traps.
+  expect(source).toContain('forbidden_dates');
+  expect(source).toContain('forbidden_parties');
+  expect(source).toContain('acceptable_dates');
+  // And it must be able to run the superseded pipeline for comparison.
+  expect(source).toContain('legacy_digest');
 });
 
-it('replays checked-in evidence through production extraction and validation before release', async () => {
-  const verifier = await readFile('src-tauri/src/bin/intern-model-evidence-validator.rs', 'utf8');
-  expect(verifier).toContain('SupervisedWorker');
-  expect(verifier).toContain('build_document_packet');
-  expect(verifier).toContain('validate_proposal');
-  expect(verifier).toContain('document_input_sha256');
-
-  const release = await readFile('.github/workflows/release.yml', 'utf8');
-  expect(release).toContain('intern-model-evidence-validator');
+it('the release gate only accepts evidence from the shipping pipeline', async () => {
+  const [validator, release] = await Promise.all([
+    readFile('scripts/validate-model-evaluation.mjs', 'utf8'),
+    readFile('.github/workflows/release.yml', 'utf8'),
+  ]);
+  expect(validator).toContain("report.pipeline === 'new'");
+  expect(validator).toContain('date_forbidden');
+  expect(release).toContain('intern-evaluate');
   expect(release).toContain('validate-model-evaluation.mjs');
-  expect(release.indexOf('intern-model-evidence-validator')).toBeLessThan(release.lastIndexOf('validate-model-evaluation.mjs'));
-
-  const smoke = await readFile('scripts/smoke-q4-runtime.ps1', 'utf8');
-  expect(smoke).toContain('qwen2.5-vl-3b-instruct-q4-k-m');
-  expect(smoke).toContain('qwen2.5-vl-3b-instruct-q8-0');
-  expect(smoke).toContain('$SelectedModel.name');
+  expect(release.indexOf('run-model-evaluation.ps1')).toBeLessThan(release.indexOf('validate-model-evaluation.mjs'));
 });

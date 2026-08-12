@@ -28,11 +28,12 @@ async function evidenceFixture() {
   };
   await writeFile(join(root, files.model), JSON.stringify({
     schema_version: 2,
+    pipeline: 'new',
     status: 'completed',
     commit,
     release_inputs_sha256: 'c'.repeat(64),
     runner: { os: 'Windows', arch: 'X64', ci_run_id: runId },
-    acceptance: { status: 'accepted', reasons: [] },
+    acceptance: { status: 'accepted', failures: [] },
   }));
   await writeFile(join(root, files.screenshot), screenshot);
   await writeFile(join(root, files.checklist), '# accepted release checklist\n');

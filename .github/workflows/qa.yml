@@ -96,12 +96,11 @@ jobs:
         run: |
           & cargo test --locked --workspace --all-targets 2>&1 | Tee-Object -FilePath docs\qa\logs\cargo-test.log
           if ($LASTEXITCODE -ne 0) { throw "Rust workspace tests failed" }
-      - name: Build parser worker and production model evidence tools
+      - name: Build parser worker and the corpus evaluator
         shell: pwsh
         run: |
           cargo build --locked -p intern-worker --release --features windows-native
-          cargo build --locked -p intern-app --release --bin intern-model-evaluator
-          cargo build --locked -p intern-app --release --bin intern-model-evidence-validator
+          cargo build --locked -p intern-engine --release --bin intern-evaluate
           New-Item -ItemType Directory src-tauri\binaries -Force | Out-Null
           Copy-Item target\release\intern-worker.exe src-tauri\binaries\intern-worker-x86_64-pc-windows-msvc.exe -Force
       - name: Fetch and verify pinned Windows assets
@@ -133,21 +132,14 @@ jobs:
           if (-not $Installer) { throw "NSIS installer was not produced" }
           & ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName -EvidencePath docs\qa\installed-core-smoke.json 2>&1 | Tee-Object -FilePath docs\qa\logs\installer-smoke.log
           if ($LASTEXITCODE -ne 0) { throw "Installer smoke failed" }
-      - name: Run Q4 and Q8 production prompt evaluation over every signed fixture
+      - name: Score the whole corpus through the shipping pipeline with real inference
         shell: pwsh
         run: |
           ./scripts/run-model-evaluation.ps1 `
             -RuntimeDirectory $env:INTERN_QA_RUNTIME_STAGE `
             -WorkerPath (Join-Path $env:INTERN_QA_RUNTIME_STAGE "intern-worker.exe") `
-            -EvaluatorPath target\release\intern-model-evaluator.exe `
+            -EvaluatePath target\release\intern-evaluate.exe `
             -OutputPath docs\qa\model-evaluation.json
-      - name: Replay evidence through production extraction and validation
-        shell: pwsh
-        run: |
-          target\release\intern-model-evidence-validator.exe `
-            --worker (Join-Path $env:INTERN_QA_RUNTIME_STAGE "intern-worker.exe") `
-            --fixtures fixtures\generated `
-            --report docs\qa\model-evaluation.json
           node scripts/validate-model-evaluation.mjs docs/qa/model-evaluation.json
       - name: Write run-specific command, count, and exit-code checklist
         if: success()
@@ -176,7 +168,7 @@ jobs:
 
           | Status | Command | Exit code | Exact count/result |
           |---|---|---:|---|
-          | pass | ``npm run fixtures`` | 0 | $($Evaluation.records.PSObject.Properties.Count) signed gold fixtures |
+          | pass | ``npm run fixtures`` | 0 | $($Evaluation.records.Count) gold fixtures |
           | pass | ``npm run check`` | 0 | $VitestFiles Vitest files / $VitestTests tests; TypeScript and Vite build passed |
           | pass | ``npm run test:e2e`` | 0 | $BrowserTests Playwright tests; 1536x1024 capture written |
           | pass | ``cargo fmt --all -- --check`` | 0 | workspace formatting |
@@ -186,8 +178,8 @@ jobs:
           | pass | native ``generated_fixtures`` | 0 | $NativeTests native fixture tests |
           | pass | ``npm run tauri build -- --bundles nsis -- --locked`` | 0 | one NSIS installer |
           | pass | ``scripts/smoke-installer.ps1`` | 0 | install, packaged worker PDF/OCR, uninstall, user-data retention |
-          | pass | ``scripts/run-model-evaluation.ps1`` | 0 | $($Evaluation.records.PSObject.Properties.Count) fixtures x 2 models; selected $($Evaluation.selected_model) |
-          | pass | release model validator | 0 | Q4/Q8 response/readiness/accuracy/unsupported-fact gates derived from records |
+          | pass | ``scripts/run-model-evaluation.ps1`` | 0 | $($Evaluation.summary.evaluated) documents scored on $($Evaluation.model_file); peak model RSS $([math]::Round($Evaluation.peak_model_rss_bytes / 1MB)) MB |
+          | pass | ``scripts/validate-model-evaluation.mjs`` | 0 | date/type/party/description accuracy and trap-date gates |
 
           This QA workflow has read-only repository permissions and does not tag, push, or publish.
           "@ | Set-Content docs\qa\release-checklist.md -Encoding utf8NoBOM

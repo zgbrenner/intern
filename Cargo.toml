@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/intern-core", "crates/intern-worker", "src-tauri"]
+members = [
+    "crates/intern-core",
+    "crates/intern-engine",
+    "crates/intern-queue",
+    "crates/intern-worker",
+    "src-tauri",
+]
 
 [workspace.package]
 version = "0.1.0-alpha.1"

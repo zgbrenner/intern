@@ -1,633 +1,848 @@
 {
+  "budget_characters": 12000,
+  "model_id": "intern-local",
+  "pipeline": "new",
+  "records": [
+    {
+      "description": "An employment agreement between Northstar Lantern Works LLC and Mira Vale specifying the effective date as February 14, 2025.",
+      "digest_characters": 180,
+      "extraction_millis": 249,
+      "file": "employment-agreement.pdf",
+      "filename": "2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "An employment agreement between Northstar Lantern Works LLC and Mira Vale specifying the effective date as February 14, 2025.",
+        "document_date": "2025-02-14",
+        "document_type": "Employment Agreement",
+        "evidence": {
+          "date": "Effective date: February 14, 2025",
+          "document_type": "Employment Agreement",
+          "parties": []
+        },
+        "parties": [
+          "Northstar Lantern Works LLC",
+          "Mira Vale"
+        ],
+        "party_relation": "between"
+      },
+      "readiness": "ready",
+      "review_reasons": [],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 2,
+        "parties_matched": 2,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 174,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.034482717514038,
+        "digestCharacters": 180,
+        "distillMicros": 118,
+        "inferenceMillis": 14221,
+        "sourceCharacters": 174,
+        "visionUsed": false
+      }
+    },
+    {
+      "extraction_millis": 75,
+      "file": "scanned-lease.pdf",
+      "parser_error": "NATIVE_ASSETS_MISSING",
+      "readiness": "failed",
+      "scores": {
+        "expected_error": false
+      },
+      "status": "extraction_failed"
+    },
+    {
+      "extraction_millis": 84,
+      "file": "mixed-signature.pdf",
+      "parser_error": "NATIVE_ASSETS_MISSING",
+      "readiness": "failed",
+      "scores": {
+        "expected_error": false
+      },
+      "status": "extraction_failed"
+    },
+    {
+      "description": "A non-disclosure agreement effective March 3, 2025, between Fable Harbor Labs LLC and Copper Wren Design Inc. regarding Project Marigold.",
+      "digest_characters": 282,
+      "extraction_millis": 19,
+      "file": "nda.docx",
+      "filename": "2025-03-03 Non-Disclosure Agreement between Fable Harbor Labs LLC and Copper Wren Design Inc.docx",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "A non-disclosure agreement effective March 3, 2025, between Fable Harbor Labs LLC and Copper Wren Design Inc. regarding Project Marigold.",
+        "document_date": "2025-03-03",
+        "document_type": "Non-Disclosure Agreement",
+        "evidence": {
+          "date": "Effective March 3, 2025",
+          "document_type": "Mutual Non-Disclosure Agreement",
+          "parties": []
+        },
+        "parties": [
+          "Fable Harbor Labs LLC",
+          "Copper Wren Design Inc."
+        ],
+        "party_relation": "between"
+      },
+      "readiness": "ready",
+      "review_reasons": [],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 2,
+        "parties_matched": 2,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": false,
+        "type_present": true
+      },
+      "source_characters": 274,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.029197096824646,
+        "digestCharacters": 282,
+        "distillMicros": 135,
+        "inferenceMillis": 12633,
+        "sourceCharacters": 274,
+        "visionUsed": false
+      }
+    },
+    {
+      "description": "An invoice from Nimbus Orchard Supply Co. to Atlas Threadworks LLC for a total of $1,248.",
+      "digest_characters": 347,
+      "extraction_millis": 14,
+      "file": "multi-date-invoice.pdf",
+      "filename": "2025-04-30 Invoice from Nimbus Orchard Supply Co.pdf",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "An invoice from Nimbus Orchard Supply Co. to Atlas Threadworks LLC for a total of $1,248.",
+        "document_date": "2025-04-30",
+        "document_type": "Invoice",
+        "evidence": {
+          "date": "Invoice date: April 30, 2025",
+          "document_type": "Invoice INV-2048",
+          "parties": [
+            "Bill to Atlas Threadworks LLC"
+          ]
+        },
+        "parties": [
+          "Nimbus Orchard Supply Co.",
+          "Atlas Threadworks LLC"
+        ],
+        "party_relation": "from"
+      },
+      "readiness": "ready",
+      "review_reasons": [],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": false,
+        "parties_expected": 1,
+        "parties_matched": 1,
+        "parties_spurious": 1,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 146,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 2.3767123222351074,
+        "digestCharacters": 347,
+        "distillMicros": 70,
+        "inferenceMillis": 12730,
+        "sourceCharacters": 146,
+        "visionUsed": false
+      }
+    },
+    {
+      "description": "A meeting where the Fictional Meridian Committee reviewed inventory, safety, and the next quarterly plan.",
+      "digest_characters": 152,
+      "extraction_millis": 13,
+      "file": "meeting-minutes.md",
+      "filename": "2025-05-07 Document.md",
+      "pages": 1,
+      "proposal": {
+        "confidence": 0.8999999761581421,
+        "date_role": "effective",
+        "description": "A meeting where the Fictional Meridian Committee reviewed inventory, safety, and the next quarterly plan.",
+        "document_date": "2025-05-07",
+        "document_type": null,
+        "evidence": {
+          "date": "Date: May 7, 2025",
+          "document_type": "Quarterly Operations Review",
+          "parties": []
+        },
+        "parties": [],
+        "party_relation": "none"
+      },
+      "readiness": "needs_review",
+      "review_reasons": [
+        "type_unsupported"
+      ],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": false,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 0,
+        "parties_matched": 0,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": false,
+        "ready": false,
+        "type_correct": false,
+        "type_present": false
+      },
+      "source_characters": 144,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.0555555820465088,
+        "digestCharacters": 152,
+        "distillMicros": 71,
+        "inferenceMillis": 9271,
+        "sourceCharacters": 144,
+        "visionUsed": false
+      }
+    },
+    {
+      "extraction_millis": 13,
+      "file": "rotated-low-resolution-scan.png",
+      "parser_error": "NATIVE_ASSETS_MISSING",
+      "readiness": "failed",
+      "scores": {
+        "expected_error": false
+      },
+      "status": "extraction_failed"
+    },
+    {
+      "extraction_millis": 14,
+      "file": "encrypted.pdf",
+      "parser_error": "PARSE_FAILED",
+      "readiness": "failed",
+      "scores": {
+        "expected_error": true
+      },
+      "status": "expected_error"
+    },
+    {
+      "extraction_millis": 13,
+      "file": "malformed.pdf",
+      "parser_error": "PARSE_FAILED",
+      "readiness": "failed",
+      "scores": {
+        "expected_error": true
+      },
+      "status": "expected_error"
+    },
+    {
+      "description": "A fictional observation journal dated July 1, 2025.",
+      "digest_characters": 103,
+      "extraction_millis": 29,
+      "file": "long-document-100-pages.pdf",
+      "filename": "2025-07-01 Document.pdf",
+      "pages": 100,
+      "proposal": {
+        "confidence": 0.5,
+        "date_role": "effective",
+        "description": "A fictional observation journal dated July 1, 2025.",
+        "document_date": "2025-07-01",
+        "document_type": null,
+        "evidence": {
+          "date": "Journal date: July 1, 2025",
+          "document_type": "Journal date: July 1, 2025",
+          "parties": []
+        },
+        "parties": [],
+        "party_relation": "none"
+      },
+      "readiness": "needs_review",
+      "review_reasons": [
+        "type_unsupported",
+        "low_confidence",
+        "model_requested_review"
+      ],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 0,
+        "parties_matched": 0,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": false,
+        "ready": false,
+        "type_correct": false,
+        "type_present": false
+      },
+      "source_characters": 9592,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 0.010738114826381207,
+        "digestCharacters": 103,
+        "distillMicros": 465,
+        "inferenceMillis": 9513,
+        "sourceCharacters": 9592,
+        "visionUsed": false
+      }
+    },
+    {
+      "extraction_millis": 13,
+      "file": "document-image.png",
+      "parser_error": "NATIVE_ASSETS_MISSING",
+      "readiness": "failed",
+      "scores": {
+        "expected_error": false
+      },
+      "status": "extraction_failed"
+    },
+    {
+      "extraction_millis": 14,
+      "file": "document-image.jpg",
+      "parser_error": "NATIVE_ASSETS_MISSING",
+      "readiness": "failed",
+      "scores": {
+        "expected_error": false
+      },
+      "status": "extraction_failed"
+    },
+    {
+      "extraction_millis": 16,
+      "file": "document-image.tiff",
+      "parser_error": "NATIVE_ASSETS_MISSING",
+      "readiness": "failed",
+      "scores": {
+        "expected_error": false
+      },
+      "status": "extraction_failed"
+    },
+    {
+      "description": "A Statement of Work for the implementation of a CRM platform, data migration, and training, effective April 1, 2026, through March 31, 2027, with a total fee of $248,000.",
+      "digest_characters": 13178,
+      "extraction_millis": 33,
+      "file": "statement-of-work.pdf",
+      "filename": "2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf",
+      "pages": 14,
+      "proposal": {
+        "confidence": 0.9900000095367432,
+        "date_role": "effective",
+        "description": "A Statement of Work for the implementation of a CRM platform, data migration, and training, effective April 1, 2026, through March 31, 2027, with a total fee of $248,000.",
+        "document_date": "2026-04-01",
+        "document_type": "Statement of Work",
+        "evidence": {
+          "date": "This Statement of Work is effective as of April 1, 2026",
+          "document_type": "Statement of Work NO. 4",
+          "parties": [
+            "Ridgeline Cartography LLC, a Delaware limited liability company ("
+          ]
+        },
+        "parties": [
+          "Ridgeline Cartography LLC",
+          "Vistage Worldwide, Inc."
+        ],
+        "party_relation": "between"
+      },
+      "readiness": "needs_review",
+      "review_reasons": [
+        "description_unsupported"
+      ],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 2,
+        "parties_matched": 2,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": false,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 29285,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 0.44999146461486816,
+        "digestCharacters": 13178,
+        "distillMicros": 9163,
+        "inferenceMillis": 42272,
+        "sourceCharacters": 29285,
+        "visionUsed": false
+      }
+    },
+    {
+      "description": "A formal notice terminating the Employment Agreement between John Smith and Northstar Lantern Works LLC, effective January 31, 2027.",
+      "digest_characters": 2243,
+      "extraction_millis": 18,
+      "file": "termination-notice.pdf",
+      "filename": "2026-12-29 Notice of Termination.pdf",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "A formal notice terminating the Employment Agreement between John Smith and Northstar Lantern Works LLC, effective January 31, 2027.",
+        "document_date": "2026-12-29",
+        "document_type": "Notice of Termination",
+        "evidence": {
+          "date": "Date of this Notice: December 29, 2026",
+          "document_type": "Notice of Termination",
+          "parties": []
+        },
+        "parties": [
+          "Harriet Voss",
+          "Northstar Lantern Works LLC"
+        ],
+        "party_relation": "none"
+      },
+      "readiness": "ready",
+      "review_reasons": [],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": false,
+        "description_specific": true,
+        "parties_correct": false,
+        "parties_expected": 1,
+        "parties_matched": 0,
+        "parties_spurious": 2,
+        "party_forbidden": true,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 1331,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.6851991415023804,
+        "digestCharacters": 2243,
+        "distillMicros": 460,
+        "inferenceMillis": 15493,
+        "sourceCharacters": 1331,
+        "visionUsed": false
+      }
+    },
+    {
+      "description": "This First Amendment to Consulting Agreement amends the Consulting Agreement dated January 12, 2023, by extending the term through December 31, 2026, and changing the monthly retainer fee to $9,500.",
+      "digest_characters": 4283,
+      "extraction_millis": 16,
+      "file": "consulting-amendment.pdf",
+      "filename": "2025-09-14 First Amendment to Consulting Agreement between Vistage Worldwide, Inc and Jane Ellery.pdf",
+      "pages": 2,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "This First Amendment to Consulting Agreement amends the Consulting Agreement dated January 12, 2023, by extending the term through December 31, 2026, and changing the monthly retainer fee to $9,500.",
+        "document_date": "2025-09-14",
+        "document_type": "First Amendment to Consulting Agreement",
+        "evidence": {
+          "date": "September 14, 2025",
+          "document_type": "FIRST AMENDMENT TO CONSULTING AGREEMENT",
+          "parties": []
+        },
+        "parties": [
+          "Vistage Worldwide, Inc.",
+          "Jane Ellery"
+        ],
+        "party_relation": "between"
+      },
+      "readiness": "ready",
+      "review_reasons": [],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 2,
+        "parties_matched": 2,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 3182,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.3460087776184082,
+        "digestCharacters": 4283,
+        "distillMicros": 1205,
+        "inferenceMillis": 24159,
+        "sourceCharacters": 3182,
+        "visionUsed": false
+      }
+    },
+    {
+      "description": "An invoice for annual platform subscription and onboarding services totaling $56,700 due on February 4, 2026.",
+      "digest_characters": 991,
+      "extraction_millis": 13,
+      "file": "vendor-invoice.pdf",
+      "filename": "2026-01-05 Invoice from Vistage Worldwide, Inc.pdf",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "An invoice for annual platform subscription and onboarding services totaling $56,700 due on February 4, 2026.",
+        "document_date": "2026-01-05",
+        "document_type": "Invoice",
+        "evidence": {
+          "date": "January 5, 2026",
+          "document_type": "INVOICE",
+          "parties": []
+        },
+        "parties": [
+          "Vistage Worldwide, Inc.",
+          "Acme Corporation"
+        ],
+        "party_relation": "from"
+      },
+      "readiness": "ready",
+      "review_reasons": [],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": false,
+        "parties_expected": 1,
+        "parties_matched": 1,
+        "parties_spurious": 1,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 641,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.546021819114685,
+        "digestCharacters": 991,
+        "distillMicros": 280,
+        "inferenceMillis": 16037,
+        "sourceCharacters": 641,
+        "visionUsed": false
+      }
+    },
+    {
+      "description": "Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc. settle a dispute over invoices under a logistics services agreement for $312,500 in full and final payment, with mutual release of claims and limited liability to $312,500 in the twelve months.",
+      "digest_characters": 12565,
+      "extraction_millis": 22,
+      "file": "settlement-agreement.pdf",
+      "filename": "2026-07-22 Settlement Agreement between Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc.pdf",
+      "pages": 7,
+      "proposal": {
+        "confidence": 0.9900000095367432,
+        "date_role": "effective",
+        "description": "Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc. settle a dispute over invoices under a logistics services agreement for $312,500 in full and final payment, with mutual release of claims and limited liability to $312,500 in the twelve months.",
+        "document_date": "2026-07-22",
+        "document_type": "Settlement Agreement",
+        "evidence": {
+          "date": "July 22, 2026",
+          "document_type": "SETTLEMENT AGREEMENT AND MUTUAL RELEASE",
+          "parties": [
+            "Harborline Freight Systems LLC (Harborline) and Quill and Vane Advisory Group, Inc. (Quill and Vane), each a \"Party\" and together the \"Parties.\"",
+            "party_relation\":\"between",
+            "description\":\"Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc. settle a dispute over invoices under a logistics services agreement for $312,500 in full and final payment, with mutual release of claims and limited liability to $312,500 in the twelve months preceding the claim."
+          ]
+        },
+        "parties": [
+          "Harborline Freight Systems LLC",
+          "Quill and Vane Advisory Group, Inc."
+        ],
+        "party_relation": "between"
+      },
+      "readiness": "needs_review",
+      "review_reasons": [
+        "description_invalid"
+      ],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": false,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 2,
+        "parties_matched": 2,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": false,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 14837,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 0.8468692898750305,
+        "digestCharacters": 12565,
+        "distillMicros": 5352,
+        "inferenceMillis": 51103,
+        "sourceCharacters": 14837,
+        "visionUsed": false
+      }
+    },
+    {
+      "description": "Discussion regarding the termination of a project with Rowan and Priya.",
+      "digest_characters": 301,
+      "extraction_millis": 16,
+      "file": "ambiguous-note.pdf",
+      "filename": "Document between Rowan and Priya.pdf",
+      "pages": 1,
+      "proposal": {
+        "confidence": 0.8999999761581421,
+        "date_role": null,
+        "description": "Discussion regarding the termination of a project with Rowan and Priya.",
+        "document_date": null,
+        "document_type": null,
+        "evidence": {
+          "date": "Talked with Rowan and Priya about the thing from last week.",
+          "document_type": "Talked with Rowan and Priya about the thing from last week.",
+          "parties": [
+            "Talked with Rowan and Priya about the thing from last week.",
+            "Rowan thinks we should wait until after the offsite.",
+            "Someone should check whether Ridgeline already sent theirs."
+          ]
+        },
+        "parties": [
+          "Rowan",
+          "Priya"
+        ],
+        "party_relation": "between"
+      },
+      "readiness": "needs_review",
+      "review_reasons": [
+        "type_unsupported",
+        "date_unsupported"
+      ],
+      "scores": {
+        "description_specific": true,
+        "parties_correct": false,
+        "parties_expected": 0,
+        "parties_matched": 0,
+        "parties_spurious": 2,
+        "party_forbidden": true,
+        "readiness_match": true,
+        "ready": false
+      },
+      "source_characters": 297,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.0134680271148682,
+        "digestCharacters": 301,
+        "distillMicros": 185,
+        "inferenceMillis": 16429,
+        "sourceCharacters": 297,
+        "visionUsed": false
+      }
+    },
+    {
+      "description": "An Order Form establishing a subscription between Tessellate Analytics Ltd. and Vistage Worldwide, Inc. for an annual fee of $96,000, effective February 1, 2026.",
+      "digest_characters": 778,
+      "extraction_millis": 21,
+      "file": "order-form.docx",
+      "filename": "2026-02-01 Order Form between Tessellate Analytics Ltd and Vistage Worldwide, Inc.docx",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "An Order Form establishing a subscription between Tessellate Analytics Ltd. and Vistage Worldwide, Inc. for an annual fee of $96,000, effective February 1, 2026.",
+        "document_date": "2026-02-01",
+        "document_type": "Order Form",
+        "evidence": {
+          "date": "February 1, 2026",
+          "document_type": "Order Form",
+          "parties": [
+            "Tessellate Analytics Ltd.",
+            "Vistage Worldwide, Inc."
+          ]
+        },
+        "parties": [
+          "Tessellate Analytics Ltd.",
+          "Vistage Worldwide, Inc."
+        ],
+        "party_relation": "between"
+      },
+      "readiness": "ready",
+      "review_reasons": [],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 2,
+        "parties_matched": 2,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 427,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.8220140933990479,
+        "digestCharacters": 778,
+        "distillMicros": 253,
+        "inferenceMillis": 14693,
+        "sourceCharacters": 427,
+        "visionUsed": false
+      }
+    }
+  ],
   "schema_version": 2,
-  "status": "pending",
-  "selected_model": null,
-  "generated_at": null,
-  "commit": null,
-  "release_inputs_sha256": null,
-  "runner": null,
-  "models": {
-    "q4": {
-      "model_id": "qwen2.5-vl-3b-instruct-q4-k-m",
-      "filename": "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
-      "size": 1929901056,
-      "model_sha256": "d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12",
-      "projector_sha256": "b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e"
+  "summary": {
+    "date_correct": {
+      "correct": 11,
+      "rate": 1.0,
+      "total": 11
     },
-    "q8": {
-      "model_id": "qwen2.5-vl-3b-instruct-q8-0",
-      "filename": "Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
-      "size": 3285474304,
-      "model_sha256": "fa8aeb3b6bf6152774e87d13e09892aa065f4e0c4abe90806cd8ab18ff72d9fe",
-      "projector_sha256": "b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e"
+    "date_exact": {
+      "correct": 11,
+      "rate": 1.0,
+      "total": 11
+    },
+    "date_forbidden": {
+      "correct": 0,
+      "rate": 0.0,
+      "total": 11
+    },
+    "date_present": {
+      "correct": 11,
+      "rate": 1.0,
+      "total": 11
+    },
+    "description_covers_facts": {
+      "correct": 8,
+      "rate": 0.7272727272727273,
+      "total": 11
+    },
+    "description_specific": {
+      "correct": 12,
+      "rate": 1.0,
+      "total": 12
+    },
+    "evaluated": 12,
+    "expected_error": {
+      "correct": 2,
+      "rate": 0.25,
+      "total": 8
+    },
+    "inference_millis": {
+      "count": 12,
+      "max": 51103,
+      "mean": 19879,
+      "median": 15493,
+      "min": 9271
+    },
+    "parties_correct": {
+      "correct": 8,
+      "rate": 0.6666666666666666,
+      "total": 12
+    },
+    "party_forbidden": {
+      "correct": 2,
+      "rate": 0.16666666666666666,
+      "total": 12
+    },
+    "readiness_match": {
+      "correct": 8,
+      "rate": 0.6666666666666666,
+      "total": 12
+    },
+    "ready": {
+      "correct": 7,
+      "rate": 0.5833333333333334,
+      "total": 12
+    },
+    "review_rate": 0.41666666666666663,
+    "total_millis": {
+      "count": 12,
+      "max": 51125,
+      "mean": 19918,
+      "median": 15511,
+      "min": 9284
+    },
+    "type_correct": {
+      "correct": 8,
+      "rate": 0.7272727272727273,
+      "total": 11
+    },
+    "type_present": {
+      "correct": 9,
+      "rate": 0.8181818181818182,
+      "total": 11
     }
   },
-  "runtime": {
-    "llama_cpp_build": "b10361",
-    "archive_sha256": "36da9e9c1c094bf7842fab69e6cc0921125a67fa2611ba8f329a00804350302a"
-  },
-  "prompt": {
-    "path": "src-tauri/src/model/prompt.rs",
-    "sha256": "29f2bcfb498a71792b164abab5a31083acfa2b970abfc0bc39e780c1f1a667c6"
-  },
-  "corpus": {
-    "manifest_path": "fixtures/manifest.json",
-    "manifest_sha256": "c9d32ed4f0d4b0a22e7150c550c45454cd981fc38aed0daf70aab5e5696b848a",
-    "expected_path": "fixtures/expected.json",
-    "expected_sha256": "912735049332a9c9068dd4620602d2fe631e1ef503c316952095504a4676a0ac"
-  },
-  "records": {
-    "employment-agreement.pdf": {
-      "fixture_sha256": "d83903ea30792b28d23295c0ca68d2309d1df43d00877c50d941da2c06fbf0a4",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "scanned-lease.pdf": {
-      "fixture_sha256": "00279cc6f51d27778190cd00f33bcef8f6595cf49172c5d3745c6d3717763821",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "mixed-signature.pdf": {
-      "fixture_sha256": "85938de97a273d5d50c01509678431c4138502feb9e527e6252b54b761d2693d",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "nda.docx": {
-      "fixture_sha256": "a531fd8df1f303d6d6faabbb35931d748f58b4a887e46515b50f6a40574a3569",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "multi-date-invoice.pdf": {
-      "fixture_sha256": "dc2c9ed2c8c27ca1d081bd54729af128f7a2cfe2b93f49f6646f9439a121f70c",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "meeting-minutes.md": {
-      "fixture_sha256": "1537b6cfae1f0cf9ac537f0f1254f8bf009ad38d1e655350633d12928286a72f",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "rotated-low-resolution-scan.png": {
-      "fixture_sha256": "990141b57acf47d96415695959c8c583be5810828c9486a12d981f22bcc5d0f7",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "encrypted.pdf": {
-      "fixture_sha256": "ab5b7def0666acb728dbd750823901d81b445a10e53a5af80d37325443b39b35",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "malformed.pdf": {
-      "fixture_sha256": "4c031cd4d7870d6f18d9db38d80aaf5ce8b9b364b0a973b3baf5c73fc8dc9dc3",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "long-document-100-pages.pdf": {
-      "fixture_sha256": "0a451f66f7d665617d939f3e9427577b6fac9de378e0f0041f14beff49ebc867",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "document-image.png": {
-      "fixture_sha256": "3581da8a5018524713b74353a7866b413fc177e8c36b1302ea67c2880e07b900",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "document-image.jpg": {
-      "fixture_sha256": "72fb556d97f4496ba416fc4659d5d2ec3134addb3626dcbcb1b029b51c3b1a59",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    },
-    "document-image.tiff": {
-      "fixture_sha256": "0d092e8da079b04807700b8881b5ae120b3a13294012b46d91f8c80b9b30d53b",
-      "q4": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      },
-      "q8": {
-        "status": "pending",
-        "model_invoked": null,
-        "response_valid": null,
-        "parser_error": null,
-        "model_error": null,
-        "readiness": null,
-        "input_packet_sha256": null,
-        "proposal_sha256": null,
-        "validation_sha256": null,
-        "proposal": null,
-        "validated_proposal": null,
-        "field_results": null,
-        "unsupported_facts": [],
-        "timings_ms": {
-          "extraction": null,
-          "inference": null,
-          "total": null
-        },
-        "peak_rss_bytes": null
-      }
-    }
-  },
-  "summary": null,
-  "acceptance": {
-    "status": "pending",
-    "reasons": [
-      "Q4_K_M and Q8_0 have not been run across the signed corpus with the production Windows runtime."
-    ]
+  "peak_server_rss_bytes": 2716069888,
+  "wall_clock_seconds": 240.4,
+  "status": "completed",
+  "provenance": "local developer run; release evidence is regenerated by the QA and release workflows and bound to their commit and run id",
+  "model_file": "Qwen3.5-2B-Q4_K_M.gguf",
+  "model_sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+  "threads": 8,
+  "runner": {
+    "os": "Windows 11",
+    "cpu": "AMD Ryzen 7 PRO 8840U",
+    "logical_processors": 16,
+    "ci_run_id": null,
+    "ci_run_attempt": null
   }
 }

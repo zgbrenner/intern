@@ -7,7 +7,7 @@
     {
       "file": "employment-agreement.pdf",
       "size": 791,
-      "sha256": "d83903ea30792b28d23295c0ca68d2309d1df43d00877c50d941da2c06fbf0a4"
+      "sha256": "0159c7f13f3630776b37f56edb4066da97d17f770d90ef4a6e33687a975ddd3d"
     },
     {
       "file": "scanned-lease.pdf",
@@ -17,7 +17,7 @@
     {
       "file": "mixed-signature.pdf",
       "size": 2593,
-      "sha256": "85938de97a273d5d50c01509678431c4138502feb9e527e6252b54b761d2693d"
+      "sha256": "26c140134a8496f5baba2a629b72444124f9dcbcefd566c704ee0dca14f760f0"
     },
     {
       "file": "nda.docx",
@@ -27,7 +27,7 @@
     {
       "file": "multi-date-invoice.pdf",
       "size": 770,
-      "sha256": "dc2c9ed2c8c27ca1d081bd54729af128f7a2cfe2b93f49f6646f9439a121f70c"
+      "sha256": "7fcf505d8caee6801e6c307a4c807144b5f62e05c22bc878ea6fdcced935530a"
     },
     {
       "file": "meeting-minutes.md",
@@ -42,7 +42,7 @@
     {
       "file": "encrypted.pdf",
       "size": 930,
-      "sha256": "ab5b7def0666acb728dbd750823901d81b445a10e53a5af80d37325443b39b35"
+      "sha256": "5268313932f5977e852bb93fcab20ed4d47a7f4bd8d3e78b18419d1cd9e5a621"
     },
     {
       "file": "malformed.pdf",
@@ -52,7 +52,7 @@
     {
       "file": "long-document-100-pages.pdf",
       "size": 38024,
-      "sha256": "0a451f66f7d665617d939f3e9427577b6fac9de378e0f0041f14beff49ebc867"
+      "sha256": "def79bae674c0889a38722cb837f0e8f68f5d7214f099d95ba79209bb0f3a295"
     },
     {
       "file": "document-image.png",
@@ -70,14 +70,49 @@
       "sha256": "0d092e8da079b04807700b8881b5ae120b3a13294012b46d91f8c80b9b30d53b"
     },
     {
+      "file": "statement-of-work.pdf",
+      "size": 38113,
+      "sha256": "109f3ab85ab020e706502a1cef4eb2d861bb1c956886b544d3d2812c0d6d75cb"
+    },
+    {
+      "file": "termination-notice.pdf",
+      "size": 2155,
+      "sha256": "5dcb19411217f8280a262f8fd587abf5a784e7bec5cce84fe433f8893b8cbebd"
+    },
+    {
+      "file": "consulting-amendment.pdf",
+      "size": 4542,
+      "sha256": "ccdd230170b42b532efd95c85f59acc0dfd1500d996f30b7ff879559985cbd38"
+    },
+    {
+      "file": "vendor-invoice.pdf",
+      "size": 1499,
+      "sha256": "74f1c0ae99739e111a33f7c88aed5863d44e0b1204be073060c58ef3fe85c008"
+    },
+    {
+      "file": "settlement-agreement.pdf",
+      "size": 19440,
+      "sha256": "7ca0c389031f109411753ffaaf88292a3715df382a5eb29813f3cd96b28eea4d"
+    },
+    {
+      "file": "ambiguous-note.pdf",
+      "size": 930,
+      "sha256": "9d183b1a151b190f44c3b1ae7e45a7af9d30448a8fef601448221419229698f9"
+    },
+    {
+      "file": "order-form.docx",
+      "size": 2972,
+      "sha256": "47cae15c715415f045b992916febd27ab0a6c3452fe8695f329458d9ae94303c"
+    },
+    {
       "file": "mixed-batch/duplicate-invoice-a.pdf",
       "size": 770,
-      "sha256": "dc2c9ed2c8c27ca1d081bd54729af128f7a2cfe2b93f49f6646f9439a121f70c"
+      "sha256": "7fcf505d8caee6801e6c307a4c807144b5f62e05c22bc878ea6fdcced935530a"
     },
     {
       "file": "mixed-batch/duplicate-invoice-b.pdf",
       "size": 770,
-      "sha256": "dc2c9ed2c8c27ca1d081bd54729af128f7a2cfe2b93f49f6646f9439a121f70c"
+      "sha256": "7fcf505d8caee6801e6c307a4c807144b5f62e05c22bc878ea6fdcced935530a"
     },
     {
       "file": "mixed-batch/unsupported.csv",
