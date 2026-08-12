@@ -252,13 +252,18 @@ try {
         $Summary.q4_field_accuracy -ge ($Summary.q8_field_accuracy - 0.02) -and
         $Summary.q4_readiness_accuracy -eq 1
     $SelectedModel = if ($Q4Qualifies) { "q4" } else { "q8" }
-    $Accepted = $Summary.q4_response_validity -eq 1 -and
-        $Summary.q8_response_validity -eq 1 -and
-        $Summary.q8_unsupported_ready_dates -eq 0 -and
-        $Summary.q8_unsupported_ready_parties -eq 0 -and
-        $Summary.q8_readiness_accuracy -eq 1 -and
-        $Summary.ambiguous_fixtures_in_review -eq $Summary.ambiguous_fixtures_total
-    $Reasons = if ($Accepted) { @() } else { @("One or more derived production model release gates failed.") }
+    # @(...) keeps $Reasons a real array: assigning an if statement's output
+    # unrolls empty and single-element arrays, which serializes reasons as
+    # null or a bare string and fails the release validator's schema.
+    $Reasons = @(
+        if ($Summary.q4_response_validity -ne 1) { "Q4 response validity $($Summary.q4_response_validity) is below the required 1.0." }
+        if ($Summary.q8_response_validity -ne 1) { "Q8 response validity $($Summary.q8_response_validity) is below the required 1.0." }
+        if ($Summary.q8_unsupported_ready_dates -ne 0) { "Q8 Ready results contain $($Summary.q8_unsupported_ready_dates) unsupported document date(s)." }
+        if ($Summary.q8_unsupported_ready_parties -ne 0) { "Q8 Ready results contain $($Summary.q8_unsupported_ready_parties) unsupported party value(s)." }
+        if ($Summary.q8_readiness_accuracy -ne 1) { "Q8 readiness accuracy $($Summary.q8_readiness_accuracy) is below the required 1.0." }
+        if ($Summary.ambiguous_fixtures_in_review -ne $Summary.ambiguous_fixtures_total) { "Only $($Summary.ambiguous_fixtures_in_review) of $($Summary.ambiguous_fixtures_total) ambiguous fixtures routed to Needs Review." }
+    )
+    $Accepted = $Reasons.Count -eq 0
     $Report = [ordered]@{
         schema_version = 2
         status = "completed"
