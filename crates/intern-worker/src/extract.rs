@@ -307,7 +307,11 @@ fn page_needs_vision(page: &PdfPageInspection) -> bool {
         .chars()
         .filter(|character| !character.is_whitespace())
         .count();
-    meaningful < 100 && page.image_coverage >= 0.65
+    // Word-structured native text is trustworthy and stays text-only; a large
+    // non-text region only routes to vision when extraction leaves less than
+    // 100 meaningful characters without word structure.
+    let word_structured = page.native_text.split_whitespace().count() > 1;
+    meaningful < 100 && page.image_coverage >= 0.65 && !word_structured
 }
 
 pub fn extract_pdf(
