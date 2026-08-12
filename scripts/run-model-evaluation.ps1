@@ -158,4 +158,4 @@ $Report | Add-Member -NotePropertyName "wall_clock_seconds" -NotePropertyValue (
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputPath) | Out-Null
 $Report | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $OutputPath -Encoding utf8NoBOM
-Write-Output "Wrote $OutputPath: $($Report.summary.evaluated) documents, peak model RSS $([math]::Round($Peak / 1MB)) MB, $([math]::Round($Elapsed, 1)) s"
+Write-Output "Wrote ${OutputPath}: $($Report.summary.evaluated) documents, peak model RSS $([math]::Round($Peak / 1MB)) MB, $([math]::Round($Elapsed, 1)) s"
