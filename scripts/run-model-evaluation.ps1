@@ -50,7 +50,20 @@ function Get-PinnedFile {
     )
     $Destination = Join-Path $Directory ([string]$Spec.name)
     if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
-        Invoke-WebRequest -Uri ([string]$Spec.url) -OutFile $Destination -MaximumRedirection 5
+        # Multi-gigabyte downloads over a multi-hour job: retry transient
+        # failures with backoff instead of failing the whole run on one hiccup.
+        $Attempts = 0
+        while ($true) {
+            $Attempts += 1
+            try {
+                Invoke-WebRequest -Uri ([string]$Spec.url) -OutFile $Destination -MaximumRedirection 5
+                break
+            } catch {
+                if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+                if ($Attempts -ge 4) { throw }
+                Start-Sleep -Seconds (15 * $Attempts)
+            }
+        }
     }
     $File = Get-Item -LiteralPath $Destination
     if ($File.Length -ne [long]$Spec.size) { throw "Model evidence file size mismatch: $($Spec.name)" }
@@ -169,9 +182,13 @@ function Measure-Summary {
             $Result = $Records[[string]$Fixture.file][$Variant]
             if ($Result.response_valid -eq $true) { $Metrics[$Variant].valid += 1 }
             if ($Result.readiness -eq $Fixture.expected_readiness) { $Metrics[$Variant].readiness += 1 }
-            foreach ($Field in @($Result.field_results.PSObject.Properties)) {
-                $Metrics[$Variant].total += 1
-                if ($Field.Value -eq $true) { $Metrics[$Variant].correct += 1 }
+            # field_results is $null for error-path fixtures; .PSObject on $null
+            # is a strict-mode violation, so guard before enumerating.
+            if ($null -ne $Result.field_results) {
+                foreach ($Field in @($Result.field_results.PSObject.Properties)) {
+                    $Metrics[$Variant].total += 1
+                    if ($Field.Value -eq $true) { $Metrics[$Variant].correct += 1 }
+                }
             }
             foreach ($Fact in @($Result.unsupported_facts)) {
                 if ($Result.readiness -ne "ready") { continue }
@@ -184,12 +201,17 @@ function Measure-Summary {
             }
         }
     }
+    if ($Eligible -eq 0) { throw "Model evaluation gold set contains no eligible fixtures" }
+    # A variant that produced no field results at all must read as 0% accuracy,
+    # not crash the summary with a division by zero.
+    $Q4FieldAccuracy = if ($Metrics.q4.total -eq 0) { 0.0 } else { $Metrics.q4.correct / $Metrics.q4.total }
+    $Q8FieldAccuracy = if ($Metrics.q8.total -eq 0) { 0.0 } else { $Metrics.q8.correct / $Metrics.q8.total }
     return [ordered]@{
         eligible_fixtures = $Eligible
         q4_response_validity = $Metrics.q4.valid / $Eligible
         q8_response_validity = $Metrics.q8.valid / $Eligible
-        q4_field_accuracy = $Metrics.q4.correct / $Metrics.q4.total
-        q8_field_accuracy = $Metrics.q8.correct / $Metrics.q8.total
+        q4_field_accuracy = $Q4FieldAccuracy
+        q8_field_accuracy = $Q8FieldAccuracy
         q4_unsupported_ready_dates = $Metrics.q4.dates
         q4_unsupported_ready_parties = $Metrics.q4.parties
         q8_unsupported_ready_dates = $Metrics.q8.dates

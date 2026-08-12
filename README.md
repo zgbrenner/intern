@@ -37,7 +37,7 @@ cargo test --locked --workspace --all-targets
 ## Windows runtime assets and installer
 
 From PowerShell on Windows, fetch the exact llama.cpp b10361, PDFium
-chromium/7999, Tesseract 5.5.2, and tessdata assets:
+chromium/7881, Tesseract 5.5.2, and tessdata assets:
 
 ```powershell
 cargo build --locked -p intern-worker --release --features windows-native

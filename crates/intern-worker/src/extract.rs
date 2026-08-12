@@ -302,7 +302,11 @@ fn page_needs_vision(page: &PdfPageInspection) -> bool {
         .chars()
         .filter(|character| !character.is_whitespace())
         .count();
-    meaningful < 100 && page.image_coverage >= 0.65
+    // Word-structured native text is trustworthy and stays text-only; a large
+    // non-text region only routes to vision when extraction leaves less than
+    // 100 meaningful characters without word structure.
+    let word_structured = page.native_text.split_whitespace().count() > 1;
+    meaningful < 100 && page.image_coverage >= 0.65 && !word_structured
 }
 
 pub fn extract_pdf(
@@ -354,8 +358,7 @@ pub fn extract_pdf(
         limits.validate_page_pixels(render_width, render_height)?;
         timed_check(cancel, started, limits)?;
         let result = ocr.recognize(&rendered, cancel)?;
-        let vision_escalated = vision_candidate.is_none()
-            && (result.mean_confidence < 75.0 || page_needs_vision(&inspection));
+        let vision_escalated = vision_candidate.is_none() && result.mean_confidence < 75.0;
         if result.mean_confidence < 75.0 && !warnings.contains(&ExtractionWarning::LowOcrConfidence)
         {
             warnings.push(ExtractionWarning::LowOcrConfidence);
