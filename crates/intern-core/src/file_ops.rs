@@ -1331,6 +1331,8 @@ mod windows_file {
     ) -> io::Result<Box<dyn LockedFile>> {
         let mut input = fs::File::open(source)?;
         let output = OpenOptions::new()
+            .read(true)
+            .write(true)
             .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
             .share_mode(FILE_SHARE_READ)
             .create_new(true)
