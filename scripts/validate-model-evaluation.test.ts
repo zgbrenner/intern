@@ -46,6 +46,34 @@ describe('model evaluation gate', () => {
     expect(result.failures).toEqual([]);
   });
 
+  it('rejects a run where a document it chose to name carried the wrong date', () => {
+    const result = validateEvaluation(
+      report({
+        records: [
+          { file: 'statement-of-work.pdf', status: 'completed', filename: '2026-04-01 Statement of Work.pdf', scores: { ready: true, date_correct: false } },
+          { file: 'termination-notice.pdf', status: 'completed', filename: '2026-12-29 Notice of Termination.pdf', scores: { ready: true, date_correct: true } },
+        ],
+      }),
+    );
+    expect(result.accepted).toBe(false);
+    expect(result.failures.join(' ')).toContain('statement-of-work.pdf');
+  });
+
+  it('does not hold a document it sent to review to the named-date guarantee', () => {
+    // A scan whose digits OCR corrupts cannot produce a literal date. Sending it
+    // to review is the correct outcome, not a gate failure.
+    const result = validateEvaluation(
+      report({
+        records: [
+          { file: 'scanned-lease.pdf', status: 'completed', filename: 'Lease Agreement with Orion Glass Studio Inc.pdf', scores: { ready: false, date_correct: false } },
+          { file: 'statement-of-work.pdf', status: 'completed', filename: '2026-04-01 Statement of Work.pdf', scores: { ready: true, date_correct: true } },
+        ],
+      }),
+    );
+    expect(result.accepted).toBe(true);
+    expect(result.named).toEqual({ rate: 1, named: 1, wrong: [] });
+  });
+
   it('rejects a run that picks even one date the corpus marks as a trap', () => {
     const result = validateEvaluation(report({}, { date_forbidden: { correct: 1, total: 12, rate: 1 / 12 } }));
     expect(result.accepted).toBe(false);

@@ -36,8 +36,23 @@ function Assert-ExactFile {
 function Get-PinnedDownload {
     param([pscustomobject]$Download)
     $Destination = Join-Path $WorkDirectory $Download.archive
-    if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
-        Invoke-WebRequest -Uri $Download.url -OutFile $Destination -MaximumRedirection 5
+    # These come from GitHub release and CDN endpoints that return 503 often
+    # enough to have failed two consecutive CI runs on the first request, eleven
+    # seconds in. Retry with backoff, and discard a partial file before retrying
+    # so a truncated response cannot be mistaken for a cache hit. Every attempt
+    # still has to satisfy the pinned size and SHA-256 below, so retrying widens
+    # no trust boundary.
+    $Attempts = 0
+    while (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+        $Attempts += 1
+        try {
+            Invoke-WebRequest -Uri $Download.url -OutFile $Destination -MaximumRedirection 5
+        } catch {
+            if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+            if ($Attempts -ge 4) { throw "Failed to download $($Download.id) after $Attempts attempts: $($_.Exception.Message)" }
+            Write-Warning "Download of $($Download.id) failed on attempt ${Attempts}: $($_.Exception.Message)"
+            Start-Sleep -Seconds (15 * $Attempts)
+        }
     }
     Assert-ExactFile -Path $Destination -Size $Download.size -Sha256 $Download.sha256 -Label $Download.id
     return $Destination

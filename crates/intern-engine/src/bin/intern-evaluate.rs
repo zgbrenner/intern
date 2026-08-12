@@ -171,6 +171,7 @@ fn evaluate_one(
                 ScoreInput {
                     document_date: analysis.proposal.document_date.as_deref(),
                     document_type: analysis.proposal.document_type.as_deref(),
+                    date_role: analysis.proposal.date_role.map(|role| role.as_str()),
                     parties: &analysis.proposal.parties,
                     description: &analysis.description,
                     ready: analysis.status == ProposalStatus::Ready,
@@ -234,6 +235,9 @@ fn legacy_record(
         ScoreInput {
             document_date: outcome.document_date.as_deref(),
             document_type: outcome.document_type.as_deref(),
+            // The old pipeline had no vocabulary for what a date meant; that
+            // absence is the point of the comparison, not a gap in the scoring.
+            date_role: None,
             parties: &outcome.parties,
             description: &outcome.description,
             ready: outcome.ready,
@@ -294,6 +298,7 @@ fn post_legacy(
 struct ScoreInput<'a> {
     document_date: Option<&'a str>,
     document_type: Option<&'a str>,
+    date_role: Option<&'a str>,
     parties: &'a [String],
     description: &'a str,
     ready: bool,
@@ -325,6 +330,21 @@ fn score(fixture: &Value, actual: ScoreInput<'_>) -> Value {
             "date_present".into(),
             Value::Bool(actual.document_date.is_some()),
         );
+        // Picking the right date and knowing why it is the right date are two
+        // different things, and the second is what keeps the first from being
+        // luck. Scored only where the corpus states a role and a date was
+        // produced, because a role attached to no date measures nothing.
+        if let Some(gold_role) = fixture
+            .get("date_role")
+            .and_then(Value::as_str)
+            .filter(|role| !role.is_empty())
+            && actual.document_date.is_some()
+        {
+            scores.insert(
+                "date_role_correct".into(),
+                Value::Bool(actual.date_role == Some(gold_role)),
+            );
+        }
     }
     if let Some(gold_type) = fixture.get("document_type").and_then(Value::as_str) {
         // A document can have more than one right name. The minutes fixture is
