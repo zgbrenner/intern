@@ -6,7 +6,7 @@
     {
       "description": "An employment agreement between Northstar Lantern Works LLC and Mira Vale specifying the effective date as February 14, 2025.",
       "digest_characters": 180,
-      "extraction_millis": 319,
+      "extraction_millis": 375,
       "file": "employment-agreement.pdf",
       "filename": "2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf",
       "pages": 1,
@@ -51,42 +51,137 @@
       "telemetry": {
         "compressionRatio": 1.034482717514038,
         "digestCharacters": 180,
-        "distillMicros": 134,
-        "inferenceMillis": 15062,
+        "distillMicros": 115,
+        "inferenceMillis": 19479,
         "sourceCharacters": 174
       }
     },
     {
-      "extraction_millis": 254,
+      "description": "A lease agreement effective September 1, 2024, between two property owners.",
+      "digest_characters": 127,
+      "extraction_millis": 6609,
       "file": "scanned-lease.pdf",
-      "parser_error": "NATIVE_ASSETS_MISSING",
-      "readiness": "failed",
-      "scores": {
-        "expected_error": false
+      "filename": "Lease Agreement with ORION GLASS STUDIO INC.pdf",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": null,
+        "description": "A lease agreement effective September 1, 2024, between two property owners.",
+        "document_date": null,
+        "document_type": "Lease Agreement",
+        "evidence": {
+          "date": "LEASE AGREEMENT EFFECTIVE SEPTEMBER 1 24h24",
+          "document_type": "LEASE AGREEMENT EFFECTIVE SEPTEMBER 1 24h24 PROPERTY 4° JUNIPER LOOP LEDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC",
+          "parties": [
+            "LENDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC"
+          ]
+        },
+        "parties": [
+          "ORION GLASS STUDIO INC"
+        ],
+        "party_relation": "with"
       },
-      "status": "extraction_failed"
+      "readiness": "needs_review",
+      "review_reasons": [
+        "date_unsupported",
+        "party_unsupported",
+        "description_unsupported"
+      ],
+      "scores": {
+        "date_correct": false,
+        "date_exact": false,
+        "date_forbidden": false,
+        "date_present": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": false,
+        "parties_expected": 2,
+        "parties_matched": 1,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 118,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.0762711763381958,
+        "digestCharacters": 127,
+        "distillMicros": 172,
+        "inferenceMillis": 18430,
+        "sourceCharacters": 118
+      }
     },
     {
-      "extraction_millis": 141,
+      "description": "Services Agreement dated January 8, 2025, between Lumen Kite Cooperative and Solstice Index LLC for the Aurora Catalog Project.",
+      "digest_characters": 212,
+      "extraction_millis": 6081,
       "file": "mixed-signature.pdf",
-      "parser_error": "NATIVE_ASSETS_MISSING",
-      "readiness": "failed",
-      "scores": {
-        "expected_error": false
+      "filename": "2025-01-08 Services Agreement between Lumen Kite Cooperative and Solstice Index LLC.pdf",
+      "pages": 2,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "Services Agreement dated January 8, 2025, between Lumen Kite Cooperative and Solstice Index LLC for the Aurora Catalog Project.",
+        "document_date": "2025-01-08",
+        "document_type": "Services Agreement",
+        "evidence": {
+          "date": "Dated January 8, 2025",
+          "document_type": "SERVICES AGREEMENT",
+          "parties": [
+            "Lumen Kite Cooperative and Solstice Index LLC"
+          ]
+        },
+        "parties": [
+          "Lumen Kite Cooperative",
+          "Solstice Index LLC"
+        ],
+        "party_relation": "between"
       },
-      "status": "extraction_failed"
+      "readiness": "needs_review",
+      "review_reasons": [
+        "parser_warning"
+      ],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 2,
+        "parties_matched": 2,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 193,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.0984456539154053,
+        "digestCharacters": 212,
+        "distillMicros": 168,
+        "inferenceMillis": 16086,
+        "sourceCharacters": 193
+      }
     },
     {
-      "description": "A non-disclosure agreement effective March 3, 2025, between Fable Harbor Labs LLC and Copper Wren Design Inc. regarding Project Marigold.",
+      "description": "A non-disclosure agreement effective March 3, 2025 between Fable Harbor Labs LLC and Copper Wren Design Inc. for Project Marigold.",
       "digest_characters": 282,
-      "extraction_millis": 22,
+      "extraction_millis": 40,
       "file": "nda.docx",
       "filename": "2025-03-03 Non-Disclosure Agreement between Fable Harbor Labs LLC and Copper Wren Design Inc.docx",
       "pages": 1,
       "proposal": {
-        "confidence": 1.0,
+        "confidence": 0.8999999761581421,
         "date_role": "effective",
-        "description": "A non-disclosure agreement effective March 3, 2025, between Fable Harbor Labs LLC and Copper Wren Design Inc. regarding Project Marigold.",
+        "description": "A non-disclosure agreement effective March 3, 2025 between Fable Harbor Labs LLC and Copper Wren Design Inc. for Project Marigold.",
         "document_date": "2025-03-03",
         "document_type": "Non-Disclosure Agreement",
         "evidence": {
@@ -124,15 +219,15 @@
       "telemetry": {
         "compressionRatio": 1.029197096824646,
         "digestCharacters": 282,
-        "distillMicros": 80,
-        "inferenceMillis": 13173,
+        "distillMicros": 117,
+        "inferenceMillis": 16245,
         "sourceCharacters": 274
       }
     },
     {
       "description": "An invoice dated April 30, 2025, from Nimbus Orchard Supply Co. to Atlas Threadworks LLC for a total of $1,248.",
       "digest_characters": 276,
-      "extraction_millis": 35,
+      "extraction_millis": 36,
       "file": "multi-date-invoice.pdf",
       "filename": "2025-04-30 Invoice from Nimbus Orchard Supply Co.pdf",
       "pages": 1,
@@ -179,15 +274,15 @@
       "telemetry": {
         "compressionRatio": 1.8904109001159668,
         "digestCharacters": 276,
-        "distillMicros": 62,
-        "inferenceMillis": 14131,
+        "distillMicros": 100,
+        "inferenceMillis": 17308,
         "sourceCharacters": 146
       }
     },
     {
       "description": "A review of inventory, safety, and the next quarterly plan held on May 7, 2025.",
       "digest_characters": 152,
-      "extraction_millis": 14,
+      "extraction_millis": 33,
       "file": "meeting-minutes.md",
       "filename": "2025-05-07 Document.md",
       "pages": 1,
@@ -198,7 +293,7 @@
         "document_date": "2025-05-07",
         "document_type": null,
         "evidence": {
-          "date": "May 7, 2025",
+          "date": "Date: May 7, 2025",
           "document_type": "Quarterly Operations Review",
           "parties": []
         },
@@ -231,23 +326,73 @@
       "telemetry": {
         "compressionRatio": 1.0555555820465088,
         "digestCharacters": 152,
-        "distillMicros": 54,
-        "inferenceMillis": 10240,
+        "distillMicros": 87,
+        "inferenceMillis": 13034,
         "sourceCharacters": 144
       }
     },
     {
-      "extraction_millis": 34,
+      "description": "A delivery receipt from Pine Echo Courters LLC to Violet Cartography Studio dated June 12, 2025.",
+      "digest_characters": 95,
+      "extraction_millis": 1702,
       "file": "rotated-low-resolution-scan.png",
-      "parser_error": "NATIVE_ASSETS_MISSING",
-      "readiness": "failed",
-      "scores": {
-        "expected_error": false
+      "filename": "Delivery Receipt between Pine Echo Courters LLC and Violet Cartography Studio.png",
+      "pages": 1,
+      "proposal": {
+        "confidence": 0.8999999761581421,
+        "date_role": null,
+        "description": "A delivery receipt from Pine Echo Courters LLC to Violet Cartography Studio dated June 12, 2025.",
+        "document_date": null,
+        "document_type": "Delivery Receipt",
+        "evidence": {
+          "date": "DELIVERY RECEIPT OR-?771 JUNE 12 2a25",
+          "document_type": "DELIVERY RECEIPT OR-?771 JUNE 12 2a25 PINE ECHO COURTERS LLC VIOLET CARTOGRAPHY STUDIO",
+          "parties": [
+            "Pine Echo Courters LLC",
+            "Violet Cartography Studio"
+          ]
+        },
+        "parties": [
+          "Pine Echo Courters LLC",
+          "Violet Cartography Studio"
+        ],
+        "party_relation": "between"
       },
-      "status": "extraction_failed"
+      "readiness": "needs_review",
+      "review_reasons": [
+        "date_unsupported",
+        "description_unsupported",
+        "parser_warning"
+      ],
+      "scores": {
+        "date_correct": false,
+        "date_exact": false,
+        "date_forbidden": false,
+        "date_present": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": false,
+        "parties_expected": 1,
+        "parties_matched": 0,
+        "parties_spurious": 2,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 86,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.1046512126922607,
+        "digestCharacters": 95,
+        "distillMicros": 50,
+        "inferenceMillis": 18788,
+        "sourceCharacters": 86
+      }
     },
     {
-      "extraction_millis": 9,
+      "extraction_millis": 32,
       "file": "encrypted.pdf",
       "parser_error": "PARSE_FAILED",
       "readiness": "failed",
@@ -257,7 +402,7 @@
       "status": "expected_error"
     },
     {
-      "extraction_millis": 9,
+      "extraction_millis": 11,
       "file": "malformed.pdf",
       "parser_error": "PARSE_FAILED",
       "readiness": "failed",
@@ -269,12 +414,12 @@
     {
       "description": "A fictional observation journal dated July 1, 2025, containing no substantive content.",
       "digest_characters": 103,
-      "extraction_millis": 16,
+      "extraction_millis": 24,
       "file": "long-document-100-pages.pdf",
       "filename": "2025-07-01 Document.pdf",
       "pages": 100,
       "proposal": {
-        "confidence": 0.0,
+        "confidence": 0.5,
         "date_role": "effective",
         "description": "A fictional observation journal dated July 1, 2025, containing no substantive content.",
         "document_date": "2025-07-01",
@@ -315,45 +460,188 @@
       "telemetry": {
         "compressionRatio": 0.010738114826381207,
         "digestCharacters": 103,
-        "distillMicros": 331,
-        "inferenceMillis": 10566,
+        "distillMicros": 384,
+        "inferenceMillis": 13654,
         "sourceCharacters": 9592
       }
     },
     {
-      "extraction_millis": 12,
+      "description": "A purchase order for manufacturing services dated July 14, 2025.",
+      "digest_characters": 77,
+      "extraction_millis": 1632,
       "file": "document-image.png",
-      "parser_error": "NATIVE_ASSETS_MISSING",
-      "readiness": "failed",
-      "scores": {
-        "expected_error": false
+      "filename": "Purchase Order from Post Manufacturing LLC.png",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": null,
+        "description": "A purchase order for manufacturing services dated July 14, 2025.",
+        "document_date": null,
+        "document_type": "Purchase Order",
+        "evidence": {
+          "date": "DATE JULY 14 2625",
+          "document_type": "PURCHASE ORDER PO-31i",
+          "parties": [
+            "Post Manufacturing LLC"
+          ]
+        },
+        "parties": [
+          "Post Manufacturing LLC"
+        ],
+        "party_relation": "from"
       },
-      "status": "extraction_failed"
+      "readiness": "needs_review",
+      "review_reasons": [
+        "date_unsupported",
+        "description_unsupported",
+        "parser_warning"
+      ],
+      "scores": {
+        "date_correct": false,
+        "date_exact": false,
+        "date_forbidden": false,
+        "date_present": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 1,
+        "parties_matched": 1,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 68,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.1323529481887817,
+        "digestCharacters": 77,
+        "distillMicros": 52,
+        "inferenceMillis": 13984,
+        "sourceCharacters": 68
+      }
     },
     {
-      "extraction_millis": 14,
+      "description": "A notice of termination dated July 15, 2025, issued by Quartz Meadow Retail LLC.",
+      "digest_characters": 71,
+      "extraction_millis": 1531,
       "file": "document-image.jpg",
-      "parser_error": "NATIVE_ASSETS_MISSING",
-      "readiness": "failed",
-      "scores": {
-        "expected_error": false
+      "filename": "2025-07-15 Document - QUARTZ MEADOW RETAIL LLC.jpg",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": "effective",
+        "description": "A notice of termination dated July 15, 2025, issued by Quartz Meadow Retail LLC.",
+        "document_date": "2025-07-15",
+        "document_type": null,
+        "evidence": {
+          "date": "DATE JULY 15 2025",
+          "document_type": "QUARTZ MEADOW RETAIL LLC",
+          "parties": [
+            "QUARTZ MEADOW RETAIL LLC"
+          ]
+        },
+        "parties": [
+          "QUARTZ MEADOW RETAIL LLC"
+        ],
+        "party_relation": "none"
       },
-      "status": "extraction_failed"
+      "readiness": "needs_review",
+      "review_reasons": [
+        "type_unsupported",
+        "parser_warning"
+      ],
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "description_covers_facts": false,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 1,
+        "parties_matched": 1,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": false,
+        "type_present": false
+      },
+      "source_characters": 62,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.1451612710952759,
+        "digestCharacters": 71,
+        "distillMicros": 34,
+        "inferenceMillis": 14374,
+        "sourceCharacters": 62
+      }
     },
     {
-      "extraction_millis": 12,
+      "description": "A work order for Harbor Comet Repairs LLC dated July 16, 2027.",
+      "digest_characters": 70,
+      "extraction_millis": 989,
       "file": "document-image.tiff",
-      "parser_error": "NATIVE_ASSETS_MISSING",
-      "readiness": "failed",
-      "scores": {
-        "expected_error": false
+      "filename": "Work Order - HARBOR COMET REPAIRS LLC.tiff",
+      "pages": 1,
+      "proposal": {
+        "confidence": 1.0,
+        "date_role": null,
+        "description": "A work order for Harbor Comet Repairs LLC dated July 16, 2027.",
+        "document_date": null,
+        "document_type": "Work Order",
+        "evidence": {
+          "date": "DATE JULY 16 26275",
+          "document_type": "WORK ORDER WO-312",
+          "parties": [
+            "WORK ORDER WO-312 DATE JULY 16 26275 HARBOR COMET REPAIRS LLC"
+          ]
+        },
+        "parties": [
+          "HARBOR COMET REPAIRS LLC"
+        ],
+        "party_relation": "none"
       },
-      "status": "extraction_failed"
+      "readiness": "needs_review",
+      "review_reasons": [
+        "date_unsupported",
+        "description_unsupported",
+        "parser_warning"
+      ],
+      "scores": {
+        "date_correct": false,
+        "date_exact": false,
+        "date_forbidden": false,
+        "date_present": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "parties_expected": 1,
+        "parties_matched": 1,
+        "parties_spurious": 0,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      },
+      "source_characters": 61,
+      "status": "completed",
+      "telemetry": {
+        "compressionRatio": 1.1475409269332886,
+        "digestCharacters": 70,
+        "distillMicros": 33,
+        "inferenceMillis": 15997,
+        "sourceCharacters": 61
+      }
     },
     {
       "description": "A Statement of Work for the implementation of a client management platform, data migration, and training, effective April 1, 2026, through March 31, 2027.",
       "digest_characters": 12771,
-      "extraction_millis": 31,
+      "extraction_millis": 59,
       "file": "statement-of-work.pdf",
       "filename": "2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf",
       "pages": 14,
@@ -400,22 +688,22 @@
       "telemetry": {
         "compressionRatio": 0.4360935688018799,
         "digestCharacters": 12771,
-        "distillMicros": 9653,
-        "inferenceMillis": 36217,
+        "distillMicros": 13514,
+        "inferenceMillis": 56329,
         "sourceCharacters": 29285
       }
     },
     {
-      "description": "A notice of termination of an employment agreement between John Smith and Northstar Lantern Works LLC, effective January 31, 2027.",
+      "description": "A formal notice terminating an employment agreement between John Smith and Northstar Lantern Works LLC, effective January 31, 2027.",
       "digest_characters": 1833,
-      "extraction_millis": 31,
+      "extraction_millis": 13,
       "file": "termination-notice.pdf",
-      "filename": "2026-12-29 Notice of Termination to John Smith.pdf",
+      "filename": "2026-12-29 Notice of Termination - John Smith.pdf",
       "pages": 1,
       "proposal": {
-        "confidence": 0.8999999761581421,
+        "confidence": 1.0,
         "date_role": "effective",
-        "description": "A notice of termination of an employment agreement between John Smith and Northstar Lantern Works LLC, effective January 31, 2027.",
+        "description": "A formal notice terminating an employment agreement between John Smith and Northstar Lantern Works LLC, effective January 31, 2027.",
         "document_date": "2026-12-29",
         "document_type": "Notice of Termination",
         "evidence": {
@@ -426,7 +714,7 @@
         "parties": [
           "John Smith"
         ],
-        "party_relation": "to"
+        "party_relation": "none"
       },
       "readiness": "ready",
       "review_reasons": [],
@@ -435,7 +723,7 @@
         "date_exact": true,
         "date_forbidden": false,
         "date_present": true,
-        "description_covers_facts": true,
+        "description_covers_facts": false,
         "description_specific": true,
         "parties_correct": true,
         "parties_expected": 1,
@@ -452,8 +740,8 @@
       "telemetry": {
         "compressionRatio": 1.3771600723266602,
         "digestCharacters": 1833,
-        "distillMicros": 448,
-        "inferenceMillis": 14825,
+        "distillMicros": 699,
+        "inferenceMillis": 19396,
         "sourceCharacters": 1331
       }
     },
@@ -505,15 +793,15 @@
       "telemetry": {
         "compressionRatio": 1.2454431056976318,
         "digestCharacters": 3963,
-        "distillMicros": 978,
-        "inferenceMillis": 20680,
+        "distillMicros": 1145,
+        "inferenceMillis": 33520,
         "sourceCharacters": 3182
       }
     },
     {
       "description": "An invoice for annual platform subscription and services totaling $56,700 due on February 4, 2026.",
       "digest_characters": 845,
-      "extraction_millis": 37,
+      "extraction_millis": 16,
       "file": "vendor-invoice.pdf",
       "filename": "2026-01-05 Invoice between Vistage Worldwide, Inc and Acme Corporation.pdf",
       "pages": 1,
@@ -561,15 +849,15 @@
       "telemetry": {
         "compressionRatio": 1.318252682685852,
         "digestCharacters": 845,
-        "distillMicros": 417,
-        "inferenceMillis": 17676,
+        "distillMicros": 341,
+        "inferenceMillis": 25410,
         "sourceCharacters": 641
       }
     },
     {
       "description": "Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc. settle a dispute over invoices under a logistics services agreement for $312,500.",
       "digest_characters": 12282,
-      "extraction_millis": 40,
+      "extraction_millis": 23,
       "file": "settlement-agreement.pdf",
       "filename": "2026-07-22 Settlement Agreement between Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc.pdf",
       "pages": 7,
@@ -617,15 +905,15 @@
       "telemetry": {
         "compressionRatio": 0.8277953863143921,
         "digestCharacters": 12282,
-        "distillMicros": 4125,
-        "inferenceMillis": 35900,
+        "distillMicros": 6707,
+        "inferenceMillis": 54779,
         "sourceCharacters": 14837
       }
     },
     {
       "description": "Discussion regarding the termination of a project with Rowan and Priya.",
       "digest_characters": 301,
-      "extraction_millis": 36,
+      "extraction_millis": 37,
       "file": "ambiguous-note.pdf",
       "filename": "Document between Rowan and Priya.pdf",
       "pages": 1,
@@ -670,15 +958,15 @@
       "telemetry": {
         "compressionRatio": 1.0134680271148682,
         "digestCharacters": 301,
-        "distillMicros": 144,
-        "inferenceMillis": 17404,
+        "distillMicros": 181,
+        "inferenceMillis": 22443,
         "sourceCharacters": 297
       }
     },
     {
       "description": "An Order Form establishing a subscription agreement between Tessellate Analytics Ltd. and Vistage Worldwide, Inc. for an annual fee of $96,000, effective February 1, 2026.",
       "digest_characters": 721,
-      "extraction_millis": 35,
+      "extraction_millis": 18,
       "file": "order-form.docx",
       "filename": "2026-02-01 Order Form between Tessellate Analytics Ltd and Vistage Worldwide, Inc.docx",
       "pages": 1,
@@ -726,8 +1014,8 @@
       "telemetry": {
         "compressionRatio": 1.688524603843689,
         "digestCharacters": 721,
-        "distillMicros": 154,
-        "inferenceMillis": 15340,
+        "distillMicros": 252,
+        "inferenceMillis": 18738,
         "sourceCharacters": 427
       }
     }
@@ -735,99 +1023,107 @@
   "schema_version": 2,
   "summary": {
     "date_correct": {
-      "correct": 11,
-      "rate": 1.0,
-      "total": 11
+      "correct": 13,
+      "rate": 0.7647058823529411,
+      "total": 17
     },
     "date_exact": {
-      "correct": 11,
-      "rate": 1.0,
-      "total": 11
+      "correct": 13,
+      "rate": 0.7647058823529411,
+      "total": 17
     },
     "date_forbidden": {
       "correct": 0,
       "rate": 0.0,
-      "total": 11
+      "total": 17
     },
     "date_present": {
-      "correct": 11,
-      "rate": 1.0,
-      "total": 11
+      "correct": 13,
+      "rate": 0.7647058823529411,
+      "total": 17
     },
     "description_covers_facts": {
-      "correct": 9,
-      "rate": 0.8181818181818182,
-      "total": 11
+      "correct": 13,
+      "rate": 0.7647058823529411,
+      "total": 17
     },
     "description_specific": {
-      "correct": 12,
+      "correct": 18,
       "rate": 1.0,
-      "total": 12
+      "total": 18
     },
-    "evaluated": 12,
+    "evaluated": 18,
     "expected_error": {
       "correct": 2,
-      "rate": 0.25,
-      "total": 8
+      "rate": 1.0,
+      "total": 2
     },
     "inference_millis": {
-      "count": 12,
-      "max": 36217,
-      "mean": 18434,
-      "median": 15340,
-      "min": 10240
+      "count": 18,
+      "max": 56329,
+      "mean": 22666,
+      "median": 18738,
+      "min": 13034
     },
     "parties_correct": {
-      "correct": 9,
-      "rate": 0.75,
-      "total": 12
+      "correct": 13,
+      "rate": 0.7222222222222222,
+      "total": 18
     },
     "party_forbidden": {
       "correct": 1,
-      "rate": 0.08333333333333333,
-      "total": 12
+      "rate": 0.05555555555555555,
+      "total": 18
     },
     "readiness_match": {
-      "correct": 10,
-      "rate": 0.8333333333333334,
-      "total": 12
+      "correct": 16,
+      "rate": 0.8888888888888888,
+      "total": 18
     },
     "ready": {
       "correct": 9,
-      "rate": 0.75,
-      "total": 12
+      "rate": 0.5,
+      "total": 18
     },
-    "review_rate": 0.25,
+    "review_rate": 0.5,
     "total_millis": {
-      "count": 12,
-      "max": 36248,
-      "mean": 18488,
-      "median": 15381,
-      "min": 10254
+      "count": 18,
+      "max": 56388,
+      "mean": 23736,
+      "median": 19854,
+      "min": 13067
     },
     "type_correct": {
-      "correct": 8,
-      "rate": 0.7272727272727273,
-      "total": 11
+      "correct": 13,
+      "rate": 0.7647058823529411,
+      "total": 17
     },
     "type_present": {
-      "correct": 9,
-      "rate": 0.8181818181818182,
-      "total": 11
+      "correct": 14,
+      "rate": 0.8235294117647058,
+      "total": 17
     }
   },
-  "peak_server_rss_bytes": 2684493824,
-  "wall_clock_seconds": 223.7,
   "status": "completed",
-  "provenance": "local developer run; release evidence is regenerated by the QA and release workflows and bound to their commit and run id",
-  "model_file": "Qwen3.5-2B-Q4_K_M.gguf",
-  "model_sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
-  "threads": 8,
+  "commit": "bd6ffd7e78dcd604f405858802117ac7dd78ea2b",
+  "release_inputs_sha256": "9228f7235c2574bb626596147171c45393a1c383048985051a5dec7af0ed02d9",
   "runner": {
-    "os": "Windows 11",
-    "cpu": "AMD Ryzen 7 PRO 8840U",
+    "os": "Microsoft Windows NT 10.0.26100.0",
     "logical_processors": 16,
     "ci_run_id": null,
     "ci_run_attempt": null
-  }
+  },
+  "acceptance": {
+    "status": "accepted",
+    "failures": [],
+    "evaluated": 18,
+    "named": 9,
+    "date_correct_when_named": 1
+  },
+  "model_file": "Qwen3.5-2B-Q4_K_M.gguf",
+  "model_sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+  "model_bytes": 1280835840,
+  "threads": 8,
+  "peak_model_rss_bytes": 2590457856,
+  "wall_clock_seconds": 428.4
 }

@@ -56,8 +56,8 @@ while vcpkg fetched libjpeg-turbo sources; the fetch script now retries that.
 | 1536×1024 implementation capture | pending | Real Playwright screenshot at `docs/qa/latest-implementation.png`; no file is checked in because no qualifying capture was produced |
 | Windows Tauri/NSIS build | pending | `npm run tauri build -- --bundles nsis -- --locked` |
 | Installer/install/uninstall smoke | pending | `scripts/smoke-installer.ps1`, including signed runtime inventory, installed worker PDF/OCR path, and retained user-data sentinel |
-| Corpus evaluation | pending | Every gold fixture through the packaged worker and the shipping distill/prompt/client/validate path, llama.cpp b10361, the exact pinned text model; `scripts/run-model-evaluation.ps1` |
-| Model acceptance | pending | `scripts/validate-model-evaluation.mjs`: date, type, party, and description accuracy above their regression floors, zero documents filed under a corpus-marked trap date, and a review rate under the ceiling |
+| Corpus evaluation | pending on the release runner | Every gold fixture through the packaged worker and the shipping distill/prompt/client/validate path, llama.cpp b10361, the exact pinned text model; `scripts/run-model-evaluation.ps1`. Run locally on Windows 11 with the size-and-digest-verified pinned model: 18 documents scored, including the six OCR fixtures for the first time. Not the pinned runner, so it does not satisfy this gate. |
+| Model acceptance | pending on the release runner | `scripts/validate-model-evaluation.mjs`: date, type, party, and description accuracy above their regression floors, every document Intern named carrying the right date, zero documents filed under a corpus-marked trap date, and a review rate under the ceiling. The local run above returns `accepted`. |
 | Rendered fidelity review | pending | Inspect both accepted concept and actual `latest-implementation.png` with `view_image`; code-only inspection is not pixel QA |
 | Clean Windows core recovery path | pending | Install/setup; PDF/DOCX/scan/folder; pause/resume; edit without another model call; apply/undo; forced extraction/apply termination; restart; clear history; uninstall |
 

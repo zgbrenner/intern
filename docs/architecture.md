@@ -237,21 +237,31 @@ ordinary applications running:
 
 | | |
 | --- | --- |
-| Extraction | 13 ms for a one-page invoice, 33 ms for a 14-page contract |
+| Extraction | 13 ms for a one-page invoice, 33 ms for a 14-page contract; 38 ms median across the corpus |
+| Extraction, scanned page | seconds, and up to 6.6 s when a page has to be re-read in other orientations |
 | Distillation | 0.3 ms to 9 ms |
-| Median document, end to end | 12.4-16.6 s, depending on machine load |
+| Median document, end to end | 12.4-27.7 s across four runs of the same corpus on the same machine |
 | 29,000-character contract | 42 s |
-| Peak model process memory | 2,590 MB |
+| Peak model process memory | 2,470-2,590 MB |
 | First-run download | 1.19 GiB, the text model and nothing else |
+
+Quote the latency as a range. Four runs of the same corpus on this machine gave
+medians of 12.4, 16.6, 19.6, and 27.7 seconds depending on what else was
+competing for the eight threads, and any single figure from that spread is noise.
 
 Almost all of the time is the model, and on short documents most of that is
 *generation*, not reading: the structured reply is about 240 tokens at 17.5
 tokens per second. The previous pipeline and model took 23.6 s on the median
 document and 115 s on its worst, with 4,215 MB of peak memory.
 
-See `docs/qa/model-evaluation.json` for a recorded corpus evaluation and
-`docs/model-bakeoff.md` for the measurements behind the model and pipeline
-choice, including what was rejected and what still misses.
+`docs/qa/model-evaluation.json` records one full-corpus evaluation - all 18
+scorable fixtures, real inference, the pinned model verified by size and digest -
+bound to the commit and release-input hash that produced it. It comes from a
+development laptop, not the pinned release runner, and cannot satisfy a release
+gate: the release workflow rescores the corpus itself and
+`validate-release-evidence.mjs` requires the evidence to name the live run.
+`docs/model-bakeoff.md` has the measurements behind the model and pipeline choice,
+including what was rejected and what still misses.
 
 ## The boundary
 
