@@ -11,13 +11,13 @@
     },
     {
       "file": "scanned-lease.pdf",
-      "size": 2531,
-      "sha256": "00279cc6f51d27778190cd00f33bcef8f6595cf49172c5d3745c6d3717763821"
+      "size": 4970,
+      "sha256": "58b7e80c64aa12ff80318aa947fe8fc428b38cdc587a2a732e84ba81f9156060"
     },
     {
       "file": "mixed-signature.pdf",
-      "size": 2593,
-      "sha256": "85938de97a273d5d50c01509678431c4138502feb9e527e6252b54b761d2693d"
+      "size": 4282,
+      "sha256": "231be7d328ac27ed784469e47542c5d4cf15e1f5860ebec7c9ae7a7ba3d1428c"
     },
     {
       "file": "nda.docx",
@@ -36,8 +36,8 @@
     },
     {
       "file": "rotated-low-resolution-scan.png",
-      "size": 986,
-      "sha256": "990141b57acf47d96415695959c8c583be5810828c9486a12d981f22bcc5d0f7"
+      "size": 3273,
+      "sha256": "72689c876c3d092cd1acb5f513b10f6df55f81fba35981e269d08fae78a7fa00"
     },
     {
       "file": "encrypted.pdf",
@@ -56,8 +56,8 @@
     },
     {
       "file": "document-image.png",
-      "size": 1242,
-      "sha256": "3581da8a5018524713b74353a7866b413fc177e8c36b1302ea67c2880e07b900"
+      "size": 2820,
+      "sha256": "f5d959d876f19031087cb5efb4ea21f451afc3da6f5a87777fd7852b18eeb32f"
     },
     {
       "file": "document-image.jpg",
@@ -67,7 +67,7 @@
     {
       "file": "document-image.tiff",
       "size": 168201,
-      "sha256": "0d092e8da079b04807700b8881b5ae120b3a13294012b46d91f8c80b9b30d53b"
+      "sha256": "8a34806799ba67eb0dce70d750c88e4d06f995c0b0851c165ee4b7ecd1be7178"
     },
     {
       "file": "mixed-batch/duplicate-invoice-a.pdf",
