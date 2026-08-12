@@ -442,6 +442,11 @@ fn composer_filters_directional_marks_and_bounds_a_hostile_extension() {
     let value = compose_filename(&validated(None, None, Some(subject)), &extension, &[]).value;
     assert!(value.starts_with("ABCD."));
     assert_eq!(value.chars().count(), 140);
+
+    let collision =
+        compose_filename(&validated(None, None, Some(subject)), &extension, &[&value]).value;
+    assert!(collision.starts_with("ABCD (2)."));
+    assert_eq!(collision.chars().count(), 140);
 }
 
 #[test]
