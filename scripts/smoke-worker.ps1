@@ -35,13 +35,27 @@ $Start.RedirectStandardError = $true
 $Start.Environment["INTERN_RUNTIME_DIR"] = $Runtime
 $Process = [System.Diagnostics.Process]::new()
 $Process.StartInfo = $Start
-$Stderr = [System.Text.StringBuilder]::new()
-$Process.add_ErrorDataReceived({
-    param($Sender, $Event)
-    if ($null -ne $Event.Data) { [void]$Stderr.AppendLine($Event.Data) }
-})
 if (-not $Process.Start()) { throw "Failed to launch parser worker" }
-$Process.BeginErrorReadLine()
+try {
+    $StderrTask = $Process.StandardError.ReadToEndAsync()
+} catch {
+    $Process.Kill($true)
+    [void]$Process.WaitForExit(10000)
+    $Process.Dispose()
+    throw
+}
+
+function Get-WorkerStderr {
+    if ($null -eq $StderrTask) { return "<stderr unavailable>" }
+    if ($StderrTask.IsCompletedSuccessfully) {
+        $Value = $StderrTask.GetAwaiter().GetResult().Trim()
+        if ($Value) { return $Value }
+        return "<stderr was empty>"
+    }
+    if ($StderrTask.IsFaulted) { return "<stderr collection failed: $($StderrTask.Exception.GetBaseException().Message)>" }
+    if ($StderrTask.IsCanceled) { return "<stderr collection was canceled>" }
+    return "<stderr is still being collected>"
+}
 
 function Invoke-WorkerCommand {
     param(
@@ -61,19 +75,19 @@ function Invoke-WorkerCommand {
         $Read = $Process.StandardOutput.ReadLineAsync()
         while (-not $Read.Wait(5000)) {
             if ($Process.HasExited) {
-                throw "Worker exited with $($Process.ExitCode): $Stderr"
+                throw "Worker exited with $($Process.ExitCode): $(Get-WorkerStderr)"
             }
-            if ([DateTime]::UtcNow -ge $Deadline) { throw "Timed out waiting for worker request $RequestId. stderr: $Stderr" }
+            if ([DateTime]::UtcNow -ge $Deadline) { throw "Timed out waiting for worker request $RequestId. stderr: $(Get-WorkerStderr)" }
         }
         $Line = $Read.Result
-        if ($null -eq $Line) { throw "Worker closed stdout: $Stderr" }
+        if ($null -eq $Line) { throw "Worker closed stdout: $(Get-WorkerStderr)" }
         if ([string]::IsNullOrWhiteSpace($Line)) { continue }
         $Envelope = $Line | ConvertFrom-Json
         if ($Envelope.protocol_version -ne 1) { throw "Worker emitted unsupported protocol: $Line" }
         if ($Envelope.request_id -ne $RequestId) { throw "Worker interleaved an unexpected request: $Line" }
         if ($Envelope.event.type -in @("hello", "parsed", "error")) { return $Envelope.event }
     }
-    throw "Timed out waiting for worker request $RequestId. stderr: $Stderr"
+    throw "Timed out waiting for worker request $RequestId. stderr: $(Get-WorkerStderr)"
 }
 
 function Assert-ParsedFixture {
@@ -128,10 +142,13 @@ try {
     $Process.StandardInput.Flush()
     $Process.StandardInput.Close()
     if (-not $Process.WaitForExit(10000)) { throw "Worker did not exit after shutdown" }
-    if ($Process.ExitCode -ne 0) { throw "Worker exited with $($Process.ExitCode): $Stderr" }
+    if ($Process.ExitCode -ne 0) { throw "Worker exited with $($Process.ExitCode): $(Get-WorkerStderr)" }
     Write-Host "Package-shaped worker hello, native PDF, PDFium+Tesseract OCR, DOCX/image, and invalid-fixture smoke passed."
 }
 finally {
-    if (-not $Process.HasExited) { $Process.Kill($true) }
+    if (-not $Process.HasExited) {
+        $Process.Kill($true)
+        [void]$Process.WaitForExit(10000)
+    }
     $Process.Dispose()
 }
