@@ -175,7 +175,7 @@ fn recovery_requeues_interrupted_processing_and_reconciles_applying_without_rese
         &database,
         Arc::new(IdleWorker),
         Arc::new(IdleModel),
-        Arc::clone(&files),
+        files.clone(),
         Arc::new(NoEvents),
         SettingsStore::new(temp.path().join("settings.json")),
     )

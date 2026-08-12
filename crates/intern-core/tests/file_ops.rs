@@ -902,6 +902,42 @@ fn reopen_does_not_bind_a_historical_receipt_to_an_empty_applying_epoch() {
     assert!(!source.exists());
 }
 
+#[test]
+fn second_apply_crash_before_receipt_ignores_completed_first_apply() {
+    let temp = TempDir::new().unwrap();
+    let database = temp.path().join("queue.sqlite3");
+    let source = temp.path().join("source.pdf");
+    let destination = temp.path().join("named.pdf");
+    write(&source, b"original");
+    let (applier, store, item_id) = applying(&temp, &source, Arc::new(StdFileSystem));
+    let applied = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap();
+    store.complete_apply(item_id, applied.id).unwrap();
+    store
+        .begin_applying(item_id, QueueStatus::Completed)
+        .unwrap();
+    let undone = applier.undo(item_id, &applied).unwrap();
+    store.complete_undo(item_id, undone.id).unwrap();
+
+    store.begin_applying(item_id, QueueStatus::Ready).unwrap();
+    assert_eq!(store.list().unwrap()[0].active_receipt_id, None);
+    drop(applier);
+    drop(store);
+
+    let reopened = Arc::new(QueueStore::open(database).unwrap());
+    reopened.claim_applying_reconciliation(item_id).unwrap();
+    let resolved = FileApplier::local(reopened).reconcile(item_id).unwrap();
+    assert_eq!(resolved.status, QueueStatus::Ready);
+    assert!(source.exists());
+    assert!(!destination.exists());
+}
+
 #[cfg(windows)]
 mod windows_safety {
     use std::{fs, io::Write};

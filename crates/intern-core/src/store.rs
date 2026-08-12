@@ -53,6 +53,7 @@ impl QueueStore {
                previous_status TEXT,
                active_receipt_id INTEGER,
                reconciliation_receipt_id INTEGER,
+               applying_epoch INTEGER NOT NULL DEFAULT 0,
                created_at INTEGER NOT NULL,
                updated_at INTEGER NOT NULL,
                UNIQUE(source_path_key, source_hash)
@@ -317,7 +318,8 @@ impl QueueStore {
                 "UPDATE queue_items
              SET status = 'applying', previous_status = ?1, owner_session = ?2,
                  lease_expires_at = ?3, active_receipt_id = NULL,
-                 reconciliation_receipt_id = NULL, error_code = NULL, updated_at = ?4
+                 reconciliation_receipt_id = NULL, applying_epoch = applying_epoch + 1,
+                 error_code = NULL, updated_at = ?4
              WHERE id = ?5 AND status = ?1 AND active_receipt_id IS NULL
                AND NOT EXISTS (
                  SELECT 1 FROM queue_items active
@@ -503,6 +505,9 @@ impl QueueStore {
     }
 
     pub(crate) fn resolve_empty_applying(&self, id: i64) -> InternResult<QueueItem> {
+        // Only begin_applying() advances this epoch marker. Pre-v4 applying rows stay at
+        // zero, so ambiguous legacy operations still fail closed instead of being
+        // mistaken for a crash that happened before the receipt transaction.
         let mut connection = self.lock()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -516,18 +521,8 @@ impl QueueStore {
                  error_code = NULL, updated_at = ?1
              WHERE id = ?2 AND status = 'applying' AND owner_session = ?3
                AND active_receipt_id IS NULL
-               AND previous_status IN ('ready', 'completed')
-               AND NOT EXISTS (
-                 SELECT 1 FROM operation_receipts receipts
-                 WHERE receipts.queue_item_id = ?2
-                   AND receipts.stage <> 'rolled_back'
-                   AND (
-                     (queue_items.previous_status = 'ready' AND receipts.direction = 'apply'
-                       AND receipts.source_path = queue_items.source_path)
-                     OR (queue_items.previous_status = 'completed' AND receipts.direction = 'undo'
-                       AND receipts.destination_path = queue_items.source_path)
-                   )
-               )",
+               AND applying_epoch > 0
+               AND previous_status IN ('ready', 'completed')",
                 params![now(), id, self.session_id],
             )
             .map_err(InternError::from)?;
@@ -1194,6 +1189,10 @@ fn migrate_legacy_schema(connection: &mut Connection) -> InternResult<()> {
             "reconciliation_receipt_id",
             "reconciliation_receipt_id INTEGER",
         ),
+        (
+            "applying_epoch",
+            "applying_epoch INTEGER NOT NULL DEFAULT 0",
+        ),
     ] {
         if !column_exists(&transaction, "queue_items", column)? {
             transaction
@@ -1302,6 +1301,12 @@ fn migrate_legacy_schema(connection: &mut Connection) -> InternResult<()> {
     transaction
         .execute(
             "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?1)",
+            params![now()],
+        )
+        .map_err(InternError::from)?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, ?1)",
             params![now()],
         )
         .map_err(InternError::from)?;

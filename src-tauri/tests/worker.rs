@@ -1,7 +1,4 @@
-use intern_app::{
-    pipeline::{PipelineProgress, WorkerBoundary},
-    worker::{SupervisedWorker, WorkerEvent, adapt_parsed_document, decode_worker_response},
-};
+use intern_app::worker::{WorkerEvent, adapt_parsed_document, decode_worker_response};
 use tempfile::tempdir;
 
 #[test]
@@ -117,6 +114,10 @@ fn high_confidence_vision_routing_does_not_invent_a_low_ocr_warning() {
 #[cfg(target_os = "linux")]
 mod process_fixture {
     use super::*;
+    use intern_app::{
+        pipeline::{PipelineProgress, WorkerBoundary},
+        worker::SupervisedWorker,
+    };
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
