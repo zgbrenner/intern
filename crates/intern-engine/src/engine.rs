@@ -13,17 +13,21 @@ use std::time::Instant;
 
 use crate::client::{ModelClient, ModelRequest};
 use crate::distill::{DigestBudget, DocumentDigest, distill};
-use crate::domain::{AnalysisTelemetry, DocumentAnalysis, DocumentSource, ValidationOutcome};
+use crate::domain::{
+    AnalysisTelemetry, DocumentAnalysis, DocumentSource, ProposalStatus, ReviewReason,
+    ValidationOutcome,
+};
 use crate::error::EngineResult;
 use crate::naming::compose_filename;
 use crate::validate::validate;
 
-/// Whether a document should be shown to the model as an image as well as text.
+/// Below this much extracted text, a document is treated as unreadable rather
+/// than analysed on the strength of a few stray characters.
 ///
-/// Vision is a fallback, not the normal path: loading a projector costs
-/// hundreds of megabytes and image tokens cost far more CPU than text tokens.
-/// It is used only when text extraction produced almost nothing.
-pub const MIN_TEXT_CHARACTERS_FOR_TEXT_ONLY: usize = 200;
+/// Intern has no vision fallback: the model is text-only and the local server
+/// runs without a projector, so a page nothing could read is a page for a human
+/// to look at, not one to guess about.
+pub const MIN_READABLE_CHARACTERS: usize = 200;
 
 pub struct Engine {
     client: ModelClient,
@@ -71,14 +75,21 @@ impl Engine {
         extension: &str,
         existing_names: &[&str],
     ) -> EngineResult<DocumentAnalysis> {
-        let image = vision_input(source, digest);
-        let request = ModelRequest::from_digest(digest, image.clone());
+        let request = ModelRequest::from_digest(digest);
         let inference_started = Instant::now();
         let proposal = self.client.propose(&request)?;
         let inference_millis =
             u64::try_from(inference_started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
-        let outcome = validate(proposal, digest);
+        let mut outcome = validate(proposal, digest);
+        if barely_readable(source) {
+            // A page that yielded almost no text cannot support a confident
+            // name, whatever the model returned about it.
+            if !outcome.reasons.contains(&ReviewReason::ParserWarning) {
+                outcome.reasons.push(ReviewReason::ParserWarning);
+            }
+            outcome.status = ProposalStatus::NeedsReview;
+        }
         Ok(finish(
             outcome,
             digest,
@@ -90,7 +101,6 @@ impl Engine {
                 compression_ratio: digest.compression_ratio(),
                 distill_micros,
                 inference_millis,
-                vision_used: image.is_some(),
             },
         ))
     }
@@ -123,23 +133,13 @@ pub fn finish(
     }
 }
 
-/// True when a document is unreadable enough as text that the page image is
-/// worth its cost.
+/// True when extraction produced too little text to name a document from.
 ///
-/// Callers use this to decide whether to load a vision projector at all, which
-/// is why it depends only on the source and not on the digest.
-pub fn wants_vision(source: &DocumentSource) -> bool {
-    source.page_image.is_some() && source.character_count() < MIN_TEXT_CHARACTERS_FOR_TEXT_ONLY
-}
-
-fn vision_input(
-    source: &DocumentSource,
-    digest: &DocumentDigest,
-) -> Option<crate::domain::PageImage> {
-    let _ = digest;
-    wants_vision(source)
-        .then(|| source.page_image.clone())
-        .flatten()
+/// The parser hands back a rendered page image when it could not read a page as
+/// text. Intern cannot show that image to the model, so the image is a signal
+/// rather than an input: it means a human should look at this one.
+pub fn barely_readable(source: &DocumentSource) -> bool {
+    source.page_image.is_some() && source.character_count() < MIN_READABLE_CHARACTERS
 }
 
 #[cfg(test)]
@@ -161,27 +161,24 @@ mod tests {
     }
 
     #[test]
-    fn a_text_bearing_page_never_pays_for_vision() {
+    fn a_text_bearing_page_is_readable_even_when_an_image_came_with_it() {
         let source = source_with_image(
             "STATEMENT OF WORK\n\nThis Statement of Work is effective as of April 1, 2026 by and \
              between Acme Corporation and Vistage Worldwide, Inc. and covers the 2026 CRM \
              implementation, its deliverables, its fees, and its project term.",
         );
-        let digest = distill(&source, DigestBudget::default());
-        assert!(vision_input(&source, &digest).is_none());
+        assert!(!barely_readable(&source));
     }
 
     #[test]
-    fn an_unreadable_scan_falls_back_to_vision() {
-        let source = source_with_image("l1 ll  I");
-        let digest = distill(&source, DigestBudget::default());
-        assert!(vision_input(&source, &digest).is_some());
+    fn a_scan_that_yielded_nothing_is_flagged_rather_than_guessed_at() {
+        assert!(barely_readable(&source_with_image("l1 ll  I")));
     }
 
     #[test]
-    fn a_document_with_no_image_never_uses_vision() {
-        let source = source_from_text("x");
-        let digest = distill(&source, DigestBudget::default());
-        assert!(vision_input(&source, &digest).is_none());
+    fn a_short_document_with_no_image_is_not_treated_as_unreadable() {
+        // A one-line note is short but perfectly legible; only a page the parser
+        // gave up on arrives with an image attached.
+        assert!(!barely_readable(&source_from_text("Paid in full.")));
     }
 }

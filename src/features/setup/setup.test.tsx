@@ -5,7 +5,7 @@ import type { ExistingModelFiles, SelectionBoundary } from '../../lib/bridge';
 import { createInMemoryBridge } from '../../lib/inMemoryBridge';
 import type { SetupState } from '../../types';
 
-const modelFiles = { modelPath: 'C:\\Models\\intern-q4.gguf', projectorPath: 'C:\\Models\\mmproj-f16.gguf' };
+const modelFiles = { modelPath: 'C:\\Models\\intern-q4.gguf' };
 
 function setupSelection(pickExistingModelFiles: () => Promise<ExistingModelFiles | undefined>): SelectionBoundary {
   return {

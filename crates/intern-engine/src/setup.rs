@@ -48,10 +48,10 @@ impl SetupOperationGate {
     }
 }
 
+/// A model file the user already has on disk, offered instead of downloading.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExistingModelSelection {
     pub model_path: PathBuf,
-    pub projector_path: PathBuf,
 }
 
 pub fn install_existing_model_files<D, F>(
@@ -66,12 +66,6 @@ where
     D: DiskSpace,
     F: FnMut(SetupProgress),
 {
-    if selection.model_path == selection.projector_path {
-        return Err(ModelError::new(
-            ModelErrorCode::ModelFileInvalid,
-            "model and projector selections must be different files",
-        ));
-    }
     let total = manifest.total_bytes();
     let mut completed_before = 0_u64;
     for expected in &manifest.files {
@@ -80,7 +74,6 @@ where
         }
         let selected = match expected.role {
             ModelRole::Model => &selection.model_path,
-            ModelRole::Projector => &selection.projector_path,
         };
         let offset = completed_before;
         install_selected_file(

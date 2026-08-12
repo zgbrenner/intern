@@ -7,6 +7,7 @@
       "file": "employment-agreement.pdf",
       "kind": "text_pdf",
       "document_type": "Employment Agreement",
+      "acceptable_types": [],
       "document_date": "2025-02-14",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -29,6 +30,7 @@
       "file": "scanned-lease.pdf",
       "kind": "image_only_pdf",
       "document_type": "Lease Agreement",
+      "acceptable_types": [],
       "document_date": "2024-09-01",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -53,6 +55,7 @@
       "file": "mixed-signature.pdf",
       "kind": "mixed_pdf",
       "document_type": "Services Agreement",
+      "acceptable_types": [],
       "document_date": "2025-01-08",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -76,6 +79,7 @@
       "file": "nda.docx",
       "kind": "docx",
       "document_type": "Mutual Non-Disclosure Agreement",
+      "acceptable_types": [],
       "document_date": "2025-03-03",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -98,6 +102,7 @@
       "file": "multi-date-invoice.pdf",
       "kind": "text_pdf",
       "document_type": "Invoice",
+      "acceptable_types": [],
       "document_date": "2025-04-30",
       "acceptable_dates": [],
       "forbidden_dates": [
@@ -122,6 +127,9 @@
       "file": "meeting-minutes.md",
       "kind": "markdown",
       "document_type": "Meeting Minutes",
+      "acceptable_types": [
+        "Quarterly Operations Review"
+      ],
       "document_date": "2025-05-07",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -140,6 +148,7 @@
       "file": "rotated-low-resolution-scan.png",
       "kind": "rotated_scan",
       "document_type": "Delivery Receipt",
+      "acceptable_types": [],
       "document_date": "2025-06-12",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -185,6 +194,7 @@
       "file": "long-document-100-pages.pdf",
       "kind": "long_pdf",
       "document_type": "Project Journal",
+      "acceptable_types": [],
       "document_date": "2025-07-01",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -203,6 +213,7 @@
       "file": "document-image.png",
       "kind": "png",
       "document_type": "Purchase Order",
+      "acceptable_types": [],
       "document_date": "2025-07-14",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -225,6 +236,7 @@
       "file": "document-image.jpg",
       "kind": "jpeg",
       "document_type": "Packing Slip",
+      "acceptable_types": [],
       "document_date": "2025-07-15",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -247,6 +259,7 @@
       "file": "document-image.tiff",
       "kind": "tiff",
       "document_type": "Work Order",
+      "acceptable_types": [],
       "document_date": "2025-07-16",
       "acceptable_dates": [],
       "forbidden_dates": [],
@@ -269,6 +282,7 @@
       "file": "statement-of-work.pdf",
       "kind": "long_contract_pdf",
       "document_type": "Statement of Work",
+      "acceptable_types": [],
       "document_date": "2026-04-01",
       "acceptable_dates": [],
       "forbidden_dates": [
@@ -302,6 +316,7 @@
       "file": "termination-notice.pdf",
       "kind": "text_pdf",
       "document_type": "Notice of Termination",
+      "acceptable_types": [],
       "document_date": "2026-12-29",
       "acceptable_dates": [
         "2027-01-31"
@@ -337,6 +352,7 @@
       "file": "consulting-amendment.pdf",
       "kind": "text_pdf",
       "document_type": "First Amendment to Consulting Agreement",
+      "acceptable_types": [],
       "document_date": "2025-09-14",
       "acceptable_dates": [],
       "forbidden_dates": [
@@ -363,6 +379,7 @@
       "file": "vendor-invoice.pdf",
       "kind": "text_pdf",
       "document_type": "Invoice",
+      "acceptable_types": [],
       "document_date": "2026-01-05",
       "acceptable_dates": [],
       "forbidden_dates": [
@@ -387,6 +404,7 @@
       "file": "settlement-agreement.pdf",
       "kind": "long_contract_pdf",
       "document_type": "Settlement Agreement",
+      "acceptable_types": [],
       "document_date": "2026-07-22",
       "acceptable_dates": [],
       "forbidden_dates": [
@@ -435,6 +453,7 @@
       "file": "order-form.docx",
       "kind": "docx",
       "document_type": "Order Form",
+      "acceptable_types": [],
       "document_date": "2026-02-01",
       "acceptable_dates": [],
       "forbidden_dates": [

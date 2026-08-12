@@ -208,7 +208,7 @@ preserved; collisions get a ` (2)` suffix.
 | Runtime | llama.cpp `b10361`, CPU only |
 | Context | 8,192 tokens |
 | Threads | half the logical processors, clamped to 2–12 |
-| Vision | the projector is **not** loaded; it is fetched and loaded on demand |
+| Vision | none. No projector is pinned, downloaded, or loaded, and the request type has no field for an image |
 
 The model is text-first. Essentially every business document has usable text,
 and a permanently resident vision projector costs hundreds of megabytes for a
@@ -230,10 +230,10 @@ ordinary applications running:
 | --- | --- |
 | Extraction | 13 ms for a one-page invoice, 33 ms for a 14-page contract |
 | Distillation | 0.3 ms to 9 ms |
-| Median document, end to end | 12.4 s |
+| Median document, end to end | 12.4-16.6 s, depending on machine load |
 | 29,000-character contract | 42 s |
 | Peak model process memory | 2,590 MB |
-| Installed model | 1.19 GiB, plus a 638 MB projector that is not loaded |
+| First-run download | 1.19 GiB, the text model and nothing else |
 
 Almost all of the time is the model, and on short documents most of that is
 *generation*, not reading: the structured reply is about 240 tokens at 17.5

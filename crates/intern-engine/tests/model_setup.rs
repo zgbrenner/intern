@@ -29,22 +29,13 @@ fn manifest() -> ModelManifest {
         schema_version: 2,
         model_id: "test-model".into(),
         served_model_name: "intern-local".into(),
-        files: vec![
-            ModelFile {
-                name: "model.gguf".into(),
-                role: ModelRole::Model,
-                url: "https://example.invalid/model.gguf".into(),
-                size: 11,
-                sha256: "357e5d6fafa34d27360fec24b4326d3534905e33c6acdee60198fb078b7b79e5".into(),
-            },
-            ModelFile {
-                name: "projector.gguf".into(),
-                role: ModelRole::Projector,
-                url: "https://example.invalid/projector.gguf".into(),
-                size: 15,
-                sha256: "b95a25c1f308da898c582dc7728f9c1157ab1f5b34c36109a5203f0ac71a2f85".into(),
-            },
-        ],
+        files: vec![ModelFile {
+            name: "model.gguf".into(),
+            role: ModelRole::Model,
+            url: "https://example.invalid/model.gguf".into(),
+            size: 11,
+            sha256: "357e5d6fafa34d27360fec24b4326d3534905e33c6acdee60198fb078b7b79e5".into(),
+        }],
     }
 }
 
@@ -64,21 +55,16 @@ fn setup_gate_cancels_the_active_token_and_allows_a_fresh_resume_only_after_fini
 }
 
 #[test]
-fn existing_pair_install_validates_and_publishes_both_files_with_aggregate_progress() {
+fn an_existing_model_file_is_validated_and_published_with_progress() {
     let temp = tempdir().unwrap();
     let model = temp.path().join("selected-model.gguf");
-    let projector = temp.path().join("selected-projector.gguf");
     fs::write(&model, b"model-bytes").unwrap();
-    fs::write(&projector, b"projector-bytes").unwrap();
     let destination = temp.path().join("installed");
     let progress = Mutex::new(Vec::new());
 
     let total = install_existing_model_files(
         &manifest(),
-        &ExistingModelSelection {
-            model_path: model,
-            projector_path: projector,
-        },
+        &ExistingModelSelection { model_path: model },
         &destination,
         &FixedDisk(DISK_RESERVE_BYTES + 100),
         &CancellationToken::new(),
@@ -86,35 +72,29 @@ fn existing_pair_install_validates_and_publishes_both_files_with_aggregate_progr
     )
     .unwrap();
 
-    assert_eq!(total, 26);
+    assert_eq!(total, 11);
     assert_eq!(
         fs::read(destination.join("model.gguf")).unwrap(),
         b"model-bytes"
     );
-    assert_eq!(
-        fs::read(destination.join("projector.gguf")).unwrap(),
-        b"projector-bytes"
-    );
     let events = progress.into_inner().unwrap();
     assert_eq!(events.last().unwrap().stage, SetupStage::Complete);
-    assert_eq!(events.last().unwrap().completed_bytes, 26);
-    assert_eq!(events.last().unwrap().total_bytes, 26);
+    assert_eq!(events.last().unwrap().completed_bytes, 11);
+    assert_eq!(events.last().unwrap().total_bytes, 11);
 }
 
+/// Cancelling must leave nothing half-installed, and a second attempt must
+/// still work. With one file there is no partial set to resume, so the
+/// guarantee is that the destination stays clean and the retry succeeds.
 #[test]
-fn canceled_existing_pair_can_resume_without_replacing_the_verified_first_file() {
+fn a_canceled_install_publishes_nothing_and_can_be_retried() {
     let temp = tempdir().unwrap();
     let model = temp.path().join("selected-model.gguf");
-    let projector = temp.path().join("selected-projector.gguf");
     fs::write(&model, b"model-bytes").unwrap();
-    fs::write(&projector, b"projector-bytes").unwrap();
     let destination = temp.path().join("installed");
-    let selection = ExistingModelSelection {
-        model_path: model,
-        projector_path: projector,
-    };
+    let selection = ExistingModelSelection { model_path: model };
     let cancellation = CancellationToken::new();
-    let cancel_from_progress = cancellation.clone();
+    cancellation.cancel();
 
     let error = install_existing_model_files(
         &manifest(),
@@ -122,17 +102,12 @@ fn canceled_existing_pair_can_resume_without_replacing_the_verified_first_file()
         &destination,
         &FixedDisk(u64::MAX),
         &cancellation,
-        move |event| {
-            if event.stage == SetupStage::Complete && event.completed_bytes == 11 {
-                cancel_from_progress.cancel();
-            }
-        },
+        |_| {},
     )
     .unwrap_err();
 
     assert_eq!(error.code(), ModelErrorCode::DownloadCanceled);
-    assert!(destination.join("model.gguf").exists());
-    assert!(!destination.join("projector.gguf").exists());
+    assert!(!destination.join("model.gguf").exists());
 
     install_existing_model_files(
         &manifest(),
@@ -143,7 +118,10 @@ fn canceled_existing_pair_can_resume_without_replacing_the_verified_first_file()
         |_| {},
     )
     .unwrap();
-    assert!(destination.join("projector.gguf").exists());
+    assert_eq!(
+        fs::read(destination.join("model.gguf")).unwrap(),
+        b"model-bytes"
+    );
 }
 
 fn analysis(

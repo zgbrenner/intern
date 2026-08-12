@@ -250,10 +250,13 @@ try {
             }
     )
     if ($BundledFiles.Count -lt 7) { throw "Runtime asset staging produced an unexpectedly small signed file set" }
-    # The staged entries are ordered hashtables, so group via a script block:
-    # property binding on a dictionary key yields one $null group otherwise.
-    $DuplicateInstallPaths = @($BundledFiles | Group-Object { [string]$_.install_path } | Where-Object Count -gt 1)
-    if ($DuplicateInstallPaths.Count -gt 0) { throw "Runtime assets collide in the package: $($DuplicateInstallPaths.Name -join ', ')" }
+    # Packaged-path collisions are rejected by verify-assets.mjs below, which
+    # reads the install path as a real property and is covered by
+    # verify-assets.test.ts. The check that used to live here grouped these
+    # ordered hashtables by that key name; PowerShell cannot resolve a hashtable
+    # key as a named property, so every file landed in one unnamed group and the
+    # throw fired for any package holding more than one file. It never passed,
+    # and it printed an empty collision list when it did fire.
     $LicenseFiles = @(
         Get-ChildItem -LiteralPath $LicensesDirectory -Recurse -File | Sort-Object FullName | ForEach-Object {
             $Relative = [System.IO.Path]::GetRelativePath($RepositoryRoot, $_.FullName).Replace("\", "/")
