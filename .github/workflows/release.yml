@@ -53,7 +53,9 @@ jobs:
     env:
       RELEASE_TAG: v0.1.0-alpha.1
       CARGO_TERM_COLOR: always
-      INTERN_QA_CAPTURE: "1"
+      # Deliberately NOT capturing a fresh screenshot here; see the fidelity step
+      # below. `qa.yml` still sets INTERN_QA_CAPTURE=1, which is where new captures
+      # are produced for review.
       INTERN_REQUIRE_GENERATED_FIXTURES: "1"
       INTERN_PDFIUM_DIR: ${{ github.workspace }}\src-tauri\resources\native\pdfium
       GH_TOKEN: ${{ github.token }}
@@ -162,8 +164,15 @@ jobs:
         run: |
           $Installer = Get-ChildItem target\release\bundle\nsis\*.exe | Select-Object -First 1
           if (-not $Installer) { throw "NSIS installer was not produced" }
+          # No $LASTEXITCODE check here: it is only set by a native command, and
+          # this step runs none - the script drives the installer through
+          # Start-Process and System.Diagnostics.Process. On a clean pwsh session
+          # $LASTEXITCODE is undefined, so `$LASTEXITCODE -ne 0` evaluated true and
+          # this guard threw on every run, including a completely successful smoke
+          # test. The script's own `throw` is the real gate: under the pwsh shell's
+          # $ErrorActionPreference = 'stop' it propagates through the pipeline and
+          # fails the step.
           & ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName -EvidencePath release\installed-core-smoke.json 2>&1 | Tee-Object -FilePath release\installer-smoke.log
-          if ($LASTEXITCODE -ne 0) { throw "Installed application smoke failed" }
       - name: Assemble release and generate validated SPDX documents
         shell: pwsh
         run: |
@@ -172,6 +181,24 @@ jobs:
           Copy-Item $Installer.FullName (Join-Path $Release $Installer.Name)
           Copy-Item src-tauri\resources\THIRD_PARTY_NOTICES.md $Release
           Copy-Item src-tauri\resources\runtime-assets.json $Release
+          # Ship the capture a reviewer actually looked at, not a new one.
+          #
+          # This step used to regenerate the screenshot during the release run and
+          # then require the sign-off to carry its SHA-256. That is unsatisfiable in
+          # practice and weaker than it looks: the reviewer would have to predict
+          # the digest of an image that does not exist yet, and the image they
+          # inspected would not be the image that shipped. Any difference in font
+          # rasterisation between runs blocked the release for no safety gain.
+          #
+          # The freshness guarantee comes from elsewhere and is unchanged: the
+          # sign-off must carry `release_inputs_sha256`, which
+          # scripts/hash-release-inputs.mjs computes over every tracked file
+          # EXCEPT docs/qa/. Change any application code and the sign-off is
+          # invalidated, forcing a fresh review. Change only the screenshot and its
+          # own recorded digest must still match.
+          if (-not (Test-Path docs\qa\latest-implementation.png)) {
+            throw "docs/qa/latest-implementation.png is missing; capture it with the QA workflow and have it reviewed before releasing"
+          }
           Copy-Item docs\qa\latest-implementation.png $Release
           Copy-Item docs\qa\rendered-fidelity-signoff.json $Release
           ./scripts/generate-sbom.ps1 -ReleaseDirectory $Release.FullName -RuntimeStage $env:INTERN_RUNTIME_STAGE

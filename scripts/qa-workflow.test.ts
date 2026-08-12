@@ -43,7 +43,12 @@ it('gates the exact main commit before creating its annotated tag and publishing
   expect(workflow.indexOf('validate-release-evidence.mjs')).toBeLessThan(workflow.indexOf('gh release create'));
   expect(workflow.indexOf('git tag -a $Tag $env:GITHUB_SHA')).toBeLessThan(workflow.indexOf('gh release create'));
   expect(workflow).toContain('gh release view $Tag --json isDraft');
-  expect(workflow).toContain('INTERN_QA_CAPTURE: "1"');
+  // The release ships the capture a reviewer inspected rather than taking a new
+  // one: a sign-off cannot carry the digest of an image that does not exist yet,
+  // and the image reviewed must be the image published. Fresh captures come from
+  // the QA workflow, which still sets INTERN_QA_CAPTURE.
+  expect(workflow).not.toContain('INTERN_QA_CAPTURE: "1"');
+  expect(workflow).toContain('docs/qa/latest-implementation.png is missing');
   expect(workflow).toContain('release\\cargo-test.log');
   expect(workflow).toContain('--log=release/cargo-test.log');
   expect(workflow).toContain('Copy-Item docs\\qa\\latest-implementation.png $Release');

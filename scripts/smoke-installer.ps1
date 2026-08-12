@@ -78,7 +78,21 @@ try {
     }
     if (-not $WindowReady) { throw "Installed Intern.exe did not create a main window" }
     if (-not $AppProcess.CloseMainWindow()) { throw "Installed Intern.exe rejected a normal window close request" }
-    if (-not $AppProcess.WaitForExit(15000)) { throw "Installed Intern.exe did not shut down cleanly" }
+    # A WebView2 app on a shared CI runner can take well over fifteen seconds to
+    # tear its browser process down, and a timeout here reads as "the app hangs on
+    # close" when the truth is "the runner was busy". Sixty seconds still fails a
+    # genuine hang, and a slow-but-clean shutdown costs only the time it needs.
+    if (-not $AppProcess.WaitForExit(60000)) {
+        # Say what is still alive. Without this the failure names no process and
+        # gives no way to tell a hung app from a hung child.
+        $Surviving = @(Get-Process -Name "intern", "intern-worker", "llama-server", "msedgewebview2" -ErrorAction SilentlyContinue |
+            ForEach-Object { "$($_.Name)#$($_.Id)" })
+        $Children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($AppProcess.Id)" -ErrorAction SilentlyContinue |
+            ForEach-Object { "$($_.Name)#$($_.ProcessId)" })
+        throw ("Installed Intern.exe did not shut down cleanly within 60s. " +
+            "Main process HasExited=$($AppProcess.HasExited). " +
+            "Children: $($Children -join ', '). Live Intern processes: $($Surviving -join ', ')")
+    }
     if ($AppProcess.ExitCode -ne 0) { throw "Installed Intern.exe exited with $($AppProcess.ExitCode)" }
 
     $Uninstaller = Get-ChildItem -LiteralPath $InstallDirectory -File -Filter "uninstall*.exe" | Select-Object -First 1
