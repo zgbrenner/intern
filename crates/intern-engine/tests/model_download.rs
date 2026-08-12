@@ -127,6 +127,30 @@ impl StallingServer {
                 );
                 let _ = stream.write_all(&prefix);
                 let _ = stream.flush();
+                // Then stall until the client goes away, rather than for a fixed
+                // 350 ms. The body test cancels as soon as the prefix reaches
+                // disk, and a fixed sleep put that cancellation in a race with
+                // the socket closing: whichever happened first decided whether
+                // the download reported canceled or interrupted. Waiting for the
+                // peer removes the competitor instead of tuning the odds.
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(50)));
+                // Outlast the cancelling thread's own ten-second deadline, so the
+                // socket closing can never be what ends the download.
+                let deadline = Instant::now() + Duration::from_secs(25);
+                let mut byte = [0_u8; 1];
+                while Instant::now() < deadline {
+                    match std::io::Read::read(&mut stream, &mut byte) {
+                        Ok(0) => break,
+                        Ok(_) => {}
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                            ) => {}
+                        Err(_) => break,
+                    }
+                }
+                return;
             }
             thread::sleep(Duration::from_millis(350));
         });
@@ -246,6 +270,30 @@ fn file(url: &str, bytes: &[u8]) -> ModelFile {
 
 fn downloader(disk: u64) -> Downloader<ReqwestHttpTransport, FixedDisk> {
     Downloader::new(ReqwestHttpTransport::new().unwrap(), FixedDisk(disk))
+}
+
+/// Timeouts wide enough that cancellation is the only thing that can end the
+/// download.
+///
+/// `short_timeout_downloader` caps the *whole* transfer at 180 ms, which is right
+/// for asserting that a stalled server times out and wrong for asserting what
+/// cancellation does: on a loaded runner the 180 ms clock beat the cancel and the
+/// download reported `DownloadInterrupted` instead of `DownloadCanceled`.
+///
+/// The margins here are deliberately far larger than any plausible scheduling
+/// slip, because the cancelling thread gives itself ten seconds to notice the
+/// partial file. Every competing deadline has to sit outside that window, or the
+/// test is only ever measuring which timer fired first.
+fn patient_downloader(disk: u64) -> Downloader<ReqwestHttpTransport, FixedDisk> {
+    Downloader::new(
+        ReqwestHttpTransport::with_timeouts(
+            Duration::from_secs(5),
+            Duration::from_secs(20),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+        FixedDisk(disk),
+    )
 }
 
 fn short_timeout_downloader(disk: u64) -> Downloader<ReqwestHttpTransport, FixedDisk> {
@@ -462,7 +510,7 @@ fn cancellation_during_a_stalled_body_preserves_received_partial() {
         cancel_from_thread.cancel();
     });
 
-    let error = short_timeout_downloader(u64::MAX)
+    let error = patient_downloader(u64::MAX)
         .download(
             &file(&server.url, bytes),
             directory.path(),
