@@ -229,7 +229,9 @@ impl BlockingModel {
     }
 
     fn wait_for_cancel(&self) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        // Generous deadline: the poll exits as soon as cancel starts, but a
+        // cold, loaded CI runner can take well over two seconds to get there.
+        let deadline = Instant::now() + Duration::from_secs(30);
         while !self.cancel_started.load(Ordering::SeqCst) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(2));
         }
