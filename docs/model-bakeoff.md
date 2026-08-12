@@ -40,7 +40,7 @@ signature date where an effective date exists, a payment due date).
 | Qwen3.5-2B, old pipeline | 9/11 | 2 | 4/11 | 7/12 | 6/11 | 42% |
 | Qwen2.5-VL-3B, new pipeline | 9/11 | 2 | 9/11 | 7/12 | 8/11 | 42% |
 | Qwen3-1.7B, new pipeline | 11/11 | 0 | 9/11 | 7/12 | 9/11 | 33% |
-| **Qwen3.5-2B, new pipeline** *(selected)* | **11/11** | **0** | **8/11** | **8/12** | **8/11** | **42%** |
+| **Qwen3.5-2B, new pipeline** *(selected)* | **11/11** | **0** | **8/11** | **9/12** | **9/11** | **25%** |
 
 The two comparisons that matter:
 
@@ -77,7 +77,7 @@ Measured over the same runs, per document, including extraction:
 
 | | Qwen2.5-VL-3B, old pipeline | Qwen3.5-2B, new pipeline |
 | --- | ---: | ---: |
-| Median total time | 23.6 s | 15.5 s |
+| Median total time | 23.6 s | 12.4 s |
 | Slowest document | 115 s | 51 s |
 | Peak model process memory | 4,215 MB | 2,590 MB |
 | Installed model size | 3.05 GiB *(model + projector, both resident)* | 1.19 GiB *(projector installed but not loaded)* |
@@ -88,7 +88,7 @@ Essentially all the time is the model:
 
 | Document | Pages | Source chars | Digest chars | Distill | Inference |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Vendor invoice | 1 | 641 | 991 | 0.3 ms | 16.0 s |
+| Vendor invoice | 1 | 641 | 903 | 0.3 ms | 9.7 s |
 | 100-page journal | 100 | 9,592 | 103 | 0.5 ms | 9.5 s |
 | Settlement agreement | 7 | 14,837 | 12,565 | 5.4 ms | 51.1 s |
 | Statement of work | 14 | 29,285 | 13,178 | 9.2 ms | 42.3 s |
@@ -140,9 +140,8 @@ fitting a prompt to it is not the same as being right:
 * Two documents (`meeting-minutes.md`, a 100-page project journal) get no
   document type and are named `<date> Document.<ext>`. Both are the least
   contract-like fixtures in the corpus.
-* The vendor invoice names the billed party rather than the issuer in some runs.
-* The termination notice drops its party rather than naming the wrong one, which
-  is the safe failure but loses `for John Smith`.
+* The vendor invoice reads `between` its two sides rather than `from` the party
+  that issued it. The direction is under-determined by the document's own layout.
 * Six OCR fixtures were not scored on this machine, which has no Tesseract
   build; the OCR path is covered by the Rust routing tests and by CI, which
   builds the pinned Tesseract.

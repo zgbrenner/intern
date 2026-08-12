@@ -602,32 +602,32 @@ fn date_lines(blocks: &[Block], kept: &[usize]) -> Vec<String> {
     const MAX_LINE_CHARACTERS: usize = 150;
     let mut lines: Vec<String> = Vec::new();
     for index in kept {
-        // Blocks arrive hard-wrapped from PDF extraction. Rejoining and then
-        // splitting on sentences means each listed date reads as the document
-        // wrote it, instead of stopping at a line break.
-        let flowed = blocks[*index]
-            .text
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        for sentence in split_sentences(&flowed, MAX_LINE_CHARACTERS) {
-            let trimmed = sentence.trim();
-            if trimmed.is_empty() || date_signal_count(trimmed) == 0 {
-                continue;
-            }
-            let shortened = if trimmed.chars().count() > MAX_LINE_CHARACTERS {
-                trimmed
+        // The line is the unit. On an invoice, an order form, or a letter every
+        // date sits on its own labelled line, and running them together is
+        // exactly what destroys the distinction this index exists to make. Only
+        // a line too long to read on its own is split further, which is what
+        // hard-wrapped contract prose needs.
+        for line in blocks[*index].text.lines() {
+            let candidates = if line.chars().count() > MAX_LINE_CHARACTERS {
+                split_sentences(line, MAX_LINE_CHARACTERS)
+            } else {
+                vec![line.to_owned()]
+            };
+            for candidate in candidates {
+                let trimmed = candidate.trim();
+                if trimmed.is_empty() || date_signal_count(trimmed) == 0 {
+                    continue;
+                }
+                let shortened = trimmed
                     .chars()
                     .take(MAX_LINE_CHARACTERS)
-                    .collect::<String>()
-            } else {
-                trimmed.to_owned()
-            };
-            if !lines.iter().any(|existing| existing == &shortened) {
-                lines.push(shortened);
-            }
-            if lines.len() >= MAX_LINES {
-                return lines;
+                    .collect::<String>();
+                if !lines.iter().any(|existing| existing == &shortened) {
+                    lines.push(shortened);
+                }
+                if lines.len() >= MAX_LINES {
+                    return lines;
+                }
             }
         }
     }
@@ -802,6 +802,57 @@ mod tests {
                 .matches("Confidential - Do Not Distribute")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn a_form_keeps_each_labelled_date_on_its_own_line() {
+        let source = DocumentSource::from_pages(vec![page(
+            1,
+            "INVOICE\nAcme Corporation, 500 Foundry Road\nInvoice Number: INV-7741\nInvoice Date: January 5, 2026\nPayment Due Date: February 4, 2026\nBill To: Vistage Worldwide, Inc.\n",
+        )]);
+        let digest = distill(&source, DigestBudget::default());
+        assert!(
+            digest
+                .date_lines
+                .iter()
+                .any(|line| line == "Invoice Date: January 5, 2026"),
+            "{:?}",
+            digest.date_lines
+        );
+        assert!(
+            digest
+                .date_lines
+                .iter()
+                .any(|line| line == "Payment Due Date: February 4, 2026"),
+            "{:?}",
+            digest.date_lines
+        );
+        // The two dates must never share an entry, and a party must never be
+        // swept into one: telling them apart is the whole point of the index.
+        for line in &digest.date_lines {
+            assert!(!line.contains("Bill To"), "{line}");
+            assert!(
+                !(line.contains("January 5") && line.contains("February 4")),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn wrapped_contract_prose_still_keeps_its_date_with_its_meaning() {
+        let source = DocumentSource::from_pages(vec![page(
+            1,
+            "4.1 Effective Date.\nThis Statement of Work is effective as of April 1, 2026 and continues\nthrough March 31, 2027 unless terminated earlier.\n",
+        )]);
+        let digest = distill(&source, DigestBudget::default());
+        assert!(
+            digest
+                .date_lines
+                .iter()
+                .any(|line| line.contains("effective as of April 1, 2026")),
+            "{:?}",
+            digest.date_lines
         );
     }
 

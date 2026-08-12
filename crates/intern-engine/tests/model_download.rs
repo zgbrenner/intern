@@ -403,8 +403,20 @@ fn cancellation_during_a_stalled_body_preserves_received_partial() {
     let directory = tempdir().unwrap();
     let cancellation = CancellationToken::new();
     let cancel_from_thread = cancellation.clone();
+    // Cancel once the prefix is actually on disk rather than after a fixed
+    // sleep. A timer races the download loop, and under load the cancel can
+    // arrive before anything has been written, leaving no partial file to
+    // assert on.
+    let partial = directory.path().join("model.gguf.partial");
+    let expected_prefix = prefix.len();
     let cancel_thread = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(30));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if fs::metadata(&partial).is_ok_and(|info| info.len() as usize >= expected_prefix) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
         cancel_from_thread.cancel();
     });
 
