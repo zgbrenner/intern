@@ -56,11 +56,16 @@ impl HeaderCancelServer {
         let address = listener.local_addr().unwrap();
         let (disconnected_sender, disconnected) = mpsc::channel();
         let join = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
             let _ = read_request(&mut stream);
-            stream
+            if stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
+                .is_err()
+            {
+                return;
+            }
             let mut byte = [0_u8; 1];
             loop {
                 match std::io::Read::read(&mut stream, &mut byte) {
@@ -89,7 +94,12 @@ impl HeaderCancelServer {
 impl Drop for HeaderCancelServer {
     fn drop(&mut self) {
         if let Some(join) = self.join.take() {
-            join.join().unwrap();
+            // Joining must not panic. A panic here can run while the test is
+            // already unwinding, and a panic during a panic aborts the whole test
+            // binary instead of failing one test - which is how a broken pipe in a
+            // helper thread turned into STATUS_STACK_BUFFER_OVERRUN on CI after
+            // every test had reported ok.
+            let _ = join.join();
         }
     }
 }
@@ -99,16 +109,24 @@ impl StallingServer {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let join = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
             let _ = read_request(&mut stream);
             if let StallPoint::DuringBody { total, prefix } = stall {
-                write!(
+                // This server exists to be cancelled mid-body, so the client
+                // hanging up is the scenario under test, not a failure. Unwrapping
+                // these writes panicked the thread on a broken pipe, and the
+                // panic then propagated out of `join().unwrap()` in `Drop` - a
+                // panic while panicking, which aborts the process. That is the
+                // `STATUS_STACK_BUFFER_OVERRUN` the Windows runner reported after
+                // every test had already printed `ok`.
+                let _ = write!(
                     stream,
                     "HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
-                )
-                .unwrap();
-                stream.write_all(&prefix).unwrap();
-                stream.flush().unwrap();
+                );
+                let _ = stream.write_all(&prefix);
+                let _ = stream.flush();
             }
             thread::sleep(Duration::from_millis(350));
         });
@@ -122,7 +140,12 @@ impl StallingServer {
 impl Drop for StallingServer {
     fn drop(&mut self) {
         if let Some(join) = self.join.take() {
-            join.join().unwrap();
+            // Joining must not panic. A panic here can run while the test is
+            // already unwinding, and a panic during a panic aborts the whole test
+            // binary instead of failing one test - which is how a broken pipe in a
+            // helper thread turned into STATUS_STACK_BUFFER_OVERRUN on CI after
+            // every test had reported ok.
+            let _ = join.join();
         }
     }
 }
@@ -135,9 +158,16 @@ impl FakeServer {
         let seen = Arc::clone(&requests);
         let join = thread::spawn(move || {
             for response in responses {
-                let (mut stream, _) = listener.accept().unwrap();
-                seen.lock().unwrap().push(read_request(&mut stream));
-                stream.write_all(&response).unwrap();
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                if let Ok(mut seen) = seen.lock() {
+                    seen.push(read_request(&mut stream));
+                }
+                // A client that cancelled, or a queued response the test never
+                // asks for, must not panic this thread; see the note in
+                // StallingServer for why a panic here aborts the whole binary.
+                let _ = stream.write_all(&response);
             }
         });
         Self {
@@ -151,17 +181,29 @@ impl FakeServer {
 impl Drop for FakeServer {
     fn drop(&mut self) {
         if let Some(join) = self.join.take() {
-            join.join().unwrap();
+            // Joining must not panic. A panic here can run while the test is
+            // already unwinding, and a panic during a panic aborts the whole test
+            // binary instead of failing one test - which is how a broken pipe in a
+            // helper thread turned into STATUS_STACK_BUFFER_OVERRUN on CI after
+            // every test had reported ok.
+            let _ = join.join();
         }
     }
 }
 
 fn read_request(stream: &mut TcpStream) -> String {
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let Ok(clone) = stream.try_clone() else {
+        return String::new();
+    };
+    let mut reader = BufReader::new(clone);
     let mut request = String::new();
     loop {
         let mut line = String::new();
-        reader.read_line(&mut line).unwrap();
+        // A client that cancelled mid-request resets the connection; return what
+        // arrived rather than panicking a helper thread.
+        if reader.read_line(&mut line).is_err() {
+            return request;
+        }
         request.push_str(&line);
         if line == "\r\n" || line.is_empty() {
             return request;

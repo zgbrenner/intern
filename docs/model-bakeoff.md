@@ -58,12 +58,20 @@ The two comparisons that matter:
 | Document | Old pipeline | New pipeline |
 | --- | --- | --- |
 | 14-page statement of work | `2026-04-09 - Statement of Work.pdf` *(signature date)* | `2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf` |
-| Termination notice | `2026-12-29 - notice.pdf` | `2026-12-29 Notice of Termination.pdf` |
+| Termination notice | `2026-12-29 - notice.pdf` | `2026-12-29 Notice of Termination - John Smith.pdf` |
 | Consulting amendment | `2025-09-14 - amendment - FIRST AMENDMENT TO CONSULTING AGREEMENT.pdf` | `2025-09-14 First Amendment to Consulting Agreement between Vistage Worldwide, Inc and Jane Ellery.pdf` |
-| Vendor invoice | `2026-01-05 - invoice.pdf` | `2026-01-05 Invoice from Acme Corporation.pdf` |
+| Vendor invoice | `2026-01-05 - invoice.pdf` | `2026-01-05 Invoice between Vistage Worldwide, Inc and Acme Corporation.pdf` |
 | Employment agreement | `2025-02-14.pdf` | `2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf` |
 | Order form | `2026-01-14 - Order Form.docx` *(signature date)* | `2026-02-01 Order Form between Tessellate Analytics Ltd and Vistage Worldwide, Inc.docx` |
-| Ambiguous note | `Document.pdf`, needs review | `Document.pdf`, needs review |
+| Ambiguous note | `Document.pdf`, needs review | `Document between Rowan and Priya.pdf`, needs review |
+
+Every filename above is copied from a scored run, including the two that are not
+flattering. The vendor invoice reads `between` its two sides where `from Acme
+Corporation` would be right, and it leads with the party that was billed; the
+direction is under-determined by the document's own layout and the model does not
+recover it. An earlier revision of this table showed the correct-looking
+`2026-01-05 Invoice from Acme Corporation.pdf`, which the pipeline does not
+produce.
 
 The statement of work and the order form are the two documents built to punish a
 pipeline that reaches for the easiest date. The old pipeline took the signature
