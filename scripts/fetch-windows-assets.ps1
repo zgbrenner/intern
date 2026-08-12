@@ -147,7 +147,7 @@ try {
     Get-ChildItem -LiteralPath $LlamaServer[0].Directory.FullName -File -Filter "*.dll" | ForEach-Object {
         Copy-SidecarDll $_.FullName "llama.cpp" ([string]($Manifest.downloads | Where-Object id -eq "llama.cpp").version)
     }
-    Copy-UpstreamLicense $LlamaExtract "llama.cpp-LICENSE.txt"
+    Copy-RuntimeFile $Downloads["llama.cpp-license"] (Join-Path $LicensesDirectory "llama.cpp-LICENSE.txt")
 
     $PdfiumExtract = Join-Path $WorkDirectory "pdfium"
     if (Test-Path -LiteralPath $PdfiumExtract) { Remove-Item -LiteralPath $PdfiumExtract -Recurse -Force }
