@@ -35,13 +35,15 @@ $Start.RedirectStandardError = $true
 $Start.Environment["INTERN_RUNTIME_DIR"] = $Runtime
 $Process = [System.Diagnostics.Process]::new()
 $Process.StartInfo = $Start
-$Stderr = [System.Text.StringBuilder]::new()
-$Process.add_ErrorDataReceived({
-    param($Sender, $Event)
-    if ($null -ne $Event.Data) { [void]$Stderr.AppendLine($Event.Data) }
-})
 if (-not $Process.Start()) { throw "Failed to launch parser worker" }
-$Process.BeginErrorReadLine()
+# Drain stderr with a .NET task. A ScriptBlock event handler would run on a
+# threadpool thread without a runspace and crash the whole PowerShell process.
+$StderrTask = $Process.StandardError.ReadToEndAsync()
+
+function Get-WorkerStderr {
+    if ($StderrTask.Wait(500)) { return $StderrTask.Result }
+    return "(worker stderr pipe still open)"
+}
 
 function Invoke-WorkerCommand {
     param(
@@ -61,12 +63,12 @@ function Invoke-WorkerCommand {
         $Read = $Process.StandardOutput.ReadLineAsync()
         while (-not $Read.Wait(5000)) {
             if ($Process.HasExited) {
-                throw "Worker exited with $($Process.ExitCode): $Stderr"
+                throw "Worker exited with $($Process.ExitCode): $(Get-WorkerStderr)"
             }
-            if ([DateTime]::UtcNow -ge $Deadline) { throw "Timed out waiting for worker request $RequestId. stderr: $Stderr" }
+            if ([DateTime]::UtcNow -ge $Deadline) { throw "Timed out waiting for worker request $RequestId. stderr: $(Get-WorkerStderr)" }
         }
         $Line = $Read.Result
-        if ($null -eq $Line) { throw "Worker closed stdout: $Stderr" }
+        if ($null -eq $Line) { throw "Worker closed stdout: $(Get-WorkerStderr)" }
         if ([string]::IsNullOrWhiteSpace($Line)) { continue }
         $Envelope = $Line | ConvertFrom-Json
         # Under Set-StrictMode, reading a missing property throws an opaque
@@ -79,7 +81,7 @@ function Invoke-WorkerCommand {
         if (-not $Envelope.event.PSObject.Properties["type"]) { throw "Worker emitted unsupported protocol: $Line" }
         if ($Envelope.event.type -in @("hello", "parsed", "error")) { return $Envelope.event }
     }
-    throw "Timed out waiting for worker request $RequestId. stderr: $Stderr"
+    throw "Timed out waiting for worker request $RequestId. stderr: $(Get-WorkerStderr)"
 }
 
 function Assert-ParsedFixture {
@@ -134,7 +136,7 @@ try {
     $Process.StandardInput.Flush()
     $Process.StandardInput.Close()
     if (-not $Process.WaitForExit(10000)) { throw "Worker did not exit after shutdown" }
-    if ($Process.ExitCode -ne 0) { throw "Worker exited with $($Process.ExitCode): $Stderr" }
+    if ($Process.ExitCode -ne 0) { throw "Worker exited with $($Process.ExitCode): $(Get-WorkerStderr)" }
     Write-Host "Package-shaped worker hello, native PDF, PDFium+Tesseract OCR, DOCX/image, and invalid-fixture smoke passed."
 }
 finally {
