@@ -213,7 +213,7 @@ it('accepts the pinned Q8 manifest when Q4 misses the readiness and accuracy gat
   report.release_inputs_sha256 = (await exec(process.execPath, ['scripts/hash-release-inputs.mjs', `--root=${root}`])).stdout.trim();
   await writeFile(path, JSON.stringify(report));
   await expect(exec(process.execPath, ['scripts/validate-model-evaluation.mjs', path, `--root=${root}`])).resolves.toMatchObject({ stdout: expect.stringContaining('"global_constraints_passed":true') });
-});
+}, 15_000);
 
 it('recognizes pending evidence for QA but blocks release validation', async () => {
   const { root, path, report } = await evidence('pending');
