@@ -78,7 +78,9 @@ try {
     }
     if (-not $WindowReady) { throw "Installed Intern.exe did not create a main window" }
     if (-not $AppProcess.CloseMainWindow()) { throw "Installed Intern.exe rejected a normal window close request" }
-    if (-not $AppProcess.WaitForExit(15000)) { throw "Installed Intern.exe did not shut down cleanly" }
+    # WebView2 teardown on a busy CI runner can exceed 15 seconds even when the
+    # close was accepted; the assertion is a clean exit, not a fast one.
+    if (-not $AppProcess.WaitForExit(60000)) { throw "Installed Intern.exe did not shut down cleanly" }
     if ($AppProcess.ExitCode -ne 0) { throw "Installed Intern.exe exited with $($AppProcess.ExitCode)" }
 
     $Uninstaller = Get-ChildItem -LiteralPath $InstallDirectory -File -Filter "uninstall*.exe" | Select-Object -First 1
