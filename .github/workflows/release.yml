@@ -119,10 +119,24 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Run apply, undo, recovery, worker, and workspace tests
         shell: pwsh
+        # A hang here used to sit until the job's 360-minute limit. The suite
+        # takes about ten minutes; this fails in a tenth of the time it took to
+        # notice the last one.
+        timeout-minutes: 45
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          & cargo test --locked --workspace --all-targets 2>&1 | Tee-Object -FilePath release\cargo-test.log
-          if ($LASTEXITCODE -ne 0) { throw "Rust workspace tests failed" }
+          # Redirected by cmd rather than piped through Tee-Object. This step
+          # hung for over two hours while CI ran the identical `cargo test` on
+          # the same commit and finished in 33 minutes; the only difference was
+          # the PowerShell pipeline. A test process that outlives cargo inherits
+          # the pipe's write handle, so Tee-Object waits for a writer that never
+          # closes, and the step hangs after the tests have already passed.
+          # cmd's > hands cargo a real file handle, so nothing can hold the
+          # pipeline open, and the exit code is still cargo's own.
+          & cmd /c "cargo test --locked --workspace --all-targets > release\cargo-test.log 2>&1"
+          $TestExit = $LASTEXITCODE
+          Get-Content -LiteralPath release\cargo-test.log
+          if ($TestExit -ne 0) { throw "Rust workspace tests failed" }
       - name: Build parser worker sidecar
         shell: pwsh
         run: |
@@ -149,6 +163,10 @@ jobs:
           "INTERN_RUNTIME_STAGE=$Stage" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Score the corpus through the shipping pipeline for this exact commit
         shell: pwsh
+        # Downloads 1.19 GiB and scores 20 documents with real inference, about
+        # 11 minutes when healthy. Bounded so a wedged llama-server cannot hold
+        # the job open for hours.
+        timeout-minutes: 60
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
           # No $LASTEXITCODE guard: the script is PowerShell, so that variable
