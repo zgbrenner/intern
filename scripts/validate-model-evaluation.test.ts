@@ -103,6 +103,34 @@ describe('model evaluation gate', () => {
     expect(result.failures.join(' ')).toContain('review rate');
   });
 
+  // The ceiling is the only non-correctness gate here, and it blocked a release
+  // once for the pipeline behaving correctly: on the release runner the model
+  // claimed a fee the document could not support, evidence validation refused
+  // it, that document went to review, and the rate moved from 50% to 55.6%.
+  // llama.cpp is not bit-identical across machines, so one document of drift on
+  // an 18-document corpus is 5.6 points. Both ends are pinned here so the
+  // ceiling cannot return to zero tolerance, or drift upward to where it would
+  // stop catching a real collapse.
+  it('tolerates one document of machine drift but not a collapse into review', () => {
+    const drifted = validateEvaluation(report({}, { review_rate: 10 / 18 }));
+    expect(drifted.accepted).toBe(true);
+
+    const collapsed = validateEvaluation(report({}, { review_rate: 12 / 18 }));
+    expect(collapsed.accepted).toBe(false);
+    expect(collapsed.failures.join(' ')).toContain('review rate');
+  });
+
+  it('keeps every correctness gate where it was when the review ceiling moved', () => {
+    // Raising a coverage ceiling must never become a way to relax what protects
+    // a filename. Changing one of these is a decision to make on purpose.
+    expect(GATES.dateCorrectWhenNamed).toBe(1);
+    expect(GATES.maximumForbiddenDateRate).toBe(0);
+    expect(GATES.dateCorrect).toBe(0.75);
+    expect(GATES.typeCorrect).toBe(0.7);
+    expect(GATES.partiesCorrect).toBe(0.6);
+    expect(GATES.descriptionSpecific).toBe(0.9);
+  });
+
   it('refuses evidence produced by the superseded pipeline', () => {
     expect(() => validateEvaluation(report({ pipeline: 'legacy' }))).toThrow(/shipping pipeline/);
   });
