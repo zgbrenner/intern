@@ -860,6 +860,15 @@ pub fn history_clear(state: State<'_, AppState>) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// Abandons every item still waiting, for a folder chosen by mistake.
+///
+/// Returns the number dropped so the interface can say what it did rather than
+/// leaving the user to count rows.
+#[tauri::command]
+pub fn queue_discard_waiting(state: State<'_, AppState>) -> Result<usize, CommandError> {
+    Ok(state.pipeline.discard_waiting()?)
+}
+
 fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
     let proposal = item.proposal.as_ref();
     let evidence = proposal.map(|record| EvidenceDto {

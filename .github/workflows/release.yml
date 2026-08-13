@@ -420,10 +420,18 @@ jobs:
           if ($ViewExit -eq 0 -and $Draft.Trim() -eq 'true') {
             gh release upload $Tag $Assets --clobber
             if ($LASTEXITCODE -ne 0) { throw 'Could not repair draft release assets' }
-            gh release edit $Tag --draft=false --prerelease --verify-tag --notes-file docs/releases/v0.1.0-alpha.1.md --title 'Intern v0.1.0-alpha.1'
+            gh release edit $Tag --draft=false --latest --verify-tag --notes-file docs/releases/v0.1.0-alpha.1.md --title 'Intern v0.1.0-alpha.1'
             if ($LASTEXITCODE -ne 0) { throw 'Could not publish repaired draft release' }
             exit 0
           }
           if ($ViewExit -notin @(0, 1)) { throw 'Could not inspect existing release' }
-          gh release create $Tag $Assets --verify-tag --prerelease --notes-file docs/releases/v0.1.0-alpha.1.md --title 'Intern v0.1.0-alpha.1'
+          # --latest, not --prerelease. GitHub resolves /releases/latest to the
+          # newest NON-prerelease release, and that path is what the in-app
+          # updater fetches its manifest from - it is compiled into the build, so
+          # a shipped app cannot be redirected elsewhere. Publishing as a
+          # prerelease made every installed copy's update check return 404 while
+          # the manifest sat one URL away, reachable only by exact tag. The
+          # release is still plainly an alpha: the version says alpha.1 and the
+          # notes say so in their first line.
+          gh release create $Tag $Assets --verify-tag --latest --notes-file docs/releases/v0.1.0-alpha.1.md --title 'Intern v0.1.0-alpha.1'
           if ($LASTEXITCODE -ne 0) { throw 'Could not publish GitHub release' }

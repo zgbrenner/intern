@@ -56,6 +56,37 @@ describe('queue interactions', () => {
     expect(zone).not.toHaveAttribute('tabindex');
   });
 
+  // Pointing the queue at a large folder used to be unrecoverable from inside
+  // the app: pause leaves the backlog, Clear history only touches finished
+  // items, and dropping a waiting item was one click each.
+  it('discards the waiting backlog without touching work in flight or already done', async () => {
+    const bridge = createInMemoryBridge();
+    render(<App bridge={bridge} />);
+
+    const discard = await screen.findByRole('button', { name: 'Discard waiting items' });
+    expect(discard).toHaveTextContent('3');
+
+    fireEvent.click(discard);
+
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Action status' })).toHaveTextContent('Discarded 3 waiting items.'));
+    const remaining = await bridge.listItems();
+    expect(remaining.some((item) => item.status === 'waiting')).toBe(false);
+    // The states that must survive: mid-flight, awaiting a decision, and renamed.
+    expect(remaining.some((item) => item.status === 'processing')).toBe(true);
+    expect(remaining.some((item) => item.status === 'review')).toBe(true);
+    expect(remaining.some((item) => item.status === 'ready')).toBe(true);
+    expect(remaining.some((item) => item.status === 'completed')).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Discard waiting items' })).not.toBeInTheDocument();
+  });
+
+  it('offers no discard action when nothing is waiting', async () => {
+    const items = (await createInMemoryBridge().listItems()).filter((item) => item.status !== 'waiting');
+    render(<App bridge={createInMemoryBridge({ items })} />);
+
+    await screen.findByRole('button', { name: 'Apply all ready' });
+    expect(screen.queryByRole('button', { name: 'Discard waiting items' })).not.toBeInTheDocument();
+  });
+
   it('uses restrained extension-aware document icons', async () => {
     render(<App bridge={createInMemoryBridge()} />);
 

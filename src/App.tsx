@@ -76,6 +76,9 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const selected = items.find((item) => item.id === selectedId);
   const drawerOpen = Boolean(selected && narrowInspector);
   const readyItems = items.filter((item) => item.status === 'ready' && item.proposedFilename);
+  // Only items that have not started. Anything mid-flight, awaiting a decision,
+  // or already renamed is deliberately out of reach of the discard action.
+  const waitingItems = items.filter((item) => item.status === 'waiting');
   const queueStatus = queueStatusAnnouncement(items, paused);
   const select = (item: QueueItem, trigger: HTMLButtonElement) => { seededSelection.current = true; focusRestoreVersion.current += 1; reviewTrigger.current = { element: trigger, itemId: item.id }; setSelectedId(item.id); };
   const restoreQueueFocus = () => {
@@ -86,9 +89,15 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
       if (focusRestoreVersion.current !== version) return;
       const refreshedTrigger = [...document.querySelectorAll<HTMLButtonElement>('.row-select')]
         .find((button) => button.dataset.itemId === invocation?.itemId);
+      // Prefer the primary action by name rather than "the first button in the
+      // panel". That positional fallback silently moved the moment the toolbar
+      // gained a second control, sending focus to a destructive Discard button
+      // instead of Apply all ready.
       const target = invocation?.element.isConnected
         ? invocation.element
-        : refreshedTrigger ?? document.querySelector<HTMLButtonElement>('.queue-panel button');
+        : refreshedTrigger
+          ?? document.querySelector<HTMLButtonElement>('.queue-panel .queue-actions button.primary')
+          ?? document.querySelector<HTMLButtonElement>('.queue-panel button');
       target?.focus();
     });
   };
@@ -101,7 +110,9 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     setSelectedId(undefined);
     restoreQueueFocus();
   }, [selected, selectedId]);
-  const runQueueAction = async (run: () => Promise<void>, success: string) => {
+  // Promise<unknown>: some commands report what they did - discardWaiting
+  // resolves with a count - and the result is not needed here.
+  const runQueueAction = async (run: () => Promise<unknown>, success: string) => {
     if (actionPending) return false;
     setActionPending(true);
     setActionError('');
@@ -210,7 +221,18 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} onAddFiles={() => { void selection?.pickFiles().then((files) => applySelection({ files })); }} onAddFolder={() => { void selection?.pickFolder().then((folder) => { if (folder) applySelection({ folder }); }); }} onTogglePause={() => void (async () => { if (await runQueueAction(paused ? bridge.resumeQueue : bridge.pauseQueue, `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
     <Sidebar inert={drawerOpen} active={view} items={items} onChange={(next) => { focusRestoreVersion.current += 1; reviewTrigger.current = null; setView(next); setSelectedId(undefined); }} onSettings={openSettings} />
     <div className="workspace"><section className="queue-panel" aria-label="Queue items" inert={drawerOpen || undefined}><DropZone onDrop={(payload) => { void selection?.resolveDrop(payload).then(applySelection); }} />
-      {view === 'queue' && readyItems.length > 0 && <div className="queue-actions"><button type="button" className="primary" aria-label="Apply all ready" disabled={actionPending} onClick={() => void applyAllReady()}>Apply all ready <span>{readyItems.length}</span></button></div>}
+      {/*
+        The way out of a folder chosen by mistake. Pointing the queue at a large
+        directory used to be unrecoverable from inside the app: pausing stops it
+        taking new work but leaves the backlog, Clear history only touches
+        finished items, and dropping a waiting item was one click each. Four
+        hundred items meant four hundred clicks, so the count is shown here to
+        make the scale of what is being dropped explicit.
+      */}
+      {view === 'queue' && (readyItems.length > 0 || waitingItems.length > 0) && <div className="queue-actions">
+        {waitingItems.length > 0 && <button type="button" aria-label="Discard waiting items" disabled={actionPending} onClick={() => void (async () => { const dropped = waitingItems.length; await runQueueAction(() => bridge.discardWaiting(), `Discarded ${dropped} waiting ${dropped === 1 ? 'item' : 'items'}.`); })()}>Discard waiting <span>{waitingItems.length}</span></button>}
+        {readyItems.length > 0 && <button type="button" className="primary" aria-label="Apply all ready" disabled={actionPending} onClick={() => void applyAllReady()}>Apply all ready <span>{readyItems.length}</span></button>}
+      </div>}
       {view === 'completed' && filtered.length > 0 && <div className="queue-actions"><button type="button" disabled={actionPending} onClick={() => void (async () => { if (await runQueueAction(() => bridge.clearHistory(), 'History cleared.')) queueMicrotask(() => document.querySelector<HTMLButtonElement>('.sidebar button[aria-label="Completed"]')?.focus()); })()}>Clear history</button></div>}
       <QueueTable items={filtered} selectedId={selectedId} onSelect={select} /><p className="item-count">{filtered.length} items</p></section>
       {selected && <ReviewInspector busy={actionPending} drawer={drawerOpen} item={selected} onClose={closeReview} onApprove={(filename, description) => void refreshAndClear(() => bridge.approve(selected.id, filename, description), 'Rename applied.')} onKeep={() => void refreshAndClear(() => bridge.keepOriginal(selected.id), 'Original filename kept.')} onCancel={() => void refreshAndClear(() => bridge.cancel(selected.id), 'Processing canceled.')} onRetry={() => void refreshAndClear(() => bridge.retry(selected.id), 'Item queued for retry.')} onRemove={() => void refreshAndClear(() => bridge.remove(selected.id), 'Item removed.')} onUndo={() => void refreshAndClear(() => bridge.undo(selected.id), 'Operation undone.')} />}

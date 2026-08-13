@@ -40,6 +40,7 @@ pub fn run() {
             commands::setup_cancel,
             commands::setup_choose_existing,
             commands::history_clear,
+            commands::queue_discard_waiting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Intern");

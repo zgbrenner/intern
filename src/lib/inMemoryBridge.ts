@@ -127,6 +127,11 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
       setup = { ...setup, state: 'ready', downloadedBytes: setup.totalBytes, error: undefined };
     },
     clearHistory: async () => { items = items.filter((item) => item.status !== 'completed' && item.status !== 'failed'); },
+    discardWaiting: async () => {
+      const waiting = items.filter((item) => item.status === 'waiting');
+      items = items.filter((item) => item.status !== 'waiting');
+      return waiting.length;
+    },
     // The browser build has no Tauri runtime and nothing to replace, so it says
     // so rather than pretending to be up to date.
     checkForUpdate: async () => options.update ?? { state: 'unsupported' },

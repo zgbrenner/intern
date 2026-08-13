@@ -50,6 +50,13 @@ export interface DesktopBridge {
   setupChooseExisting(files: ExistingModelFiles): Promise<void>;
   clearHistory(): Promise<void>;
   /**
+   * Abandon every item still waiting, for a folder chosen by mistake.
+   *
+   * Resolves with how many were dropped. Items being processed, awaiting a
+   * decision, or already renamed are untouched.
+   */
+  discardWaiting(): Promise<number>;
+  /**
    * Ask GitHub whether a newer signed release exists.
    *
    * This is the only network request Intern makes apart from the one-off model

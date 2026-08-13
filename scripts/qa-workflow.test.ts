@@ -104,6 +104,23 @@ it('publishes an update manifest pointing at the signed installer', async () => 
   // whose update button can never work.
   expect(workflow).toContain('TAURI_SIGNING_PRIVATE_KEY is not set');
   expect(workflow).toContain('src-tauri/tauri.release.conf.json');
+
+  // The endpoint compiled into the app is /releases/latest/download/latest.json,
+  // and GitHub resolves /releases/latest to the newest NON-prerelease release.
+  // Publishing as a prerelease made every installed copy's update check 404
+  // against a manifest that existed one URL away. A shipped build cannot be
+  // pointed somewhere else, so this has to stay right at publish time.
+  const config = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8'));
+  expect(config.plugins.updater.endpoints[0]).toContain('/releases/latest/download/latest.json');
+  // Scoped to the gh commands, not the whole file: the comment above explains
+  // what --prerelease did, so a bare absence check would fail on the
+  // explanation. That mistake has now been made twice in this file.
+  const publishCommands = workflow.split('\n').filter((line) => /^\s*gh release (create|edit)\b/.test(line));
+  expect(publishCommands.length).toBeGreaterThan(0);
+  for (const command of publishCommands) {
+    expect(command, 'a prerelease is unreachable via /releases/latest').not.toContain('--prerelease');
+  }
+  expect(workflow).toContain('gh release create $Tag $Assets --verify-tag --latest');
 });
 
 it('attests the installer, and only after its evidence has been accepted', async () => {
