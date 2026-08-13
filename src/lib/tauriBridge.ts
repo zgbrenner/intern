@@ -123,6 +123,8 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
   }
   clearHistory(): Promise<void> { return this.transport.invoke('history_clear'); }
 
+  discardWaiting(): Promise<number> { return this.transport.invoke('queue_discard_waiting'); }
+
   // The updater plugin is loaded lazily so that importing this module never
   // pulls in update machinery for a session that never asks for it, and so the
   // browser build - which has no Tauri runtime at all - does not fail to load.

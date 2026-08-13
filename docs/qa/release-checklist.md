@@ -1,4 +1,4 @@
-# Intern v0.1.0-alpha.1 release checklist
+# Intern v0.1.0-alpha.2 release checklist
 
 **Release status: awaiting the dispatched release run.** The rendered-fidelity sign-off is recorded and accepted in `docs/qa/rendered-fidelity-signoff.json` (reviewed 2026-08-12), so that gate no longer blocks. What remains is the evidence only the pinned Windows release runner can produce, which the release workflow produces and validates itself before it can publish.
 

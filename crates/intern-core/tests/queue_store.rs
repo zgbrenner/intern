@@ -210,6 +210,63 @@ fn clear_terminal_removes_only_terminal_rows() {
     assert_eq!(db.list().unwrap()[0].id, active.id);
 }
 
+/// Pointing the queue at the wrong folder must be recoverable, and recovering
+/// must not cost a rename the user can no longer undo. Only rows that never
+/// started are dropped.
+#[test]
+fn discard_queued_drops_waiting_work_and_nothing_else() {
+    let temp = TempDir::new().unwrap();
+    let db = store(&temp);
+
+    // Enqueued in claim order, because claim_next takes the oldest and the queue
+    // holds exactly one active claim - it processes one document at a time. The
+    // review item therefore has to reach a resting state before the next claim.
+    let awaiting_decision = db.enqueue(Path::new("review.pdf"), "r").unwrap();
+    let in_flight = db.enqueue(Path::new("in-flight.pdf"), "f").unwrap();
+    let canceled = db.enqueue(Path::new("canceled.pdf"), "c").unwrap();
+    let waiting_one = db.enqueue(Path::new("waiting-one.pdf"), "w1").unwrap();
+    let waiting_two = db.enqueue(Path::new("waiting-two.pdf"), "w2").unwrap();
+
+    assert_eq!(db.claim_next().unwrap().unwrap().id, awaiting_decision.id);
+    db.transition(
+        awaiting_decision.id,
+        QueueStatus::Extracting,
+        QueueStatus::Analyzing,
+        None,
+    )
+    .unwrap();
+    db.transition(
+        awaiting_decision.id,
+        QueueStatus::Analyzing,
+        QueueStatus::NeedsReview,
+        None,
+    )
+    .unwrap();
+    // Only now is the single active slot free for the next claim.
+    assert_eq!(db.claim_next().unwrap().unwrap().id, in_flight.id);
+    db.transition(
+        canceled.id,
+        QueueStatus::Queued,
+        QueueStatus::Canceled,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(db.discard_queued().unwrap(), 2);
+
+    let remaining: Vec<i64> = db.list().unwrap().into_iter().map(|item| item.id).collect();
+    assert!(!remaining.contains(&waiting_one.id));
+    assert!(!remaining.contains(&waiting_two.id));
+    // Mid-flight work belongs to a session and has to reach its own end; the
+    // review is a human's to decide, and terminal rows carry rename receipts.
+    assert!(remaining.contains(&in_flight.id));
+    assert!(remaining.contains(&awaiting_decision.id));
+    assert!(remaining.contains(&canceled.id));
+
+    // Idempotent: nothing left to discard.
+    assert_eq!(db.discard_queued().unwrap(), 0);
+}
+
 #[test]
 fn explicit_manual_retry_and_keep_original_cas_paths_are_enforced() {
     let temp = TempDir::new().unwrap();

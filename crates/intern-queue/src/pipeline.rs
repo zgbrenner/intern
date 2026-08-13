@@ -1070,6 +1070,15 @@ impl Pipeline {
         Ok(removed)
     }
 
+    /// Abandons everything still waiting, for the folder that was chosen by
+    /// mistake. Renames already applied keep their receipts, and anything
+    /// awaiting a human decision stays put.
+    pub fn discard_waiting(&self) -> PipelineResult<usize> {
+        let removed = self.store.discard_queued()?;
+        self.events.queue_changed();
+        Ok(removed)
+    }
+
     fn reject_deferred_reconciliation_mutation(&self, id: i64) -> PipelineResult<()> {
         let item = self
             .store

@@ -810,6 +810,24 @@ impl QueueStore {
             .map_err(InternError::from)
     }
 
+    /// Drops items that are still only waiting, leaving everything else alone.
+    ///
+    /// A user who points the queue at the wrong folder had no way out: the only
+    /// bulk action was `clear_terminal`, which deletes finished work, and the
+    /// only way to drop a waiting item was one at a time. Four hundred items
+    /// meant four hundred clicks.
+    ///
+    /// Strictly `queued`. An item being extracted or analysed is owned by a
+    /// session and must reach its own end; `ready` and `needs_review` are
+    /// waiting on a human decision, not on the queue; and terminal rows hold the
+    /// receipts that make a rename undoable.
+    pub fn discard_queued(&self) -> InternResult<usize> {
+        let connection = self.lock()?;
+        connection
+            .execute("DELETE FROM queue_items WHERE status = 'queued'", [])
+            .map_err(InternError::from)
+    }
+
     pub fn record_processing_failure(
         &self,
         id: i64,
