@@ -206,7 +206,11 @@ jobs:
           # signing key from every build - which would break CI and the QA
           # workflow, neither of which should need release secrets, and would
           # break pull requests from forks outright.
-          npm run tauri build -- --bundles nsis --config tauri.release.conf.json -- --locked
+          # Path is relative to the working directory, which is the repository
+          # root, not src-tauri. Passing "tauri.release.conf.json" failed
+          # argument validation 130ms into the step with "failed to read
+          # configuration file".
+          npm run tauri build -- --bundles nsis --config src-tauri/tauri.release.conf.json -- --locked
           if ($LASTEXITCODE -ne 0) { throw "Tauri build failed" }
       - name: Smoke test installer and installed worker
         shell: pwsh

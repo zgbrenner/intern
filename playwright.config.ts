@@ -35,7 +35,12 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1',
     url: 'http://127.0.0.1:1420',
-    reuseExistingServer: !process.env.CI,
+    // Always start a dedicated server, the way CI does, so a local run cannot
+    // attach to a previous suite's server while it is shutting down. This is
+    // not what caused the first-navigation hangs - see the `test:e2e` script,
+    // which warms Vite's dependency cache - but matching CI removes one
+    // difference between the two environments.
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

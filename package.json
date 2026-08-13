@@ -12,7 +12,7 @@
     "tauri": "tauri",
     "check": "npm run lint && npm test && npm run build",
     "fixtures": "node fixtures/generate-fixtures.mjs",
-    "test:e2e": "playwright test",
+    "test:e2e": "vite optimize && playwright test",
     "assets:verify": "node scripts/verify-assets.mjs"
   },
   "dependencies": {

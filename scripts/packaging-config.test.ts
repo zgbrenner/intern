@@ -16,6 +16,32 @@ it('packages the license directory as a tree so vcpkg subpaths match the signed 
   expect(smoke).toContain('$EvidencePath');
 });
 
+// Tauri refuses to build when a plugin's Rust crate and npm package differ in
+// major/minor. A caret range on the crate let it float to 2.10.1 against an
+// exactly-pinned npm 2.9.0, and the release died at the signing build with
+// "Found version mismatched Tauri packages" - after twenty minutes of building
+// Tesseract. Both sides are pinned exactly now, and this keeps them together.
+it('keeps every Tauri plugin on the same version in Cargo.toml and package.json', async () => {
+  const [cargo, packageJson] = await Promise.all([
+    readFile('src-tauri/Cargo.toml', 'utf8'),
+    readFile('package.json', 'utf8').then(JSON.parse),
+  ]);
+
+  const npmPlugins = Object.entries(packageJson.dependencies as Record<string, string>)
+    .filter(([name]) => name.startsWith('@tauri-apps/plugin-'))
+    .map(([name, version]) => ({ plugin: name.slice('@tauri-apps/plugin-'.length), version }));
+  expect(npmPlugins.length).toBeGreaterThan(0);
+
+  for (const { plugin, version } of npmPlugins) {
+    const crate = new RegExp(`^tauri-plugin-${plugin}\\s*=\\s*"=?([^"]+)"`, 'm').exec(cargo);
+    expect(crate, `tauri-plugin-${plugin} is missing from src-tauri/Cargo.toml`).not.toBeNull();
+    // Exact pins on both sides: a range is what allowed the drift.
+    expect(version, `@tauri-apps/plugin-${plugin} must be pinned exactly`).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(cargo).toContain(`tauri-plugin-${plugin} = "=${version}"`);
+    expect(crate![1]).toBe(version);
+  }
+});
+
 it('leaves packaged-path collision detection to the checker that can actually see the property', async () => {
   const fetch = await readFile('scripts/fetch-windows-assets.ps1', 'utf8');
   // The staged file records are ordered hashtables, and PowerShell cannot
