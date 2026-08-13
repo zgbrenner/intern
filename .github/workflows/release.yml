@@ -254,17 +254,27 @@ jobs:
           }
           Copy-Item docs\qa\latest-implementation.png $Release
           Copy-Item docs\qa\rendered-fidelity-signoff.json $Release
-          # The update package and its detached signature, plus the manifest the
-          # installed app reads. latest.json must sit at the URL configured in
-          # tauri.conf.json; the signature is what an installed Intern checks
-          # against its compiled-in public key before replacing itself.
-          $UpdatePackage = Get-ChildItem target\release\bundle\nsis\*.nsis.zip | Select-Object -First 1
-          if (-not $UpdatePackage) { throw "Updater artifact was not produced; check createUpdaterArtifacts and the signing key" }
-          $SignatureFile = "$($UpdatePackage.FullName).sig"
-          if (-not (Test-Path -LiteralPath $SignatureFile)) { throw "Update package is unsigned: $SignatureFile is missing" }
-          Copy-Item $UpdatePackage.FullName (Join-Path $Release $UpdatePackage.Name)
+          # The manifest an installed Intern reads to find a newer version.
+          #
+          # Tauri v2 signs the NSIS installer itself and writes the detached
+          # signature beside it as <installer>.exe.sig - there is no separate
+          # .nsis.zip package. This step originally looked for one and failed
+          # with "Updater artifact was not produced" on a build that had in fact
+          # signed correctly, reporting "Finished 1 updater signature at:
+          # ...x64-setup.exe.sig". The installer already copied into release/
+          # above is therefore both the manual download and the update payload,
+          # so latest.json points at that one asset.
+          #
+          # The .sig file is not published: the updater reads the signature out
+          # of latest.json and checks it against the public key compiled into
+          # the installed build.
+          $SignatureFile = "$($Installer.FullName).sig"
+          if (-not (Test-Path -LiteralPath $SignatureFile)) {
+            throw ("Installer is unsigned for updates: $SignatureFile is missing. " +
+              "Check createUpdaterArtifacts in src-tauri/tauri.release.conf.json and TAURI_SIGNING_PRIVATE_KEY.")
+          }
           $Signature = (Get-Content -LiteralPath $SignatureFile -Raw).Trim()
-          if (-not $Signature) { throw "Update signature is empty" }
+          if (-not $Signature) { throw "Update signature file is empty: $SignatureFile" }
           [ordered]@{
             version = $env:RELEASE_TAG.TrimStart("v")
             notes = "See https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
@@ -272,7 +282,7 @@ jobs:
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{
                 signature = $Signature
-                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$($UpdatePackage.Name)"
+                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$($Installer.Name)"
               }
             }
           } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Release "latest.json") -Encoding utf8NoBOM

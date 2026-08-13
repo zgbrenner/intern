@@ -56,6 +56,29 @@ it('gates the exact main commit before creating its annotated tag and publishing
   expect(workflow).toContain('--fidelity-signoff=release/rendered-fidelity-signoff.json');
 });
 
+// Tauri v2 signs the NSIS installer itself and writes <installer>.exe.sig
+// beside it. There is no separate .nsis.zip package - looking for one failed a
+// release with "Updater artifact was not produced" on a build that had signed
+// correctly and logged "Finished 1 updater signature at: ...x64-setup.exe.sig".
+it('publishes an update manifest pointing at the signed installer', async () => {
+  const workflow = await readFile('.github/workflows/release.yml', 'utf8');
+  expect(workflow).toContain('$SignatureFile = "$($Installer.FullName).sig"');
+  // The glob form, not the bare extension: the surrounding comment explains
+  // what .nsis.zip was and why it is gone, so matching the bare string would
+  // fail on the explanation itself.
+  expect(workflow).not.toContain('*.nsis.zip');
+  // The manifest must name the asset that is actually uploaded and carry the
+  // signature inline, because the updater reads it from here rather than
+  // fetching a .sig.
+  expect(workflow).toContain('Join-Path $Release "latest.json"');
+  expect(workflow).toContain('signature = $Signature');
+  expect(workflow).toContain('releases/download/$env:RELEASE_TAG/$($Installer.Name)');
+  // A build with no signing key must fail loudly rather than publish a release
+  // whose update button can never work.
+  expect(workflow).toContain('TAURI_SIGNING_PRIVATE_KEY is not set');
+  expect(workflow).toContain('src-tauri/tauri.release.conf.json');
+});
+
 it('attests the installer, and only after its evidence has been accepted', async () => {
   const workflow = await readFile('.github/workflows/release.yml', 'utf8');
   // Provenance is keyless, so there is no certificate or secret to store, and the
