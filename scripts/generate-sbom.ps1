@@ -27,12 +27,20 @@ function Invoke-SbomGenerate {
     param([string]$Drop, [string]$Components, [string]$Name, [string]$Version, [string]$ExternalList = "")
     $Arguments = @("generate", "-b", $Drop, "-bc", $Components, "-pn", $Name, "-pv", $Version, "-ps", "Intern contributors", "-nsb", "https://github.com/$env:GITHUB_REPOSITORY/sbom", "-mi", "SPDX:2.2", "-D", "true")
     if ($ExternalList) { $Arguments += @("-er", $ExternalList) }
-    & $SbomTool @Arguments
+    # Out-Host, not bare invocation: a native command's stdout goes to
+    # PowerShell's success stream, so every line the SBOM tool printed became
+    # part of this function's return value. The caller received an array whose
+    # first element was the tool's leading blank line rather than the manifest
+    # path, and the release died on
+    #   Cannot bind argument to parameter 'LiteralPath' because it is an empty string.
+    # Out-Host keeps the tool's output in the log while leaving the pipeline
+    # clean, so `return $Manifest` returns only the manifest.
+    & $SbomTool @Arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Pinned SBOM generation failed for $Name" }
     $Manifest = Join-Path $Drop "_manifest/spdx_2.2/manifest.spdx.json"
     if (-not (Test-Path -LiteralPath $Manifest -PathType Leaf)) { throw "SBOM tool did not emit an SPDX 2.2 document for $Name" }
     $Validation = Join-Path $Drop "sbom-validation.json"
-    & $SbomTool validate -b $Drop -o $Validation -mi "SPDX:2.2"
+    & $SbomTool validate -b $Drop -o $Validation -mi "SPDX:2.2" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Pinned SBOM validation failed for $Name" }
     return $Manifest
 }
