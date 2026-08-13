@@ -77,6 +77,21 @@ try {
         }
     }
     if (-not $WindowReady) { throw "Installed Intern.exe did not create a main window" }
+    # A window handle proves a window exists, not that its thread pumps
+    # messages. CloseMainWindow only posts WM_CLOSE, so it works exclusively
+    # against a live message loop: the app's close-to-exit handler never ran in
+    # the runs that timed out below, which means the loop was already wedged
+    # before the close was requested. Require the process to report Responding
+    # first - an app that never gets there failed at startup, not shutdown,
+    # and the two need different fixes.
+    $Responsive = $false
+    for ($Attempt = 0; $Attempt -lt 60; $Attempt += 1) {
+        $AppProcess.Refresh()
+        if ($AppProcess.HasExited) { throw "Installed Intern.exe exited while waiting to become responsive" }
+        if ($AppProcess.Responding) { $Responsive = $true; break }
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $Responsive) { throw "Installed Intern.exe created a window but never became responsive" }
     if (-not $AppProcess.CloseMainWindow()) { throw "Installed Intern.exe rejected a normal window close request" }
     # A WebView2 app on a shared CI runner can take well over fifteen seconds to
     # tear its browser process down, and a timeout here reads as "the app hangs on
@@ -90,7 +105,7 @@ try {
         $Children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($AppProcess.Id)" -ErrorAction SilentlyContinue |
             ForEach-Object { "$($_.Name)#$($_.ProcessId)" })
         throw ("Installed Intern.exe did not shut down cleanly within 60s. " +
-            "Main process HasExited=$($AppProcess.HasExited). " +
+            "Main process HasExited=$($AppProcess.HasExited) Responding=$($AppProcess.Responding) windowTitle='$($AppProcess.MainWindowTitle)'. " +
             "Children: $($Children -join ', '). Live Intern processes: $($Surviving -join ', ')")
     }
     if ($AppProcess.ExitCode -ne 0) { throw "Installed Intern.exe exited with $($AppProcess.ExitCode)" }
