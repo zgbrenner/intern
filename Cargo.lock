@@ -2019,7 +2019,7 @@ dependencies = [
 
 [[package]]
 name = "intern-app"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "intern-core",
  "intern-engine",
@@ -2035,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "intern-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rusqlite",
  "serde",
@@ -2046,7 +2046,7 @@ dependencies = [
 
 [[package]]
 name = "intern-engine"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "fs4",
@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "intern-queue"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "intern-core",
  "intern-engine",
@@ -2075,7 +2075,7 @@ dependencies = [
 
 [[package]]
 name = "intern-worker"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "anydoc",
  "base64 0.22.1",

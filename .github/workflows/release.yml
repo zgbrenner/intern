@@ -1,4 +1,4 @@
-name: Release v0.1.0-alpha.1
+name: Release v0.1.0-alpha.2
 
 # Publishing is a deliberate act, not a side effect of merging. A maintainer
 # dispatches this workflow against the exact main commit they want released;
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: intern-v0.1.0-alpha.1-release
+  group: intern-v0.1.0-alpha.2-release
   cancel-in-progress: false
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag='v0.1.0-alpha.1'
+          tag='v0.1.0-alpha.2'
           test "$GITHUB_REF" = 'refs/heads/main' || test "$GITHUB_REF_NAME" = 'main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           if git show-ref --verify --quiet "refs/tags/$tag"; then
@@ -51,7 +51,7 @@ jobs:
     if: needs.release_target.outputs.eligible == 'true'
     runs-on: windows-latest
     env:
-      RELEASE_TAG: v0.1.0-alpha.1
+      RELEASE_TAG: v0.1.0-alpha.2
       CARGO_TERM_COLOR: always
       # Deliberately NOT capturing a fresh screenshot here; see the fidelity step
       # below. `qa.yml` still sets INTERN_QA_CAPTURE=1, which is where new captures
@@ -70,7 +70,7 @@ jobs:
           if ($env:GITHUB_REF_NAME -ne 'main') { throw "Refusing unexpected release ref $env:GITHUB_REF_NAME" }
           if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Checkout does not match the dispatched main commit' }
           if (-not (Test-Path -LiteralPath Cargo.lock -PathType Leaf)) { throw "Cargo.lock must be committed; release dependency resolution is forbidden" }
-          if (-not (Test-Path -LiteralPath docs\releases\v0.1.0-alpha.1.md -PathType Leaf)) { throw "Checked-in release notes are missing" }
+          if (-not (Test-Path -LiteralPath docs\releases\v0.1.0-alpha.2.md -PathType Leaf)) { throw "Checked-in release notes are missing" }
       - uses: actions/setup-node@v4
         with:
           node-version: 24.15.0
@@ -319,7 +319,7 @@ jobs:
           ./scripts/generate-sbom.ps1 -ReleaseDirectory $Release.FullName -RuntimeStage $env:INTERN_RUNTIME_STAGE
           if (Get-ChildItem release -Recurse -File -Filter "*.gguf") { throw "Model files must not be release assets" }
           @"
-          # Intern v0.1.0-alpha.1 release-run checklist
+          # Intern v0.1.0-alpha.2 release-run checklist
 
           - Commit: ``$env:GITHUB_SHA``
           - Workflow: ``$env:GITHUB_WORKFLOW``
@@ -375,7 +375,7 @@ jobs:
       # the ability to prove which repository, workflow, and commit produced the
       # exact bytes they hold:
       #
-      #   gh attestation verify Intern_0.1.0-alpha.1_x64-setup.exe --repo zgbrenner/intern
+      #   gh attestation verify Intern_0.1.0-alpha.2_x64-setup.exe --repo zgbrenner/intern
       #
       # It needs no certificate and stores no key: the runner proves its own
       # identity through OIDC, so there is nothing to leak or rotate.
@@ -420,7 +420,7 @@ jobs:
           if ($ViewExit -eq 0 -and $Draft.Trim() -eq 'true') {
             gh release upload $Tag $Assets --clobber
             if ($LASTEXITCODE -ne 0) { throw 'Could not repair draft release assets' }
-            gh release edit $Tag --draft=false --latest --verify-tag --notes-file docs/releases/v0.1.0-alpha.1.md --title 'Intern v0.1.0-alpha.1'
+            gh release edit $Tag --draft=false --latest --verify-tag --notes-file docs/releases/v0.1.0-alpha.2.md --title 'Intern v0.1.0-alpha.2'
             if ($LASTEXITCODE -ne 0) { throw 'Could not publish repaired draft release' }
             exit 0
           }
@@ -431,7 +431,7 @@ jobs:
           # a shipped app cannot be redirected elsewhere. Publishing as a
           # prerelease made every installed copy's update check return 404 while
           # the manifest sat one URL away, reachable only by exact tag. The
-          # release is still plainly an alpha: the version says alpha.1 and the
+          # release is still plainly an alpha: the version says so and the
           # notes say so in their first line.
-          gh release create $Tag $Assets --verify-tag --latest --notes-file docs/releases/v0.1.0-alpha.1.md --title 'Intern v0.1.0-alpha.1'
+          gh release create $Tag $Assets --verify-tag --latest --notes-file docs/releases/v0.1.0-alpha.2.md --title 'Intern v0.1.0-alpha.2'
           if ($LASTEXITCODE -ne 0) { throw 'Could not publish GitHub release' }

@@ -147,7 +147,7 @@ describe('setup and queue controls', () => {
     };
 
     it('checks only when asked, and never on its own', async () => {
-      const checkForUpdate = vi.fn(async () => ({ state: 'current' as const, currentVersion: '0.1.0-alpha.1' }));
+      const checkForUpdate = vi.fn(async () => ({ state: 'current' as const, currentVersion: '0.1.0-alpha.2' }));
       render(<App bridge={{ ...createInMemoryBridge(), checkForUpdate }} />);
       await openSettings();
 
@@ -155,18 +155,18 @@ describe('setup and queue controls', () => {
       expect(checkForUpdate).not.toHaveBeenCalled();
 
       fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
-      await waitFor(() => expect(screen.getByRole('status', { name: 'Update status' })).toHaveTextContent(/0\.1\.0-alpha\.1 is the latest release/i));
+      await waitFor(() => expect(screen.getByRole('status', { name: 'Update status' })).toHaveTextContent(/0\.1\.0-alpha\.2 is the latest release/i));
       expect(checkForUpdate).toHaveBeenCalledTimes(1);
     });
 
     it('offers to install a newer version and names both versions', async () => {
-      const bridge = createInMemoryBridge({ update: { state: 'available', currentVersion: '0.1.0-alpha.1', version: '0.2.0' } });
+      const bridge = createInMemoryBridge({ update: { state: 'available', currentVersion: '0.1.0-alpha.2', version: '0.2.0' } });
       const installUpdate = vi.fn(async () => {});
       render(<App bridge={{ ...bridge, installUpdate }} />);
       await openSettings();
       fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
 
-      await waitFor(() => expect(screen.getByRole('status', { name: 'Update status' })).toHaveTextContent(/Version 0\.2\.0 is available\. You have 0\.1\.0-alpha\.1/i));
+      await waitFor(() => expect(screen.getByRole('status', { name: 'Update status' })).toHaveTextContent(/Version 0\.2\.0 is available\. You have 0\.1\.0-alpha\.2/i));
       fireEvent.click(screen.getByRole('button', { name: /Install 0\.2\.0 and restart/i }));
       await waitFor(() => expect(installUpdate).toHaveBeenCalledTimes(1));
     });

@@ -14,7 +14,7 @@ async function evidenceFixture() {
   await mkdir(join(root, 'docs/qa/logs'), { recursive: true });
   await mkdir(join(root, 'release'), { recursive: true });
   const commit = 'a'.repeat(40);
-  const workflow = 'Release v0.1.0-alpha.1';
+  const workflow = 'Release v0.1.0-alpha.2';
   const runId = '123456';
   const screenshot = 'rendered screenshot';
   const files = {

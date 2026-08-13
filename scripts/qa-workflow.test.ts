@@ -26,7 +26,7 @@ it('never publishes as a side effect of merging to main', async () => {
   // Releasing is dispatched deliberately; a merge must not tag or publish.
   expect(workflow).toContain('workflow_dispatch:');
   expect(workflow).not.toContain('branches: [main]');
-  expect(workflow).toContain('group: intern-v0.1.0-alpha.1-release');
+  expect(workflow).toContain('group: intern-v0.1.0-alpha.2-release');
   expect(workflow).toContain('release_target:');
 });
 
