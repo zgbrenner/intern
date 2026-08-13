@@ -1,11 +1,18 @@
 import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult } from './bridge';
 import type { AppSettings, QueueItem, SetupState } from '../types';
 
+/** Exact size of the single pinned model file this build downloads. */
+export const PINNED_MODEL_BYTES = 1_280_835_840;
+
 const seedItems: QueueItem[] = [
   { id: 'employment', originalFilename: 'Employment Agreement - John Smith.pdf', status: 'ready', proposedFilename: '2024-04-12 Employment Agreement with John Smith.pdf', confidence: 0.98 },
   { id: 'lease', originalFilename: 'Lease Agreement - 123 Main St.pdf', status: 'review', proposedFilename: '2023-09-15 Lease Agreement between ABC Properties LLC and TenantCo Inc.pdf', confidence: 0.72, description: 'Commercial lease agreement between landlord and tenant for 123 Main St.', evidence: { date: 'Sep 15, 2023', type: 'Lease Agreement', parties: 'ABC Properties LLC; TenantCo Inc.' }, reason: 'Lower confidence due to unclear document type keywords and multiple possible dates.' },
   { id: 'nda', originalFilename: 'NDA - Acme Corp.docx', status: 'ready', proposedFilename: '2024-03-01 Non-Disclosure Agreement with Acme Corp.docx', confidence: 0.95 },
-  { id: 'financials', originalFilename: 'Q1 Financials.xlsx', status: 'processing', proposedFilename: '2024-03-31 Q1 Financial Statements.xlsx', progress: 60 },
+  // Not a spreadsheet: .xlsx is not in SUPPORTED_EXTENSIONS, so a real one is
+  // rejected with UNSUPPORTED_FORMAT and can never reach `processing`. The demo
+  // queue showed it mid-run at 60% next to a drop zone whose own caption lists
+  // the supported formats and omits spreadsheets.
+  { id: 'financials', originalFilename: 'Q1 Financials.pdf', status: 'processing', proposedFilename: '2024-03-31 Q1 Financial Statements.pdf', progress: 60 },
   { id: 'service', originalFilename: 'Service Agreement - BlueSky LLC.pdf', status: 'ready', proposedFilename: '2024-02-28 Service Agreement with BlueSky LLC.pdf', confidence: 0.96 },
   { id: 'minutes', originalFilename: 'Board Meeting Minutes - May 7, 2024.docx', status: 'waiting' },
   { id: 'invoice', originalFilename: 'Invoice INV-1001.pdf', status: 'waiting' },
@@ -45,7 +52,10 @@ function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
 function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): DesktopBridge {
   let items = (options.items ?? seedItems).map((item) => ({ ...item }));
   let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false };
-  let setup: SetupState = { state: 'ready', downloadedBytes: 3_278_329_184, totalBytes: 3_278_329_184, ...options.setup };
+  // The pinned model's exact size from src-tauri/resources/model-manifest.json.
+  // The previous value, 3_278_329_184, was a model plus a vision projector that
+  // this pipeline does not download.
+  let setup: SetupState = { state: 'ready', downloadedBytes: PINNED_MODEL_BYTES, totalBytes: PINNED_MODEL_BYTES, ...options.setup };
   const downloadStepBytes = options.downloadStepBytes ?? Math.max(1, Math.ceil(setup.totalBytes / 4));
   const downloadIntervalMs = options.downloadIntervalMs ?? 40;
   let downloadTimer: ReturnType<typeof setInterval> | undefined;

@@ -2,8 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import type { ExistingModelFiles, SelectionBoundary } from '../../lib/bridge';
-import { createInMemoryBridge } from '../../lib/inMemoryBridge';
+import { PINNED_MODEL_BYTES, createInMemoryBridge } from '../../lib/inMemoryBridge';
 import type { SetupState } from '../../types';
+// The manifest the installer ships and the backend reads. Importing the real
+// file is the point: it is what makes the assertion below a drift guard rather
+// than a second copy of the same number.
+import modelManifest from '../../../src-tauri/resources/model-manifest.json';
 
 const modelFiles = { modelPath: 'C:\\Models\\intern-q4.gguf' };
 
@@ -32,13 +36,32 @@ describe('setup and queue controls', () => {
     expect(await screen.findByText('123,456,789 of 3,221,225,472 bytes')).toBeVisible();
   });
 
-  it('explains the local privacy boundary and both setup sources', async () => {
+  it('quotes the download size the manifest will actually fetch, not a hardcoded one', async () => {
+    const total = modelManifest.files.reduce((sum, file) => sum + file.size, 0);
+
+    // The setup screen is the first thing a new user sees, and it used to
+    // announce a hardcoded "approximately 3.27 GB" - a model plus a vision
+    // projector from an earlier design - for a download that is one 1.19 GiB
+    // file. Both halves are pinned here: the demo total must equal the shipped
+    // manifest, and the screen must render whatever total it is given.
+    expect(PINNED_MODEL_BYTES).toBe(total);
+
     render(<App
-      bridge={createInMemoryBridge({ setup: { state: 'required', downloadedBytes: 0, totalBytes: 3_278_329_184 } })}
+      bridge={createInMemoryBridge({ setup: { state: 'required', downloadedBytes: 0, totalBytes: total } })}
       selection={setupSelection(async () => undefined)}
     />);
 
-    expect(await screen.findByText(/approximately 3\.27 GB/i)).toBeVisible();
+    expect(await screen.findByText(/Download 1\.19 GiB of model files/i)).toBeVisible();
+    expect(screen.queryByText(/3\.27 GB/i)).not.toBeInTheDocument();
+  });
+
+  it('explains the local privacy boundary and both setup sources', async () => {
+    render(<App
+      bridge={createInMemoryBridge({ setup: { state: 'required', downloadedBytes: 0, totalBytes: PINNED_MODEL_BYTES } })}
+      selection={setupSelection(async () => undefined)}
+    />);
+
+    expect(await screen.findByRole('heading', { name: 'Set up Intern' })).toBeVisible();
     expect(screen.getByText(/documents.*stay on this device/i)).toBeVisible();
     expect(screen.getByText(/processing runs fully locally/i)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Download model' })).toBeEnabled();
@@ -118,13 +141,32 @@ describe('setup and queue controls', () => {
   });
 
   it.each([
-    ['MODEL_FILE_INVALID', /selected model files did not match/i],
-    ['MODEL_SELF_TEST_FAILED', /local text and image self-test failed/i],
+    ['MODEL_FILE_INVALID', /did not match the model Intern pins/i],
+    ['MODEL_SELF_TEST_FAILED', /local self-test failed/i],
   ])('announces the %s setup failure with recovery guidance', async (error, message) => {
     render(<App bridge={createInMemoryBridge({ setup: { state: 'failed', downloadedBytes: 40, totalBytes: 300, error } })} selection={setupSelection(async () => modelFiles)} />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
     expect(screen.getByRole('button', { name: 'Try download again' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Choose existing model files' })).toBeEnabled();
+  });
+
+  // These messages previously told a user to supply "Q4 or Q8 model and mmproj
+  // GGUF files" and reported an "image self-test". This build pins exactly one
+  // file and starts the server with --no-mmproj, so that advice named files that
+  // do not exist. The names it does use must stay tied to the shipped manifest.
+  it('never asks for model files this build does not use', async () => {
+    const names = modelManifest.files.map((file) => file.name);
+    expect(names).toEqual(['Qwen3.5-2B-Q4_K_M.gguf']);
+
+    for (const error of ['MODEL_FILE_INVALID', 'MODEL_SELF_TEST_FAILED']) {
+      const { unmount } = render(<App
+        bridge={createInMemoryBridge({ setup: { state: 'failed', downloadedBytes: 40, totalBytes: PINNED_MODEL_BYTES, error } })}
+        selection={setupSelection(async () => modelFiles)}
+      />);
+      const alert = await screen.findByRole('alert');
+      expect(alert).not.toHaveTextContent(/mmproj|projector|Q8|image self-test/i);
+      unmount();
+    }
   });
 });

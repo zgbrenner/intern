@@ -1,5 +1,5 @@
 import { Download, TriangleAlert } from 'lucide-react';
-import { byteCount } from '../lib/format';
+import { byteCount, byteSize } from '../lib/format';
 import type { SetupState } from '../types';
 import { Icon } from './Icon';
 
@@ -22,7 +22,15 @@ export function SetupScreen({ setup, busy, canChooseExisting, operationError, on
   const showProgress = downloading || resumable || failed && setup.downloadedBytes > 0;
   return <main className="setup-screen" aria-label="Intern setup"><section>
     <Icon icon={failed ? TriangleAlert : Download} /><h1>{failed ? 'Model setup needs attention' : 'Set up Intern'}</h1>
-    <p>Download approximately 3.27 GB of model files, or choose matching files already on this computer.</p>
+    {/*
+      The size comes from the setup state, which the backend fills from
+      model-manifest.json before the first byte is fetched, so it cannot drift
+      from what will actually be downloaded. It used to be the hardcoded string
+      "approximately 3.27 GB" - the combined size of a model and a vision
+      projector, from a design this pipeline no longer uses. The first screen a
+      new user saw overstated the download by more than two and a half times.
+    */}
+    <p>Download {setup.totalBytes > 0 ? `${byteSize(setup.totalBytes)} of ` : ''}model files, or choose matching files already on this computer.</p>
     <p>Your documents and filenames stay on this device. After setup, processing runs fully locally with no network dependency.</p>
     {operationError && <p className="setup-error" role="alert">{operationError}</p>}
     {canceled && !operationError && <p role="status" aria-label="Setup status" aria-live="polite">Download canceled. Your progress was saved.</p>}

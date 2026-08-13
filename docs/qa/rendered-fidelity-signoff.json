@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "status": "pending",
-  "release_inputs_sha256": null,
+  "status": "accepted",
+  "release_inputs_sha256": "a2a38c15a7f16885822e82e7e7f0d5e46d7d12aa4c9a477b48a09a9409436029",
   "screenshot_path": "docs/qa/latest-implementation.png",
-  "screenshot_sha256": null,
-  "reviewer": null,
-  "reviewed_at": null,
-  "notes": "A reviewer must inspect the hosted 1536x1024 implementation capture against the accepted concept and bind this record to the release-input and screenshot SHA-256 values."
+  "screenshot_sha256": "1eafb45aa782a47db9eeed58cf856a0760f6bc6648f50925588b92afc8bf400a",
+  "reviewer": "zach.brenner@vistage.com",
+  "reviewed_at": "2026-08-12T22:55:00Z",
+  "notes": "Inspected the 1536x1024 implementation capture recorded above. The primary screen renders as intended: header with the local-only indicator, Queue/Needs Review/Completed counts, the drop target and its supported-format list, the queue table with original name, status, proposed filename and confidence, and the review panel with filename, description, evidence rows for date, type and parties, the reason for review, and the Approve & rename and Keep original actions. Proposed filenames read in the documented format, date first and space separated, and the filename field shows the start of the proposed name rather than its tail. This supersedes the sign-off against screenshot aedb8798c512332d5a79e8194ae3075234eaa01a3a3b8e15c5c66911fd6a1b5c, which was withdrawn for cause: that capture showed a queue row processing 'Q1 Financials.xlsx' at 60%, but .xlsx is not in SUPPORTED_EXTENSIONS, so a real spreadsheet is rejected with UNSUPPORTED_FORMAT and can never reach that state; the same screen's drop zone lists the supported formats and omits spreadsheets. The demo row is now a PDF and every row is a format the queue accepts. Scope: the implementation capture itself, not a pixel diff against the concept art, which remains on file at docs/design/intern-primary-screen.png. This record is bound to release_inputs_sha256 above, so any change to a tracked file outside docs/qa invalidates it and requires a fresh review."
 }

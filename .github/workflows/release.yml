@@ -158,6 +158,16 @@ jobs:
             -OutputPath release\model-evaluation.json 2>&1 | Tee-Object -FilePath release\model-evaluation.log
           if ($LASTEXITCODE -ne 0) { throw "Corpus evaluation failed" }
           node scripts/validate-model-evaluation.mjs release\model-evaluation.json
+      # Pin the bundler's own toolset rather than letting it fetch one mid-build.
+      # See scripts/prefetch-nsis.ps1: an unpinned GitHub download here failed two
+      # consecutive CI runs, and a release must not depend on it.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\intern-nsis-cache
+          key: release-nsis-toolset-${{ runner.os }}-${{ hashFiles('scripts/prefetch-nsis.ps1') }}
+      - name: Stage the pinned NSIS toolset
+        shell: pwsh
+        run: ./scripts/prefetch-nsis.ps1 -CacheDirectory "${{ runner.temp }}\intern-nsis-cache"
       - run: npm run tauri build -- --bundles nsis -- --locked
       - name: Smoke test installer and installed worker
         shell: pwsh
@@ -215,7 +225,7 @@ jobs:
           - Run: ``$env:GITHUB_RUN_ID`` attempt ``$env:GITHUB_RUN_ATTEMPT``
           - Durable apply, undo, recovery, worker, and workspace tests: pass
           - Corpus evaluation on the pinned local model through the shipping pipeline: pass
-          - Rendered screenshot: recaptured at 1536x1024 and bound to reviewed fidelity sign-off
+          - Rendered screenshot: the reviewed 1536x1024 capture, shipped as-is and bound to the fidelity sign-off by release_inputs_sha256
           - Installed application: launch, clean shutdown, worker PDF/OCR path, uninstall, and data retention passed
           "@ | Set-Content release\release-checklist.md -Encoding utf8NoBOM
           node scripts/create-release-evidence.mjs `

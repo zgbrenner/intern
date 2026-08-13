@@ -61,8 +61,12 @@ describe('queue interactions', () => {
 
     expect((await screen.findByRole('row', { name: /Employment Agreement/i })).querySelector('.file-kind--pdf')).toBeInTheDocument();
     expect(screen.getByRole('row', { name: /NDA - Acme Corp/i }).querySelector('.file-kind--document')).toBeInTheDocument();
-    expect(screen.getByRole('row', { name: /Q1 Financials/i }).querySelector('.file-kind--spreadsheet')).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: /Q1 Financials/i }).querySelector('.file-kind--pdf')).toBeInTheDocument();
     expect(screen.getByRole('row', { name: /Notes from Call/i }).querySelector('.file-kind--text')).toBeInTheDocument();
+    // Every demo row is a format the queue accepts. The spreadsheet icon still
+    // exists for a file a user drags in by mistake, but the demo no longer shows
+    // an unsupported type sailing through the pipeline.
+    expect(screen.queryByRole('row', { name: /\.xlsx/i })).not.toBeInTheDocument();
   });
 
   it('announces useful queue state changes', async () => {

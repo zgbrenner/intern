@@ -85,7 +85,7 @@ test.describe('whole-product browser QA', () => {
     await page.goto('/');
 
     await expect(page.getByRole('button', { name: 'Apply all ready' })).toBeVisible();
-    await page.getByRole('button', { name: 'Select Q1 Financials.xlsx' }).click();
+    await page.getByRole('button', { name: 'Select Q1 Financials.pdf' }).click();
     await expect(page.getByRole('button', { name: 'Cancel processing' })).toBeVisible();
     await page.getByRole('button', { name: 'Completed' }).click();
     await expect(page.getByRole('button', { name: 'Clear history' })).toBeVisible();

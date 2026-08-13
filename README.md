@@ -2,11 +2,19 @@
 
 Intern reads a document and tells you what to call it.
 
+Every pair below is copied from the scored corpus in
+[docs/model-bakeoff.md](docs/model-bakeoff.md) — the left column is what the
+previous pipeline produced, the right column is what this one does:
+
 ```text
-Scanned_20260401_0003.pdf   ->  2026-04-01 Statement of Work between Ridgeline Cartography and Vistage.pdf
-doc1.pdf                    ->  2026-12-29 Notice of Termination for John Smith.pdf
-INV_7741.pdf                ->  2026-01-05 Invoice from Acme Corporation.pdf
+2026-04-09 - Statement of Work.pdf  ->  2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf
+2026-12-29 - notice.pdf             ->  2026-12-29 Notice of Termination - John Smith.pdf
+2025-02-14.pdf                      ->  2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf
 ```
+
+The first line is the point of the whole thing: `2026-04-09` was the date the
+statement of work was signed, and `2026-04-01` is the date it takes effect. Only
+one of those is what the document *is*.
 
 Alongside the name it produces one sentence saying what the document actually
 concerns, the verbatim excerpts behind every fact it used, and a confidence. If
@@ -18,10 +26,48 @@ no remote processing; the only network traffic is one explicit, user-started
 download of the pinned model file — 1.19 GiB, the text model and nothing else.
 
 Intern reads documents as text: native PDF text first, OCR when a page has none,
-and no vision model. A projector for this model would be another 637 MB that
-every user downloads before naming a single document, for a path almost nothing
-takes. A page that neither text extraction nor OCR can read goes to review
-rather than being guessed at.
+and no vision model. A projector for this model would be a second large download
+before anyone names a single document and, at 668 MB resident, more memory than
+the model itself — for a path almost nothing takes. A page that neither text
+extraction nor OCR can read goes to review rather than being guessed at.
+
+## Install and first run
+
+Windows 10 or 11, x86-64. Download `Intern_0.1.0-alpha.1_x64-setup.exe` from the
+[latest release](https://github.com/zgbrenner/intern/releases/latest) and run it.
+It installs per-user, so it does not ask for administrator rights, and
+uninstalling it leaves your documents and Intern's own data alone.
+
+**The installer is not Authenticode signed**, because this project has no
+code-signing certificate. Windows SmartScreen will call it an unrecognized app;
+to continue, choose **More info** and then **Run anyway**. Nothing in this
+release removes that warning, and you should not take an unrecognized-app
+warning lightly — so verify the download instead of trusting it. Every published
+installer carries a keyless Sigstore build-provenance attestation naming the
+repository, workflow, and commit that produced those exact bytes:
+
+```sh
+gh attestation verify Intern_0.1.0-alpha.1_x64-setup.exe --repo zgbrenner/intern
+```
+
+`SHA256SUMS.txt` is published beside the installer and catches a corrupted or
+truncated download, but it proves nothing about origin: it sits on the same page
+as the installer, so whoever could replace one could replace both. The
+attestation is the part that establishes where the file came from.
+
+On first launch Intern shows a setup screen and asks to download the one thing
+the installer deliberately leaves out: the pinned model file, 1.19 GiB. That
+download is resumable, it is the only network request Intern ever makes, and the
+file becomes active only after its exact length and SHA-256 match the manifest
+built into the installer. If you already have the file, **Choose existing model
+files** points Intern at it and skips the download. Nothing else needs
+installing — PDF text extraction, OCR, and inference all ship inside the app.
+
+Then drag documents or a folder onto the window. Names Intern can support with
+verbatim text from the document appear ready to apply; anything else goes to
+review with the reason shown. Nothing on disk is renamed until you approve it,
+either one item at a time or with **Apply all ready**, and a rename can be
+undone.
 
 ## How a document becomes a filename
 

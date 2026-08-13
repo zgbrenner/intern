@@ -137,6 +137,16 @@ jobs:
           $Stage = Join-Path $env:RUNNER_TEMP "intern-runtime-stage"
           ./scripts/stage-windows-runtime.ps1 -Destination $Stage
           ./scripts/smoke-worker.ps1 -WorkerPath (Join-Path $Stage "intern-worker.exe") -RuntimeDirectory $Stage
+      # The last unpinned network dependency in the build. See the script header:
+      # the bundler fetches its own NSIS toolset at bundle time, and a connection
+      # reset there failed two consecutive runs of the same commit.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\intern-nsis-cache
+          key: nsis-toolset-${{ runner.os }}-${{ hashFiles('scripts/prefetch-nsis.ps1') }}
+      - name: Stage the pinned NSIS toolset
+        shell: pwsh
+        run: ./scripts/prefetch-nsis.ps1 -CacheDirectory "${{ runner.temp }}\intern-nsis-cache"
       - run: npm run tauri build -- --bundles nsis -- --locked
       - name: Smoke test per-user installer
         shell: pwsh

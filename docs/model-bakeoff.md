@@ -137,22 +137,29 @@ of 12.4, 16.6, 19.6, and 27.7 seconds depending on what else was running. The
 slowest run was the one taken while other work was competing for the same eight
 threads. Quote the range, never one figure.
 
-Extraction is not the cost. A one-page invoice extracts in 13 ms, a 14-page
-contract in 33 ms, a 100-page journal in 29 ms. Distillation is 0.3–9 ms. Across
-the full 18-document corpus the median extraction is 38 ms. The exception is a
-scanned page: OCR is seconds, and the slowest document in the corpus spends 6.6 s
-there because a page that will not read confidently is re-read in other
-orientations. Essentially all the time is the model:
+Extraction is not the cost. A one-page invoice extracts in 16 ms, a 14-page
+contract in 59 ms, a 100-page journal in 24 ms. Distillation is 0.03–13.5 ms.
+Across the corpus the median extraction is 37 ms. The exception is a scanned
+page: OCR is seconds, and the slowest document spends 6.6 s there because a page
+that will not read confidently is re-read in other orientations. Essentially all
+the time is the model:
 
 | Document | Pages | Source chars | Digest chars | Distill | Inference |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Vendor invoice | 1 | 641 | 903 | 0.3 ms | 9.7 s |
-| 100-page journal | 100 | 9,592 | 103 | 0.5 ms | 9.5 s |
-| Settlement agreement | 7 | 14,837 | 12,565 | 5.4 ms | 51.1 s |
-| Statement of work | 14 | 29,285 | 13,178 | 9.2 ms | 42.3 s |
+| Vendor invoice | 1 | 641 | 845 | 0.3 ms | 25.4 s |
+| 100-page journal | 100 | 9,592 | 103 | 0.4 ms | 13.7 s |
+| Settlement agreement | 7 | 14,837 | 12,282 | 6.7 ms | 54.8 s |
+| Statement of work | 14 | 29,285 | 12,771 | 13.5 ms | 56.3 s |
 
-Repeated runs of the same corpus on this machine put the median between 12.4 s
-and 16.6 s depending on what else is running; treat a single figure as noise.
+Every figure in that table is read from `docs/qa/model-evaluation.json`, the
+scored run this release ships. An earlier revision of the table reported 903 and
+13,178 digest characters and inference times of 9.7 s and 42.3 s — numbers from a
+superseded run, and the two inference figures were faster than the 13.0 s
+minimum recorded anywhere in the shipping corpus.
+
+That run's median document takes 19.9 s end to end and its slowest takes 56.4 s.
+Repeated runs on the same machine moved the median between 12.4 s and 27.7 s
+depending on what else was running; treat a single figure as noise.
 
 Short documents are dominated by *generation* — the structured reply is about
 240 tokens at 17.5 tokens/second. Long documents add prefill at 157
@@ -161,7 +168,7 @@ biggest files. That budget is the tuning lever: shrinking it trades accuracy for
 seconds, and 12,000 was where date accuracy stopped improving.
 
 The digest can exceed its budget by one block when the mandatory set alone is
-larger, which is why the statement of work reports 13,178 characters. Very short
+larger, which is why the statement of work reports 12,771 characters. Very short
 documents can report a ratio above 1: the page markers and the date index cost
 more than the text saved, which is the correct trade when there is nothing to
 compress.
@@ -170,9 +177,9 @@ compress.
 
 | Document | Source | Digest | Ratio |
 | --- | ---: | ---: | ---: |
-| Vendor invoice (1 page) | 641 | 991 | passthrough |
-| Settlement agreement (7 pages) | 14,837 | 12,565 | 1.2× |
-| Statement of work (14 pages) | 29,285 | 13,178 | 2.2× |
+| Vendor invoice (1 page) | 641 | 845 | passthrough |
+| Settlement agreement (7 pages) | 14,837 | 12,282 | 1.2× |
+| Statement of work (14 pages) | 29,285 | 12,771 | 2.3× |
 | Project journal (100 pages) | 9,592 | 103 | 93× |
 
 Compression is a consequence of the document, not a configured ratio. The
@@ -190,8 +197,11 @@ near the budget.
 * **Q5_K_M and Q8.** Half the prefill speed for no measured accuracy gain here.
 * **Qwen3.5-4B.** Three times slower on prefill; a 29,000-character contract
   would take minutes.
-* **A permanently loaded vision projector.** 668 MB resident for a path that a
-  text-bearing corpus never takes. It is installed and loaded on demand instead.
+* **A vision projector.** 668 MB resident for a path that a text-bearing corpus
+  never takes. Rejected outright: none is pinned, downloaded, or loaded, and the
+  request type has no field for an image. An earlier revision of this line said
+  it was "installed and loaded on demand instead", which described a capability
+  this build does not have.
 
 ## Known misses
 

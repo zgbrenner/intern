@@ -126,6 +126,15 @@ jobs:
           ./scripts/stage-windows-runtime.ps1 -Destination $Stage
           ./scripts/smoke-worker.ps1 -WorkerPath (Join-Path $Stage "intern-worker.exe") -RuntimeDirectory $Stage
           "INTERN_QA_RUNTIME_STAGE=$Stage" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      # Same pinned toolset the CI and release builds use; see
+      # scripts/prefetch-nsis.ps1 for why the bundler must not fetch its own.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\intern-nsis-cache
+          key: qa-nsis-toolset-${{ runner.os }}-${{ hashFiles('scripts/prefetch-nsis.ps1') }}
+      - name: Stage the pinned NSIS toolset
+        shell: pwsh
+        run: ./scripts/prefetch-nsis.ps1 -CacheDirectory "${{ runner.temp }}\intern-nsis-cache"
       - run: npm run tauri build -- --bundles nsis -- --locked
       - name: Smoke test per-user installer and uninstall data retention
         shell: pwsh

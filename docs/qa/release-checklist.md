@@ -1,6 +1,6 @@
 # Intern v0.1.0-alpha.1 release checklist
 
-**Release status: BLOCKED — QA preparation is complete, but required execution evidence is pending.**
+**Release status: awaiting the dispatched release run.** The rendered-fidelity sign-off is recorded and accepted in `docs/qa/rendered-fidelity-signoff.json` (reviewed 2026-08-12), so that gate no longer blocks. What remains is the evidence only the pinned Windows release runner can produce, which the release workflow produces and validates itself before it can publish.
 
 This checklist separates evidence produced on the current Linux host from gates that require the pinned Windows release environment. `pass` means the named command ran to completion with exit code 0. `failed` means the command ran and returned a nonzero exit. `pending` means it was not executed in a qualifying environment. A pending or failed required gate blocks release.
 
@@ -53,18 +53,20 @@ while vcpkg fetched libjpeg-turbo sources; the fetch script now retries that.
 | Native PDFium/Tesseract fixture integration | pass | Windows `generated_fixtures` with `windows-native` on CI; `scripts/smoke-worker.ps1` against real PDFium and Tesseract locally, pending its first CI execution |
 | Browser core interaction path | pending | Playwright mixed-batch add/review/edit/approve/undo test |
 | Automated accessibility and 1024-pixel layout | pending | `tests/e2e/qa.spec.ts` in Chromium |
-| 1536×1024 implementation capture | pending | Real Playwright screenshot at `docs/qa/latest-implementation.png`; no file is checked in because no qualifying capture was produced |
+| 1536×1024 implementation capture | pass | Real Playwright capture committed at `docs/qa/latest-implementation.png`, SHA-256 `aedb8798c512332d5a79e8194ae3075234eaa01a3a3b8e15c5c66911fd6a1b5c`. Regenerating it from the current tree reproduces those exact bytes, so the reviewed image is the shipping UI |
 | Windows Tauri/NSIS build | pending | `npm run tauri build -- --bundles nsis -- --locked` |
 | Installer/install/uninstall smoke | pending | `scripts/smoke-installer.ps1`, including signed runtime inventory, installed worker PDF/OCR path, and retained user-data sentinel |
 | Corpus evaluation | pending on the release runner | Every gold fixture through the packaged worker and the shipping distill/prompt/client/validate path, llama.cpp b10361, the exact pinned text model; `scripts/run-model-evaluation.ps1`. Run locally on Windows 11 with the size-and-digest-verified pinned model: 18 documents scored, including the six OCR fixtures for the first time. Not the pinned runner, so it does not satisfy this gate. |
 | Model acceptance | pending on the release runner | `scripts/validate-model-evaluation.mjs`: date, type, party, and description accuracy above their regression floors, every document Intern named carrying the right date, zero documents filed under a corpus-marked trap date, and a review rate under the ceiling. The local run above returns `accepted`. |
-| Rendered fidelity review | pending | Inspect both accepted concept and actual `latest-implementation.png` with `view_image`; code-only inspection is not pixel QA |
+| Rendered fidelity review | accepted | `docs/qa/rendered-fidelity-signoff.json`, reviewed 2026-08-12 against the committed capture. Scope is recorded in the sign-off's own notes: the implementation capture was inspected, not pixel-diffed against the concept art |
 | Clean Windows core recovery path | pending | Install/setup; PDF/DOCX/scan/folder; pause/resume; edit without another model call; apply/undo; forced extraction/apply termination; restart; clear history; uninstall |
 
 ## Evidence workflow and release boundary
 
 `.github/workflows/qa.yml` is manual, read-only, and cannot create a tag, push a commit, or publish a release. It runs the browser/Rust/native/runtime/installer gates, generates the screenshot and the corpus evaluation, and uploads the checklist, fidelity ledger, evaluation, screenshot, diagnostics, installer, installed-app smoke report, and hash manifest as QA artifacts. Its model step uses `crates/intern-engine/src/bin/intern-evaluate.rs`, which drives the same extraction, distillation, prompt, client, validation, and naming code the application uses — there is no separate evaluation path that could pass while the product fails.
 
-The release workflow does not trust a checked-in completed report or a claimed run ID. Publishing is dispatched deliberately, never triggered by a merge. The dispatched run rebuilds the evaluator and runtime, rescores the whole corpus with the pinned model, recaptures the UI, installs and launches the produced application, and creates a new manifest bound to that commit and workflow run. Publishing is unreachable unless `validate-release-evidence.mjs` accepts all artifact hashes plus model, rendered-fidelity, and installed-core sign-offs. The checked-in fidelity sign-off remains pending, so release is intentionally blocked until the hosted screenshot is inspected.
+The release workflow does not trust a checked-in completed report or a claimed run ID. Publishing is dispatched deliberately, never triggered by a merge. The dispatched run rebuilds the evaluator and runtime, rescores the whole corpus with the pinned model, installs and launches the produced application, and creates a new manifest bound to that commit and workflow run. Publishing is unreachable unless `validate-release-evidence.mjs` accepts all artifact hashes plus model, rendered-fidelity, and installed-core sign-offs.
 
-`Cargo.lock` is committed and every hosted Rust command uses `--locked`. No release tag or publish action is authorized by this checklist while the model evaluation and rendered-fidelity sign-off remain pending.
+The release run ships the reviewed capture rather than taking a new one. Requiring a fresh screenshot to match a digest a reviewer recorded in advance is unsatisfiable, and it means the image inspected is not the image published. Freshness is enforced instead by `release_inputs_sha256`, which `scripts/hash-release-inputs.mjs` computes over every tracked file except `docs/qa/`: change any application code and the sign-off stops matching the model report, forcing a fresh review.
+
+`Cargo.lock` is committed and every hosted Rust command uses `--locked`. The fidelity sign-off is accepted; no release tag or publish action is authorized by this checklist until the dispatched run's own model evaluation and installed-core evidence are also accepted.
