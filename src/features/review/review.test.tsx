@@ -22,6 +22,29 @@ describe('review actions', () => {
     expect((await bridge.listItems()).find((item) => item.id === 'lease')?.status).toBe('review');
   });
 
+  // The description is half of what Intern produces, and it used to be rendered
+  // only while an item was still ready or in review. Applying a rename made the
+  // item `completed`, which hid the sentence for good - so the fact describing
+  // the document disappeared exactly when the document was filed.
+  it('still shows the description after a file has been renamed', async () => {
+    render(<App bridge={createInMemoryBridge()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Completed' }));
+    selectRow(await screen.findByRole('row', { name: /Completed lease.pdf/i }));
+
+    const inspector = screen.getByRole('complementary', { name: 'Review item' });
+    expect(within(inspector).getByText(/Residential lease agreement for a twelve-month term/i)).toBeVisible();
+    // Settled, so it is reported rather than edited - but it must be reachable.
+    expect(within(inspector).queryByLabelText('Description')).not.toBeInTheDocument();
+    expect(within(inspector).getByRole('button', { name: /Copy description/i })).toBeEnabled();
+  });
+
+  it('shows each description in the queue without needing a row selected', async () => {
+    render(<App bridge={createInMemoryBridge()} />);
+    const row = await screen.findByRole('row', { name: /Lease Agreement - 123 Main St.pdf/i });
+
+    expect(within(row).getByText(/Commercial lease agreement between landlord and tenant/i)).toBeVisible();
+  });
+
   it('preserves a draft through a same-revision queue refresh', async () => {
     const bridge = createInMemoryBridge();
     render(<App bridge={bridge} />);
@@ -40,8 +63,14 @@ describe('review actions', () => {
 
     const destination = await screen.findByLabelText('Destination folder');
     await waitFor(() => expect(destination).toHaveFocus());
-    const save = screen.getByRole('button', { name: 'Save settings' });
-    save.focus();
+    // Tabbing off the LAST control must wrap to the first. Found dynamically
+    // rather than named, because this used to hard-code "Save settings" and
+    // broke the moment the dialog grew an Updates section - which tested the
+    // button order, not the trap.
+    const dialog = screen.getByRole('dialog', { name: 'Settings' });
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])'));
+    expect(focusable.length).toBeGreaterThan(2);
+    focusable[focusable.length - 1].focus();
     fireEvent.keyDown(document, { key: 'Tab' });
     expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
     fireEvent.keyDown(document, { key: 'Escape' });

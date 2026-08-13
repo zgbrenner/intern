@@ -8,7 +8,14 @@ import type {
   FolderSelection,
   SelectionBoundary,
   SelectionResult,
+  UpdateStatus,
 } from './bridge';
+
+/**
+ * The update found by the last check, held so that installing it cannot race a
+ * second lookup and install something other than what the user was shown.
+ */
+let pendingUpdate: { version: string; body?: string; date?: string; downloadAndInstall(): Promise<void> } | undefined;
 
 export interface TauriEvent<T> {
   event: string;
@@ -115,6 +122,30 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
     return this.transport.invoke('setup_choose_existing', { files });
   }
   clearHistory(): Promise<void> { return this.transport.invoke('history_clear'); }
+
+  // The updater plugin is loaded lazily so that importing this module never
+  // pulls in update machinery for a session that never asks for it, and so the
+  // browser build - which has no Tauri runtime at all - does not fail to load.
+  async checkForUpdate(): Promise<UpdateStatus> {
+    const { check } = await import('@tauri-apps/plugin-updater');
+    const { getVersion } = await import('@tauri-apps/api/app');
+    const currentVersion = await getVersion();
+    const update = await check();
+    if (!update) return { state: 'current', currentVersion };
+    pendingUpdate = update;
+    return { state: 'available', currentVersion, version: update.version, notes: update.body, date: update.date };
+  }
+
+  async installUpdate(): Promise<void> {
+    if (!pendingUpdate) throw new Error('No update has been found to install');
+    // downloadAndInstall verifies the signature against the public key in
+    // tauri.conf.json before it writes anything. An update signed by any other
+    // key is rejected here, not after installation.
+    // On Windows this hands off to the NSIS installer, which closes Intern to
+    // replace it, so there is no relaunch call here to fail after the process
+    // has already gone.
+    await pendingUpdate.downloadAndInstall();
+  }
 
   async subscribeQueue(listener: (event: QueueBridgeEvent) => void): Promise<() => void> {
     const changed = await this.transport.listen<ChangedPayload>('queue://changed', ({ payload }) => {

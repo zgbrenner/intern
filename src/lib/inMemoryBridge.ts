@@ -1,4 +1,4 @@
-import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult } from './bridge';
+import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult, UpdateStatus } from './bridge';
 import type { AppSettings, QueueItem, SetupState } from '../types';
 
 /** Exact size of the single pinned model file this build downloads. */
@@ -17,7 +17,7 @@ const seedItems: QueueItem[] = [
   { id: 'minutes', originalFilename: 'Board Meeting Minutes - May 7, 2024.docx', status: 'waiting' },
   { id: 'invoice', originalFilename: 'Invoice INV-1001.pdf', status: 'waiting' },
   { id: 'notes', originalFilename: 'Notes from Call - 2024-05-02.txt', status: 'waiting' },
-  { id: 'completed', originalFilename: 'Completed lease.pdf', status: 'completed', proposedFilename: '2024-01-22 Lease Agreement.pdf', confidence: 0.93, undoable: true },
+  { id: 'completed', originalFilename: 'Completed lease.pdf', status: 'completed', proposedFilename: '2024-01-22 Lease Agreement.pdf', confidence: 0.93, undoable: true, description: 'Residential lease agreement for a twelve-month term beginning January 22, 2024.' },
 ];
 
 export interface InMemoryBridgeOptions {
@@ -25,6 +25,7 @@ export interface InMemoryBridgeOptions {
   setup?: Partial<SetupState>;
   downloadStepBytes?: number;
   downloadIntervalMs?: number;
+  update?: UpdateStatus;
 }
 
 function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
@@ -126,6 +127,10 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
       setup = { ...setup, state: 'ready', downloadedBytes: setup.totalBytes, error: undefined };
     },
     clearHistory: async () => { items = items.filter((item) => item.status !== 'completed' && item.status !== 'failed'); },
+    // The browser build has no Tauri runtime and nothing to replace, so it says
+    // so rather than pretending to be up to date.
+    checkForUpdate: async () => options.update ?? { state: 'unsupported' },
+    installUpdate: async () => { throw new Error('Updates are only available in the desktop application'); },
   };
 }
 

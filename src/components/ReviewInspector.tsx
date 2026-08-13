@@ -1,4 +1,4 @@
-import { Ban, Ellipsis, FileCheck2, FileText, RotateCcw, Trash2, X } from 'lucide-react';
+import { Ban, ClipboardCopy, Ellipsis, FileCheck2, FileText, RotateCcw, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Icon } from './Icon';
@@ -37,6 +37,15 @@ export function ReviewInspector({ item, drawer, busy, onClose, onApprove, onKeep
     <div className="inspector-title"><h2>Review item</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Close review"><Icon icon={X} /></button></div>
     <p className="selected-file">{item.originalFilename}</p>
     {editable && <><label>Filename<input ref={filenameRef} aria-label="Filename" value={filename} onChange={(event) => setFilename(event.target.value)} aria-invalid={Boolean(error)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label></>}
+    {/*
+      A renamed file becomes `completed`, which made `editable` false and took
+      the description off screen with it. The sentence describing the document
+      is the other half of what Intern produces, and it was unreachable the
+      moment it was most useful. Read-only here because the proposal is settled,
+      with a copy action so it can go somewhere else.
+    */}
+    {!editable && item.description && <section><h3>Description</h3><p className="settled-description">{item.description}</p>
+      <button type="button" className="copy-description" onClick={() => void navigator.clipboard?.writeText(item.description ?? '')}><Icon icon={ClipboardCopy} />Copy description</button></section>}
     {hasEvidence && <section><h3>Evidence</h3><dl><dt>Date</dt><dd>{item.evidence?.date ?? '—'}</dd><dt>Type</dt><dd>{item.evidence?.type ?? '—'}</dd><dt>Parties</dt><dd>{item.evidence?.parties ?? '—'}</dd></dl></section>}
     {item.reason && <section><h3>{item.status === 'failed' ? 'Failure details' : 'Reason for review'}</h3><p>{item.reason}</p></section>}
     <div className="inspector-actions">
