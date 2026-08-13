@@ -144,11 +144,11 @@ jobs:
           # See the matching step in release.yml: this step runs no native command,
           # so $LASTEXITCODE is undefined and the old guard threw even when the
           # smoke test succeeded. The script's own `throw` fails the step.
-          # *>&1, not 2>&1: the smoke script reports success via Write-Host and
-          # Write-Warning (information and warning streams), so a merely
-          # stderr-redirected pipeline delivers nothing to Tee-Object on a
-          # passing run and the log file the evidence step requires never exists.
+          # *>&1, not 2>&1: these smoke scripts report through Write-Host, which
+          # never enters the pipeline, so Tee-Object produced no log at all
+          # while the output still showed in the step log. See release.yml.
           & ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName -EvidencePath docs\qa\installed-core-smoke.json *>&1 | Tee-Object -FilePath docs\qa\logs\installer-smoke.log
+          if (-not (Test-Path -LiteralPath 'docs\qa\logs\installer-smoke.log')) { throw "Installer smoke produced no log" }
       - name: Score the whole corpus through the shipping pipeline with real inference
         shell: pwsh
         run: |

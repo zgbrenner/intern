@@ -225,11 +225,19 @@ jobs:
           # test. The script's own `throw` is the real gate: under the pwsh shell's
           # $ErrorActionPreference = 'stop' it propagates through the pipeline and
           # fails the step.
-          # *>&1, not 2>&1: the smoke script reports success via Write-Host and
-          # Write-Warning (information and warning streams), so a merely
-          # stderr-redirected pipeline delivers nothing to Tee-Object on a
-          # passing run and the log file the evidence step requires never exists.
+          # *>&1, not 2>&1: smoke-installer.ps1 and smoke-worker.ps1 report
+          # through Write-Host, which writes to the information stream and never
+          # enters the pipeline. With 2>&1 the output still appeared in the step
+          # log - so the step looked fine - but Tee-Object received nothing and
+          # created no file at all, and the release died three steps later on
+          # "ENOENT ... release\installer-smoke.log". Verified standalone: a
+          # Write-Host-only script piped with 2>&1 produces no file, and with
+          # *>&1 produces the file with its contents.
           & ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName -EvidencePath release\installed-core-smoke.json *>&1 | Tee-Object -FilePath release\installer-smoke.log
+          # Fail here, where the cause is visible, rather than in evidence
+          # assembly where it reads as a missing artifact.
+          if (-not (Test-Path -LiteralPath 'release\installer-smoke.log')) { throw "Installer smoke produced no log at release\installer-smoke.log" }
+          if ((Get-Item -LiteralPath 'release\installer-smoke.log').Length -eq 0) { throw "Installer smoke log is empty; its output did not reach the pipeline" }
       - name: Assemble release and generate validated SPDX documents
         shell: pwsh
         run: |
@@ -258,17 +266,27 @@ jobs:
           }
           Copy-Item docs\qa\latest-implementation.png $Release
           Copy-Item docs\qa\rendered-fidelity-signoff.json $Release
-          # The update package and its detached signature, plus the manifest the
-          # installed app reads. latest.json must sit at the URL configured in
-          # tauri.conf.json; the signature is what an installed Intern checks
-          # against its compiled-in public key before replacing itself.
-          $UpdatePackage = Get-ChildItem target\release\bundle\nsis\*.nsis.zip | Select-Object -First 1
-          if (-not $UpdatePackage) { throw "Updater artifact was not produced; check createUpdaterArtifacts and the signing key" }
-          $SignatureFile = "$($UpdatePackage.FullName).sig"
-          if (-not (Test-Path -LiteralPath $SignatureFile)) { throw "Update package is unsigned: $SignatureFile is missing" }
-          Copy-Item $UpdatePackage.FullName (Join-Path $Release $UpdatePackage.Name)
+          # The manifest an installed Intern reads to find a newer version.
+          #
+          # Tauri v2 signs the NSIS installer itself and writes the detached
+          # signature beside it as <installer>.exe.sig - there is no separate
+          # .nsis.zip package. This step originally looked for one and failed
+          # with "Updater artifact was not produced" on a build that had in fact
+          # signed correctly, reporting "Finished 1 updater signature at:
+          # ...x64-setup.exe.sig". The installer already copied into release/
+          # above is therefore both the manual download and the update payload,
+          # so latest.json points at that one asset.
+          #
+          # The .sig file is not published: the updater reads the signature out
+          # of latest.json and checks it against the public key compiled into
+          # the installed build.
+          $SignatureFile = "$($Installer.FullName).sig"
+          if (-not (Test-Path -LiteralPath $SignatureFile)) {
+            throw ("Installer is unsigned for updates: $SignatureFile is missing. " +
+              "Check createUpdaterArtifacts in src-tauri/tauri.release.conf.json and TAURI_SIGNING_PRIVATE_KEY.")
+          }
           $Signature = (Get-Content -LiteralPath $SignatureFile -Raw).Trim()
-          if (-not $Signature) { throw "Update signature is empty" }
+          if (-not $Signature) { throw "Update signature file is empty: $SignatureFile" }
           [ordered]@{
             version = $env:RELEASE_TAG.TrimStart("v")
             notes = "See https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
@@ -276,7 +294,7 @@ jobs:
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{
                 signature = $Signature
-                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$($UpdatePackage.Name)"
+                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$($Installer.Name)"
               }
             }
           } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Release "latest.json") -Encoding utf8NoBOM
