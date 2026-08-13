@@ -56,6 +56,33 @@ it('gates the exact main commit before creating its annotated tag and publishing
   expect(workflow).toContain('--fidelity-signoff=release/rendered-fidelity-signoff.json');
 });
 
+// Write-Host writes to the information stream, not the pipeline, so
+// `2>&1 | Tee-Object` produced no log file at all for the smoke scripts while
+// their output still appeared in the step log - the step looked healthy and the
+// release died three steps later on a missing artifact. Any pipeline that tees a
+// script reporting via Write-Host has to redirect every stream.
+it('captures smoke output that is written to the host, not just stdout', async () => {
+  const [release, qa, installer, worker] = await Promise.all([
+    readFile('.github/workflows/release.yml', 'utf8'),
+    readFile('.github/workflows/qa.yml', 'utf8'),
+    readFile('scripts/smoke-installer.ps1', 'utf8'),
+    readFile('scripts/smoke-worker.ps1', 'utf8'),
+  ]);
+
+  // The premise: these scripts report through Write-Host. If that ever changes
+  // to Write-Output the redirect is harmless, but this test explains itself.
+  expect(installer).toContain('Write-Host');
+  expect(worker).toContain('Write-Host');
+
+  for (const [name, workflow] of [['release.yml', release], ['qa.yml', qa]] as const) {
+    const teed = workflow.split('\n').filter((line) => line.includes('Tee-Object') && line.includes('smoke-installer.ps1'));
+    expect(teed.length, `${name} should tee the installer smoke log`).toBe(1);
+    expect(teed[0], `${name} must redirect all streams, not just stderr`).toContain('*>&1');
+  }
+  // And the log must be checked where it is written, not where it is consumed.
+  expect(release).toContain('Installer smoke produced no log');
+});
+
 // Tauri v2 signs the NSIS installer itself and writes <installer>.exe.sig
 // beside it. There is no separate .nsis.zip package - looking for one failed a
 // release with "Updater artifact was not produced" on a build that had signed

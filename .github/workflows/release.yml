@@ -225,7 +225,19 @@ jobs:
           # test. The script's own `throw` is the real gate: under the pwsh shell's
           # $ErrorActionPreference = 'stop' it propagates through the pipeline and
           # fails the step.
-          & ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName -EvidencePath release\installed-core-smoke.json 2>&1 | Tee-Object -FilePath release\installer-smoke.log
+          # *>&1, not 2>&1: smoke-installer.ps1 and smoke-worker.ps1 report
+          # through Write-Host, which writes to the information stream and never
+          # enters the pipeline. With 2>&1 the output still appeared in the step
+          # log - so the step looked fine - but Tee-Object received nothing and
+          # created no file at all, and the release died three steps later on
+          # "ENOENT ... release\installer-smoke.log". Verified standalone: a
+          # Write-Host-only script piped with 2>&1 produces no file, and with
+          # *>&1 produces the file with its contents.
+          & ./scripts/smoke-installer.ps1 -InstallerPath $Installer.FullName -EvidencePath release\installed-core-smoke.json *>&1 | Tee-Object -FilePath release\installer-smoke.log
+          # Fail here, where the cause is visible, rather than in evidence
+          # assembly where it reads as a missing artifact.
+          if (-not (Test-Path -LiteralPath 'release\installer-smoke.log')) { throw "Installer smoke produced no log at release\installer-smoke.log" }
+          if ((Get-Item -LiteralPath 'release\installer-smoke.log').Length -eq 0) { throw "Installer smoke log is empty; its output did not reach the pipeline" }
       - name: Assemble release and generate validated SPDX documents
         shell: pwsh
         run: |
