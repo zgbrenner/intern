@@ -259,15 +259,27 @@ jobs:
             --log=release/cargo-test.log `
             --log=release/model-evaluation.log `
             --log=release/installer-smoke.log
+          # $PSNativeCommandUseErrorActionPreference is False by default, so a
+          # failing `node` does not throw even under $ErrorActionPreference =
+          # 'stop'. Without these guards the step ran on after a failed assembly
+          # and died at the next command with an ENOENT about the manifest,
+          # naming neither the real fault nor the file that caused it.
+          if ($LASTEXITCODE -ne 0) { throw "Could not assemble the release evidence manifest" }
           node scripts/validate-release-evidence.mjs release/release-evidence-manifest.json `
             --root=. `
             --commit=$env:GITHUB_SHA `
             --workflow="$env:GITHUB_WORKFLOW" `
             --run-id=$env:GITHUB_RUN_ID `
             --run-attempt=$env:GITHUB_RUN_ATTEMPT
-          Get-ChildItem release -File | Where-Object Name -ne "SHA256SUMS.txt" | ForEach-Object {
+          if ($LASTEXITCODE -ne 0) { throw "Release evidence was not accepted" }
+          # LF, not Set-Content -Encoding ascii: that writes CRLF on Windows, and
+          # `sha256sum -c SHA256SUMS.txt` then reports every filename as missing.
+          # The installer is Windows-only but the checksum file is for anyone
+          # verifying a download, on any machine.
+          $Sums = Get-ChildItem release -File | Where-Object Name -ne "SHA256SUMS.txt" | ForEach-Object {
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
-          } | Sort-Object | Set-Content release\SHA256SUMS.txt -Encoding ascii
+          } | Sort-Object
+          [IO.File]::WriteAllText((Join-Path (Get-Location) "release\SHA256SUMS.txt"), ($Sums -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
       # Provenance for the one file a user downloads and runs, recorded only after
       # the evidence manifest above has already been accepted, so a rejected build
       # is never attested.
