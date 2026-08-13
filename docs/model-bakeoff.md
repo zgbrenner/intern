@@ -92,10 +92,21 @@ which had never been scored at all because the machine had no Tesseract build:
 | Named a party the corpus marks as not defining | 1/18 |
 | Description specific | 18/18 |
 | Agreed with the corpus on review-or-name | 16/18 |
-| Review rate | 50% |
+| Review rate | 50% here, 55.6% on the release runner |
 | Date *role* correct | **6/13** |
 
-Two of these deserve to be read carefully rather than skimmed.
+Three of these deserve to be read carefully rather than skimmed.
+
+**The review rate is not stable across machines, and that is not a defect.**
+Scoring the same commit on the GitHub release runner sent one more document to
+review: the model described the statement of work as carrying "a total fee of
+$248,000", literal-evidence validation could not support that figure, and the
+document went to review instead of being renamed. The filename and date were
+identical and correct on both machines, and date-correct-where-named stayed at
+100%. llama.cpp is not bit-identical across machines — thread count changes the
+order of floating-point reductions, and greedy decoding does not remove that —
+so one document of drift on an 18-document corpus moves this number 5.6 points.
+The acceptance ceiling allows for it; the correctness gates do not move.
 
 **The four corpus-wide date misses are all scans, and all four are the product
 working.** On the lease, the model read `SEPTEMBER 1 24h24` and inferred September
