@@ -22,8 +22,16 @@ anything is unsupported, the document goes to review instead of being renamed.
 
 Everything happens on the machine. Document text, extracted pages, OCR output,
 and model prompts never leave it. There is no telemetry, no cloud fallback, and
-no remote processing; the only network traffic is one explicit, user-started
-download of the pinned model file — 1.19 GiB, the text model and nothing else.
+no remote processing.
+
+Intern makes exactly two network requests, both started by a person pressing a
+button, neither carrying anything about your documents:
+
+1. The one-off download of the pinned model file — 1.19 GiB, the text model and
+   nothing else.
+2. **Check for updates** in Settings, which asks GitHub for the release
+   manifest. There is no background poll and no timer. An update is installed
+   only if it is signed by this project's key; anything else is refused.
 
 Intern reads documents as text: native PDF text first, OCR when a page has none,
 and no vision model. The projector for this model is 668,227,264 bytes — 637 MiB,

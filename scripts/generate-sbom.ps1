@@ -86,8 +86,38 @@ try {
     $MainManifest = Invoke-SbomGenerate -Drop $Release -Components $RepositoryRoot -Name "Intern" -Version "0.1.0-alpha.1" -ExternalList $ExternalList
     $Main = Get-Content -LiteralPath $MainManifest -Raw | ConvertFrom-Json
     $PackageNames = @($Main.packages | ForEach-Object name)
-    foreach ($RequiredPackage in @("Intern", "intern", "intern-worker")) {
-        if ($RequiredPackage -notin $PackageNames) { throw "Application SBOM omits required app/npm/Cargo package: $RequiredPackage" }
+    # Prove each ecosystem is actually covered, using packages the SBOM tool
+    # really emits.
+    #
+    # This used to require "intern-worker", which the tool never emits and
+    # cannot: it reports dependencies, and a workspace member is a local path
+    # package it treats as part of the root rather than as a component. The
+    # check failed on a build whose SBOM was complete - 560 Rust components and
+    # 122 npm components detected - because it was asserting the absence of a
+    # design decision in someone else's tool.
+    #
+    # Direct dependencies are the honest sentinels: if the Cargo tree were
+    # missing, `tauri` would be absent; if the npm tree were missing, `react`
+    # would be. "Intern" is the root document itself.
+    # "Intern" is the root document and "intern" is the npm root; the failing
+    # build proved both are emitted, because the old check tested them first and
+    # got past them. Ecosystem coverage is asserted through package URLs rather
+    # than any particular dependency name, so this cannot break again when a
+    # single crate or npm package is added or dropped.
+    foreach ($RequiredPackage in @("Intern", "intern")) {
+        if ($RequiredPackage -notin $PackageNames) {
+            throw ("Application SBOM omits $RequiredPackage. It lists $($PackageNames.Count) packages; " +
+                "the first few are: $(($PackageNames | Select-Object -First 8) -join ', ')")
+        }
+    }
+    $Purls = @($Main.packages | ForEach-Object { $_.externalRefs } | Where-Object { $_.referenceType -eq "purl" } | ForEach-Object { [string]$_.referenceLocator })
+    foreach ($Ecosystem in @("cargo", "npm")) {
+        $Matched = @($Purls | Where-Object { $_.StartsWith("pkg:$Ecosystem/") }).Count
+        if ($Matched -eq 0) {
+            throw ("Application SBOM contains no pkg:$Ecosystem package URLs, so it does not cover that dependency tree. " +
+                "It lists $($PackageNames.Count) packages and $($Purls.Count) package URLs; a sample: $(($Purls | Select-Object -First 5) -join ', ')")
+        }
+        Write-Host "Application SBOM covers $Matched $Ecosystem packages."
     }
     if (@($Main.externalDocumentRefs).Count -ne $Packages.Count) {
         throw "Application SBOM does not reference every native runtime component SBOM"

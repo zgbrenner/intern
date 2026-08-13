@@ -7,6 +7,13 @@ pub mod commands;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // The only network call Intern makes besides the one-off model
+        // download, and it happens only when someone presses the button in
+        // Settings. There is no background poll and no timer: a document tool
+        // that reaches out on its own is a document tool you have to take on
+        // trust. Updates are verified against the public key in tauri.conf.json
+        // before anything is installed.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let state = commands::AppState::initialize(app.handle()).map_err(|error| {
                 std::io::Error::other(format!("{}: {}", error.code, error.message))

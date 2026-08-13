@@ -140,6 +140,62 @@ describe('setup and queue controls', () => {
     expect(screen.getByRole('button', { name: 'Choose existing model files' })).toBeEnabled();
   });
 
+  describe('updates', () => {
+    const openSettings = async () => {
+      const trigger = (await screen.findAllByRole('button', { name: 'Settings' }))[0];
+      fireEvent.click(trigger);
+    };
+
+    it('checks only when asked, and never on its own', async () => {
+      const checkForUpdate = vi.fn(async () => ({ state: 'current' as const, currentVersion: '0.1.0-alpha.1' }));
+      render(<App bridge={{ ...createInMemoryBridge(), checkForUpdate }} />);
+      await openSettings();
+
+      // The whole point of a button: opening Settings must not reach the network.
+      expect(checkForUpdate).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+      await waitFor(() => expect(screen.getByRole('status', { name: 'Update status' })).toHaveTextContent(/0\.1\.0-alpha\.1 is the latest release/i));
+      expect(checkForUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers to install a newer version and names both versions', async () => {
+      const bridge = createInMemoryBridge({ update: { state: 'available', currentVersion: '0.1.0-alpha.1', version: '0.2.0' } });
+      const installUpdate = vi.fn(async () => {});
+      render(<App bridge={{ ...bridge, installUpdate }} />);
+      await openSettings();
+      fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+
+      await waitFor(() => expect(screen.getByRole('status', { name: 'Update status' })).toHaveTextContent(/Version 0\.2\.0 is available\. You have 0\.1\.0-alpha\.1/i));
+      fireEvent.click(screen.getByRole('button', { name: /Install 0\.2\.0 and restart/i }));
+      await waitFor(() => expect(installUpdate).toHaveBeenCalledTimes(1));
+    });
+
+    // The reason the whole signing apparatus exists. If this message ever
+    // degrades into a generic failure, a user cannot tell "GitHub is down" from
+    // "something served me code this build refuses to trust".
+    it('says plainly when an update fails its signature check', async () => {
+      const checkForUpdate = vi.fn(async () => { throw new Error('signature verification failed'); });
+      render(<App bridge={{ ...createInMemoryBridge(), checkForUpdate }} />);
+      await openSettings();
+      fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(/was not signed by this project's key, so Intern refused it/i);
+    });
+
+    it('reports an unreachable endpoint as a network problem, not a rejection', async () => {
+      const checkForUpdate = vi.fn(async () => { throw new Error(''); });
+      render(<App bridge={{ ...createInMemoryBridge(), checkForUpdate }} />);
+      await openSettings();
+      fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(/Could not reach GitHub/i);
+      expect(alert).not.toHaveTextContent(/signed/i);
+    });
+  });
+
   it.each([
     ['MODEL_FILE_INVALID', /did not match the model Intern pins/i],
     ['MODEL_SELF_TEST_FAILED', /local self-test failed/i],

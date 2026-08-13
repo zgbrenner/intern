@@ -49,4 +49,21 @@ export interface DesktopBridge {
   setupCancel(): Promise<void>;
   setupChooseExisting(files: ExistingModelFiles): Promise<void>;
   clearHistory(): Promise<void>;
+  /**
+   * Ask GitHub whether a newer signed release exists.
+   *
+   * This is the only network request Intern makes apart from the one-off model
+   * download, it happens only when someone presses the button in Settings, and
+   * it sends nothing but a request for the release manifest. No filenames, no
+   * document contents, no identifier of any kind.
+   */
+  checkForUpdate(): Promise<UpdateStatus>;
+  /** Download and install the update found by the last check. */
+  installUpdate(): Promise<void>;
 }
+
+export type UpdateStatus =
+  | { state: 'current'; currentVersion: string }
+  | { state: 'available'; currentVersion: string; version: string; notes?: string; date?: string }
+  /** Running outside the desktop shell, where there is nothing to update. */
+  | { state: 'unsupported' };

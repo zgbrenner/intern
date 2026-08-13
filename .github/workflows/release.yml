@@ -187,7 +187,27 @@ jobs:
       - name: Stage the pinned NSIS toolset
         shell: pwsh
         run: ./scripts/prefetch-nsis.ps1 -CacheDirectory "${{ runner.temp }}\intern-nsis-cache"
-      - run: npm run tauri build -- --bundles nsis -- --locked
+      - name: Build the installer and sign the update artifact
+        shell: pwsh
+        env:
+          # Signs the .nsis.zip update package. The matching public key is
+          # committed in tauri.conf.json, and an installed Intern refuses any
+          # update that does not verify against it. Without this secret the
+          # build still produces an installer, so the guard below fails the
+          # release rather than shipping updates nobody can install.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw "TAURI_SIGNING_PRIVATE_KEY is not set; the in-app updater would ship an update no installed Intern can verify"
+          }
+          # createUpdaterArtifacts lives in a release-only config rather than
+          # tauri.conf.json, because turning it on makes the bundler demand a
+          # signing key from every build - which would break CI and the QA
+          # workflow, neither of which should need release secrets, and would
+          # break pull requests from forks outright.
+          npm run tauri build -- --bundles nsis --config tauri.release.conf.json -- --locked
+          if ($LASTEXITCODE -ne 0) { throw "Tauri build failed" }
       - name: Smoke test installer and installed worker
         shell: pwsh
         run: |
@@ -234,6 +254,28 @@ jobs:
           }
           Copy-Item docs\qa\latest-implementation.png $Release
           Copy-Item docs\qa\rendered-fidelity-signoff.json $Release
+          # The update package and its detached signature, plus the manifest the
+          # installed app reads. latest.json must sit at the URL configured in
+          # tauri.conf.json; the signature is what an installed Intern checks
+          # against its compiled-in public key before replacing itself.
+          $UpdatePackage = Get-ChildItem target\release\bundle\nsis\*.nsis.zip | Select-Object -First 1
+          if (-not $UpdatePackage) { throw "Updater artifact was not produced; check createUpdaterArtifacts and the signing key" }
+          $SignatureFile = "$($UpdatePackage.FullName).sig"
+          if (-not (Test-Path -LiteralPath $SignatureFile)) { throw "Update package is unsigned: $SignatureFile is missing" }
+          Copy-Item $UpdatePackage.FullName (Join-Path $Release $UpdatePackage.Name)
+          $Signature = (Get-Content -LiteralPath $SignatureFile -Raw).Trim()
+          if (-not $Signature) { throw "Update signature is empty" }
+          [ordered]@{
+            version = $env:RELEASE_TAG.TrimStart("v")
+            notes = "See https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $Signature
+                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$($UpdatePackage.Name)"
+              }
+            }
+          } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Release "latest.json") -Encoding utf8NoBOM
           ./scripts/generate-sbom.ps1 -ReleaseDirectory $Release.FullName -RuntimeStage $env:INTERN_RUNTIME_STAGE
           if (Get-ChildItem release -Recurse -File -Filter "*.gguf") { throw "Model files must not be release assets" }
           @"
