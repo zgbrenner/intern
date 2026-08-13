@@ -35,7 +35,15 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1',
     url: 'http://127.0.0.1:1420',
-    reuseExistingServer: !process.env.CI,
+    // Always start a dedicated server, the way CI does. Reusing one locally
+    // meant a run could attach to a previous suite's server while it was still
+    // shutting down: Playwright's readiness probe saw the port answer, then the
+    // first `page.goto` hung until the navigation timeout. It failed five times
+    // that way, always on the first test, always passing on retry, and raising
+    // the timeout from 60s to 120s did not help - because the server was not
+    // slow, it was going away. If the port is genuinely occupied this now fails
+    // immediately and says so, instead of hanging for two minutes.
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });
