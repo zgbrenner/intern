@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "accepted",
-  "release_inputs_sha256": "e7e42b534c14c4cf4a20bcfc7a329e3caa1b5ca5a4f92c4344622ffa49a33ab8",
+  "release_inputs_sha256": "3e0f70d2724e8fa660116776732a28b6b1eb3b0febb437b8a447866e6e09eab1",
   "screenshot_path": "docs/qa/latest-implementation.png",
   "screenshot_sha256": "1eafb45aa782a47db9eeed58cf856a0760f6bc6648f50925588b92afc8bf400a",
   "reviewer": "zach.brenner@vistage.com",
