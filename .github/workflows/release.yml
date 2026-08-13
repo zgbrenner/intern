@@ -151,13 +151,32 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
+          # No $LASTEXITCODE guard: the script is PowerShell, so that variable
+          # holds whatever its last *native* command left behind rather than the
+          # script's own verdict. It happened to be the acceptance validator, so
+          # the guard fired correctly once and reported "Corpus evaluation
+          # failed" for a run whose evaluation had in fact completed and whose
+          # model acceptance was blocked - the right outcome with the wrong
+          # reason, and none of the gate's own explanation. The script now
+          # prints the failures and throws deliberately.
           & ./scripts/run-model-evaluation.ps1 `
             -RuntimeDirectory $env:INTERN_RUNTIME_STAGE `
             -WorkerPath (Join-Path $env:INTERN_RUNTIME_STAGE "intern-worker.exe") `
             -EvaluatePath target\release\intern-evaluate.exe `
             -OutputPath release\model-evaluation.json 2>&1 | Tee-Object -FilePath release\model-evaluation.log
-          if ($LASTEXITCODE -ne 0) { throw "Corpus evaluation failed" }
           node scripts/validate-model-evaluation.mjs release\model-evaluation.json
+      # A refused release is the case where evidence matters most. Without this
+      # the scored report died on the runner and the only surviving explanation
+      # was a one-line exception.
+      - name: Preserve the corpus evaluation even when it blocks the release
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-evaluation-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            release/model-evaluation.json
+            release/model-evaluation.log
       # Pin the bundler's own toolset rather than letting it fetch one mid-build.
       # See scripts/prefetch-nsis.ps1: an unpinned GitHub download here failed two
       # consecutive CI runs, and a release must not depend on it.

@@ -147,7 +147,13 @@ $Report | Add-Member -NotePropertyName "runner" -NotePropertyValue ([ordered]@{
     }) -Force
 $RawPath = Join-Path $ModelDirectory "raw-report.json"
 Set-Content -LiteralPath $RawPath -Value $Raw -Encoding utf8NoBOM
-$Acceptance = & node (Join-Path $Repository "scripts/validate-model-evaluation.mjs") $RawPath | ConvertFrom-Json
+# Keep the validator's exit code and its reasons separately. Piping straight
+# into ConvertFrom-Json captured the reasons into a variable and printed
+# nothing, so a release that refused to publish said only "Corpus evaluation
+# failed" - the gate named which floor it missed and the log threw that away.
+$AcceptanceJson = & node (Join-Path $Repository "scripts/validate-model-evaluation.mjs") $RawPath
+$AcceptanceExit = $LASTEXITCODE
+$Acceptance = $AcceptanceJson | ConvertFrom-Json
 $Report | Add-Member -NotePropertyName "acceptance" -NotePropertyValue $Acceptance -Force
 $Report | Add-Member -NotePropertyName "model_file" -NotePropertyValue ([string]$ModelSpec.name) -Force
 $Report | Add-Member -NotePropertyName "model_sha256" -NotePropertyValue ([string]$ModelSpec.sha256) -Force
@@ -159,3 +165,13 @@ $Report | Add-Member -NotePropertyName "wall_clock_seconds" -NotePropertyValue (
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputPath) | Out-Null
 $Report | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $OutputPath -Encoding utf8NoBOM
 Write-Output "Wrote ${OutputPath}: $($Report.summary.evaluated) documents, peak model RSS $([math]::Round($Peak / 1MB)) MB, $([math]::Round($Elapsed, 1)) s"
+
+# The report is written before this point on purpose: a blocked run is evidence
+# worth keeping and uploading, not something to discard. Report the verdict
+# loudly, then fail deliberately rather than leaving the caller to infer it from
+# whatever $LASTEXITCODE the last native command happened to leave behind.
+Write-Output "Model acceptance: $($Acceptance.status) - $($Acceptance.evaluated) documents evaluated, $($Acceptance.named) named, date correct when named $([math]::Round([double]$Acceptance.date_correct_when_named * 100, 1))%"
+if ($AcceptanceExit -ne 0) {
+    foreach ($Failure in @($Acceptance.failures)) { Write-Output "  BLOCKED: $Failure" }
+    throw "Model acceptance blocked this release; see the failures above and release/model-evaluation.json"
+}
