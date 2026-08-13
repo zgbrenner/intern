@@ -26,9 +26,9 @@ no remote processing; the only network traffic is one explicit, user-started
 download of the pinned model file — 1.19 GiB, the text model and nothing else.
 
 Intern reads documents as text: native PDF text first, OCR when a page has none,
-and no vision model. A projector for this model would be a second large download
-before anyone names a single document and, at 668 MB resident, more memory than
-the model itself — for a path almost nothing takes. A page that neither text
+and no vision model. The projector for this model is 668,227,264 bytes — 637 MiB,
+a second download larger than half the model itself, before anyone names a
+single document, for a path almost nothing takes. A page that neither text
 extraction nor OCR can read goes to review rather than being guessed at.
 
 ## Install and first run

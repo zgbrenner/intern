@@ -197,7 +197,8 @@ near the budget.
 * **Q5_K_M and Q8.** Half the prefill speed for no measured accuracy gain here.
 * **Qwen3.5-4B.** Three times slower on prefill; a 29,000-character contract
   would take minutes.
-* **A vision projector.** 668 MB resident for a path that a text-bearing corpus
+* **A vision projector.** `mmproj-Qwen3.5-2B-F16.gguf` is 668,227,264 bytes —
+  637 MiB — downloaded and held resident for a path that a text-bearing corpus
   never takes. Rejected outright: none is pinned, downloaded, or loaded, and the
   request type has no field for an image. An earlier revision of this line said
   it was "installed and loaded on demand instead", which described a capability

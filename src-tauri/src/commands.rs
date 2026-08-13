@@ -168,11 +168,8 @@ impl RuntimeModel {
     ///
     /// Text only, and not as a mode: no vision projector is pinned, downloaded,
     /// or loaded. Essentially every business document carries usable text, and a
-    /// projector would have cost every user a second large download and, at 668
-    /// MB resident, more memory than the model itself, for a path almost nothing
-    /// takes. The 668 MB is the measured figure in `docs/model-bakeoff.md`; an
-    /// earlier revision of this comment quoted a 637 MB download size that no
-    /// measurement in this repository supports.
+    /// projector for this model is 668,227,264 bytes - 637 MiB - which every
+    /// user would download and hold resident for a path almost nothing takes.
     fn start(&self, manifest: &ModelManifest) -> Result<(), CommandError> {
         if !self.installed(manifest) {
             return Err(CommandError {
