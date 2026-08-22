@@ -29,8 +29,14 @@ describe('TauriBridge', () => {
   it('maps the exact narrow command names and JSON-safe payloads', async () => {
     const fake = fakeTransport({
       queue_list: [],
-      settings_get: { destination: '', startMinimized: false, automaticRename: false },
+      settings_get: { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '' },
       setup_get: { state: 'required', downloadedBytes: 0, totalBytes: 3278329184 },
+      intake_status: {
+        enabled: false, watching: false, folder: '', machineId: 'm-1', machineName: 'Reception',
+        cloud: null, machines: [], heldForOthers: 0, claimedByOthers: 0, processedHere: 0,
+        lastScanAt: null, error: null,
+      },
+      folder_classify: { provider: 'onedrive_business', displayName: 'OneDrive – Contoso' },
     });
     const bridge = new TauriBridge(fake.transport);
 
@@ -46,12 +52,15 @@ describe('TauriBridge', () => {
     await bridge.keepOriginal('7');
     await bridge.undo('7');
     await bridge.getSettings();
-    await bridge.saveSettings({ destination: 'C:\\Output', startMinimized: false, automaticRename: true });
+    await bridge.saveSettings({ destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception' });
     await bridge.getSetup();
     await bridge.startModelDownload();
     await bridge.setupCancel();
     await bridge.setupChooseExisting({ modelPath: 'C:\\Models\\intern-q4.gguf' });
     await bridge.clearHistory();
+    await bridge.intakeStatus();
+    await bridge.scanIntakeNow();
+    await bridge.classifyFolder('C:\\OneDrive\\Scans');
 
     expect(fake.calls).toEqual([
       { command: 'queue_list', args: undefined },
@@ -66,12 +75,15 @@ describe('TauriBridge', () => {
       { command: 'proposal_keep_original', args: { id: '7' } },
       { command: 'operation_undo', args: { id: '7' } },
       { command: 'settings_get', args: undefined },
-      { command: 'settings_save', args: { settings: { destination: 'C:\\Output', startMinimized: false, automaticRename: true } } },
+      { command: 'settings_save', args: { settings: { destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception' } } },
       { command: 'setup_get', args: undefined },
       { command: 'setup_start', args: undefined },
       { command: 'setup_cancel', args: undefined },
       { command: 'setup_choose_existing', args: { files: { modelPath: 'C:\\Models\\intern-q4.gguf' } } },
       { command: 'history_clear', args: undefined },
+      { command: 'intake_status', args: undefined },
+      { command: 'intake_scan_now', args: undefined },
+      { command: 'folder_classify', args: { path: 'C:\\OneDrive\\Scans' } },
     ]);
   });
 
@@ -141,6 +153,36 @@ describe('TauriBridge', () => {
     unsubscribe();
     unsubscribe();
     expect(fake.unlisten.get('setup://progress')).toHaveBeenCalledTimes(1);
+  });
+
+  it('delivers intake status changes from intake://changed and releases its listener', async () => {
+    const fake = fakeTransport();
+    const bridge = new TauriBridge(fake.transport);
+    const seen = vi.fn();
+    const unsubscribe = bridge.subscribeIntake(seen);
+    await vi.waitFor(() => expect(fake.listeners.has('intake://changed')).toBe(true));
+    const status = {
+      enabled: true, watching: true, folder: 'C:\\OneDrive\\Scans', machineId: 'm-1', machineName: 'Reception',
+      cloud: { provider: 'onedrive_business' as const, displayName: 'OneDrive – Contoso' },
+      machines: [{ machineId: 'm-1', machineName: 'Reception', userName: 'pat', lastSeenAt: 1755850000, active: true }],
+      heldForOthers: 3, claimedByOthers: 1, processedHere: 7, lastScanAt: 1755850000, error: null,
+    };
+
+    fake.listeners.get('intake://changed')?.({ event: 'intake://changed', id: 5, payload: status });
+
+    expect(seen).toHaveBeenCalledWith(status);
+    unsubscribe();
+    unsubscribe();
+    expect(fake.unlisten.get('intake://changed')).toHaveBeenCalledTimes(1);
+    fake.listeners.get('intake://changed')?.({ event: 'intake://changed', id: 6, payload: status });
+    expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an absent cloud classification as null, never undefined', async () => {
+    const fake = fakeTransport({ folder_classify: undefined });
+
+    await expect(new TauriBridge(fake.transport).classifyFolder('C:\\Local\\Scans')).resolves.toBeNull();
+    expect(fake.calls).toEqual([{ command: 'folder_classify', args: { path: 'C:\\Local\\Scans' } }]);
   });
 
   it('keeps native path selection at the injected boundary', async () => {

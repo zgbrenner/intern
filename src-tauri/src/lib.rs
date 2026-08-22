@@ -3,6 +3,7 @@
 use tauri::Manager;
 
 pub mod commands;
+pub mod intake;
 
 pub fn run() {
     tauri::Builder::default()
@@ -41,6 +42,9 @@ pub fn run() {
             commands::setup_choose_existing,
             commands::history_clear,
             commands::queue_discard_waiting,
+            commands::intake_status,
+            commands::intake_scan_now,
+            commands::folder_classify,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Intern");

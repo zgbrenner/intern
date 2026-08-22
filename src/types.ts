@@ -20,6 +20,42 @@ export interface AppSettings {
   destination: string;
   startMinimized: boolean;
   automaticRename: boolean;
+  /** Watched intake folder path; "" = none configured. */
+  intakeFolder: string;
+  intakeEnabled: boolean;
+  /** false = only process documents uploaded from this machine ("mine" scope). */
+  processOthersUploads: boolean;
+  /** Overrides the hostname shown to other machines; "" = use hostname. */
+  machineLabel: string;
+}
+
+/** A folder recognised as living inside a OneDrive/SharePoint sync root. */
+export interface CloudLocation {
+  provider: 'onedrive_personal' | 'onedrive_business' | 'sharepoint';
+  displayName: string;
+}
+
+export interface IntakeMachine {
+  machineId: string;
+  machineName: string;
+  userName: string;
+  lastSeenAt: number;
+  active: boolean;
+}
+
+export interface IntakeStatus {
+  enabled: boolean;
+  watching: boolean;
+  folder: string;
+  machineId: string;
+  machineName: string;
+  cloud: CloudLocation | null;
+  machines: IntakeMachine[];
+  heldForOthers: number;
+  claimedByOthers: number;
+  processedHere: number;
+  lastScanAt: number | null;
+  error: string | null;
 }
 
 export interface SetupState {
