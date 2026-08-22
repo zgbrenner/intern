@@ -1013,7 +1013,7 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
         settings,
     )
     .unwrap();
-    pipeline.enqueue_files(&[path.clone()]).unwrap();
+    pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
 
     pipeline.run_until_idle().unwrap();
 

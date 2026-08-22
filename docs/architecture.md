@@ -293,6 +293,13 @@ review reasons, validated facts with evidence, and local timings.
 `ENGINE_CONTRACT_VERSION` versions that shape.
 
 `intern-analyze` is that call as a command-line program. The desktop app, the
-CLI, and any future watched folder or connector are all callers of the same
-function; none of them can change how documents are understood. Adding a new
-host means adding a caller, not touching the engine.
+CLI, and the watched intake folder are all callers of the same function; none
+of them can change how documents are understood. Adding a new host means
+adding a caller, not touching the engine.
+
+The watched intake folder — including shared OneDrive/SharePoint intake
+folders and the multi-machine claim protocol behind them — lives in
+`intern-intake` and is documented in [`shared-intake.md`](shared-intake.md).
+It sits entirely on the queue side of this boundary: it decides *which*
+documents enter the local queue and records what happened to them, and knows
+nothing about models.

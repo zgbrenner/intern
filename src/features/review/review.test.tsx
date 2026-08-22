@@ -137,6 +137,75 @@ describe('review actions', () => {
     await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ automaticRename: true })));
   });
 
+  it('saves the shared intake configuration', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(base.saveSettings);
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    fireEvent.click(await screen.findByLabelText('Watch a folder for new documents'));
+    fireEvent.change(screen.getByLabelText('Intake folder'), { target: { value: 'C:\\Scans' } });
+    fireEvent.click(screen.getByLabelText('Also process documents uploaded by others'));
+    fireEvent.change(screen.getByLabelText("This machine's name"), { target: { value: 'Front desk' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      intakeEnabled: true,
+      intakeFolder: 'C:\\Scans',
+      processOthersUploads: true,
+      machineLabel: 'Front desk',
+    })));
+  });
+
+  it('browses for the destination and intake folders at the selection boundary', async () => {
+    const pickFolder = vi.fn()
+      .mockResolvedValueOnce({ path: 'C:\\Filed', displayName: 'Filed' })
+      .mockResolvedValueOnce({ path: 'C:\\Scans', displayName: 'Scans' });
+    render(<App bridge={createInMemoryBridge()} selection={{ pickFiles: async () => [], pickFolder, pickExistingModelFiles: async () => undefined, resolveDrop: async () => ({}) }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Browse for destination folder' }));
+    await waitFor(() => expect(screen.getByLabelText('Destination folder')).toHaveValue('C:\\Filed'));
+    fireEvent.click(screen.getByRole('button', { name: 'Browse for intake folder' }));
+    await waitFor(() => expect(screen.getByLabelText('Intake folder')).toHaveValue('C:\\Scans'));
+
+    expect(pickFolder).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a cloud badge for a OneDrive intake folder', async () => {
+    render(<App bridge={createInMemoryBridge()} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    fireEvent.change(await screen.findByLabelText('Intake folder'), { target: { value: 'C:\\Users\\pat\\OneDrive\\Scans' } });
+
+    expect(await screen.findByText('Synced with OneDrive – Contoso')).toBeVisible();
+  });
+
+  it('renders the live intake status with the held-for-others count', async () => {
+    const bridge = createInMemoryBridge();
+    await bridge.saveSettings({ destination: 'C:\\Filed', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '' });
+    render(<App bridge={bridge} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    const status = await screen.findByRole('status', { name: 'Intake status' });
+    await waitFor(() => expect(status).toHaveTextContent('Watching'));
+    expect(status).toHaveTextContent('2 machines active');
+    expect(status).toHaveTextContent('2 held for others');
+    expect(screen.getByRole('button', { name: 'Scan now' })).toBeEnabled();
+  });
+
+  it('surfaces intake validation codes from save as plain sentences', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(async () => { throw { code: 'DESTINATION_INSIDE_INTAKE', message: 'destination is inside the intake folder' }; });
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/destination folder is inside the intake folder.*\(DESTINATION_INSIDE_INTAKE\)/i);
+    // The dialog stays open so the folders can be corrected.
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+  });
+
   it('moves Keep original to Completed and lets the user undo it', async () => {
     const bridge = createInMemoryBridge();
     render(<App bridge={bridge} />);

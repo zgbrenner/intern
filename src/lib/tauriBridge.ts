@@ -1,11 +1,12 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import type { AppSettings, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
 import type {
   DesktopBridge,
   ExistingModelFiles,
   FileSelection,
   FolderSelection,
+  IntakeEventSource,
   SelectionBoundary,
   SelectionResult,
   UpdateStatus,
@@ -78,7 +79,7 @@ export interface TauriSelectionBoundary extends SelectionBoundary {
   subscribeDrops(listener: (selection: SelectionResult) => void): Promise<() => void>;
 }
 
-export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventSource {
+export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventSource, IntakeEventSource {
   constructor(private readonly transport: TauriTransport = defaultTransport) {}
 
   async listItems(): Promise<QueueItem[]> {
@@ -124,6 +125,15 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
   clearHistory(): Promise<void> { return this.transport.invoke('history_clear'); }
 
   discardWaiting(): Promise<number> { return this.transport.invoke('queue_discard_waiting'); }
+
+  intakeStatus(): Promise<IntakeStatus> { return this.transport.invoke('intake_status'); }
+  scanIntakeNow(): Promise<void> { return this.transport.invoke('intake_scan_now'); }
+
+  async classifyFolder(path: string): Promise<CloudLocation | null> {
+    // The DTO is camelCase end to end; only guard against an absent value so
+    // callers can rely on `null` rather than `undefined`.
+    return await this.transport.invoke<CloudLocation | null | undefined>('folder_classify', { path }) ?? null;
+  }
 
   // The updater plugin is loaded lazily so that importing this module never
   // pulls in update machinery for a session that never asks for it, and so the
@@ -176,6 +186,26 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
       if (!active) return;
       active = false;
       stops.forEach((stop) => stop());
+    };
+  }
+
+  // Synchronous unsubscribe per the IntakeEventSource contract: the Tauri
+  // listen call is still async underneath, so events are dropped until it
+  // resolves and the returned stop function tears down whichever state exists
+  // when it is called - before or after the listener registered.
+  subscribeIntake(handler: (status: IntakeStatus) => void): () => void {
+    let active = true;
+    let stop: (() => void) | undefined;
+    void this.transport.listen<IntakeStatus>('intake://changed', ({ payload }) => {
+      if (active) handler(payload);
+    }).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    }).catch(() => { /* No event stream in this runtime; callers fall back to polling intakeStatus. */ });
+    return () => {
+      if (!active) return;
+      active = false;
+      stop?.();
     };
   }
 

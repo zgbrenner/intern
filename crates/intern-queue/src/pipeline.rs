@@ -582,13 +582,12 @@ impl Pipeline {
                         && self.worker.restart().is_err();
                     self.store
                         .record_processing_failure(item.id, ErrorCode::IoError)?;
-                    if restart_failed {
-                        if let Some(reclaimed) = self.store.claim_next()? {
-                            if reclaimed.id == item.id {
-                                self.store
-                                    .record_processing_failure(item.id, ErrorCode::IoError)?;
-                            }
-                        }
+                    if restart_failed
+                        && let Some(reclaimed) = self.store.claim_next()?
+                        && reclaimed.id == item.id
+                    {
+                        self.store
+                            .record_processing_failure(item.id, ErrorCode::IoError)?;
                     }
                     self.events.queue_changed();
                     return Ok(true);
@@ -1129,10 +1128,10 @@ impl Pipeline {
         {
             // A still-running app may own the ambiguous operation. Its file boundary can
             // reconcile under that lease without waiting for its own session to go stale.
-            if self.files.reconcile(&item).is_err() {
-                if let Ok(claimed) = self.store.claim_applying_reconciliation(item.id) {
-                    let _ = self.files.reconcile(&claimed);
-                }
+            if self.files.reconcile(&item).is_err()
+                && let Ok(claimed) = self.store.claim_applying_reconciliation(item.id)
+            {
+                let _ = self.files.reconcile(&claimed);
             }
         }
         self.events.queue_changed();

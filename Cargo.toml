@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/intern-core",
     "crates/intern-engine",
+    "crates/intern-intake",
     "crates/intern-queue",
     "crates/intern-worker",
     "src-tauri",

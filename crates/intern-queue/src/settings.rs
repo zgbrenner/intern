@@ -14,6 +14,14 @@ pub struct AppSettings {
     pub start_minimized: bool,
     #[serde(default)]
     pub automatic_rename: bool,
+    #[serde(default)]
+    pub intake_folder: String,
+    #[serde(default)]
+    pub intake_enabled: bool,
+    #[serde(default)]
+    pub process_others_uploads: bool,
+    #[serde(default)]
+    pub machine_label: String,
 }
 
 #[derive(Clone, Debug)]
@@ -43,7 +51,13 @@ impl SettingsStore {
         }
         let bytes = serde_json::to_vec_pretty(settings)
             .map_err(|_| PipelineError::new("SETTINGS_INVALID", "settings could not be encoded"))?;
-        fs::write(&self.path, bytes).map_err(io_error)
+        // Written beside the target and renamed into place so a crash mid-write
+        // leaves the previous settings intact instead of a truncated file.
+        let mut temp = self.path.as_os_str().to_owned();
+        temp.push(".tmp");
+        let temp = PathBuf::from(temp);
+        fs::write(&temp, bytes).map_err(io_error)?;
+        fs::rename(&temp, &self.path).map_err(io_error)
     }
 
     pub fn path(&self) -> &Path {

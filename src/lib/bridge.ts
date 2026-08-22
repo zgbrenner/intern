@@ -1,4 +1,4 @@
-import type { AppSettings, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
 
 /** A JSON-safe local document reference that Task 6 can pass to Tauri. */
 export interface FileSelection {
@@ -67,6 +67,25 @@ export interface DesktopBridge {
   checkForUpdate(): Promise<UpdateStatus>;
   /** Download and install the update found by the last check. */
   installUpdate(): Promise<void>;
+  /** Current shared-intake watcher status. Resolves with zeros when intake is disabled. */
+  intakeStatus(): Promise<IntakeStatus>;
+  /** Wake the intake watcher for an immediate scan. No-op when intake is disabled. */
+  scanIntakeNow(): Promise<void>;
+  /**
+   * Say whether a folder lives inside a OneDrive/SharePoint sync root.
+   *
+   * Purely a local path lookup against the sync client's configuration - no
+   * network request is made and nothing about the folder leaves the machine.
+   */
+  classifyFolder(path: string): Promise<CloudLocation | null>;
+}
+
+/**
+ * Optional capability, duck-typed like QueueEventSource: bridges that can push
+ * intake status changes expose it; callers feature-detect `subscribeIntake`.
+ */
+export interface IntakeEventSource {
+  subscribeIntake(handler: (status: IntakeStatus) => void): () => void;
 }
 
 export type UpdateStatus =

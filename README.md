@@ -77,6 +77,34 @@ review with the reason shown. Nothing on disk is renamed until you approve it,
 either one item at a time or with **Apply all ready**, and a rename can be
 undone.
 
+## Watched intake folders, OneDrive, and SharePoint
+
+Instead of dragging documents in, Settings can point Intern at an **intake
+folder** to watch: documents that appear in it are analyzed and, once approved
+(or automatically, if you enable high-confidence renames), moved to the
+destination folder under their new name.
+
+Both folders can live inside OneDrive or a SharePoint document library. The
+integration is deliberately the **Microsoft sync client**, not a cloud API:
+point Intern at any folder the OneDrive engine keeps on disk — your personal
+OneDrive, OneDrive for Business, or a SharePoint library synced with **Sync**
+or **Add shortcut to OneDrive** — and Intern detects the sync root and labels
+the folder in Settings. Files On-Demand placeholders are handled; the sync
+client downloads content when Intern reads it. No document text, no OCR
+output, and no model prompt goes anywhere new: the two network requests listed
+above are still the only ones Intern makes, and the only thing moving files to
+the cloud is the sync client you already run.
+
+Several machines can watch the **same** shared intake folder. They coordinate
+through small claim files in a `.intern/` directory inside it — leases with
+heartbeats, so a document is processed exactly once, a crashed machine's work
+is taken over after its lease lapses, and nothing needs a server. By default
+each machine only processes documents uploaded from that machine; enabling
+**"Also process documents uploaded by others"** turns the folder into a shared
+work queue, with a courtesy delay so the uploader's own machine gets first
+claim. The design, its guarantees, and its failure behavior are documented in
+[`docs/shared-intake.md`](docs/shared-intake.md).
+
 ## How a document becomes a filename
 
 ```text
@@ -154,6 +182,7 @@ cargo test --locked --workspace --all-targets
 | Crate | What it owns |
 | --- | --- |
 | `intern-engine` | Document understanding: distillation, prompt, local model client and server, evidence validation, filename composition, and model installation. |
+| `intern-intake` | Shared intake folders: the multi-machine claim protocol, cloud sync-root detection, and the polling watcher. |
 | `intern-queue` | The durable queue: ordering, leases, retries, and the review/apply workflow. |
 | `intern-core` | Crash-safe queue storage and journalled file operations. |
 | `intern-worker` | The out-of-process parser: PDFium, OCR, and Office extraction. |
