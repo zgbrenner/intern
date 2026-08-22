@@ -353,13 +353,12 @@ impl SupervisedWorker {
     }
 
     fn clear_running(&self, expected: &Arc<WorkerProcess>) {
-        if let Ok(mut running) = self.running.lock() {
-            if running
+        if let Ok(mut running) = self.running.lock()
+            && running
                 .as_ref()
                 .is_some_and(|current| Arc::ptr_eq(current, expected))
-            {
-                *running = None;
-            }
+        {
+            *running = None;
         }
     }
 

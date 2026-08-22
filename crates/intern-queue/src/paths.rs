@@ -5,7 +5,7 @@ use std::{
 
 use crate::pipeline::{PipelineError, PipelineResult};
 
-const SUPPORTED_EXTENSIONS: &[&str] = &[
+pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     "pdf", "docx", "txt", "md", "markdown", "png", "jpg", "jpeg", "tif", "tiff",
 ];
 
@@ -141,10 +141,21 @@ fn skipped_name(path: &Path) -> bool {
         .is_none_or(|name| name.starts_with('.') || name.starts_with("~$"))
 }
 
+/// Whether a Windows reparse tag belongs to the cloud files family
+/// (IO_REPARSE_TAG_CLOUD through IO_REPARSE_TAG_CLOUD_F).
+///
+/// OneDrive and SharePoint Files On-Demand mark online-only files as reparse
+/// points with one of these tags; reading such a file hydrates it through the
+/// sync client. Rejecting them like other reparse points would exclude every
+/// synced-but-not-downloaded document, so they are the one exempt family.
+pub fn is_cloud_reparse_tag(tag: u32) -> bool {
+    (tag & 0xFFFF_0FFF) == 0x9000_001A
+}
+
 fn reject_reparse_point(path: &Path) -> PipelineResult<()> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|_| PipelineError::new("FILE_MISSING", "selected path does not exist"))?;
-    if metadata.file_type().is_symlink() || windows_reparse_point(&metadata) {
+    if metadata.file_type().is_symlink() || rejected_windows_reparse_point(path, &metadata) {
         return Err(PipelineError::new(
             "PATH_UNTRUSTED",
             "symbolic links and junctions are not followed",
@@ -154,12 +165,57 @@ fn reject_reparse_point(path: &Path) -> PipelineResult<()> {
 }
 
 #[cfg(windows)]
-fn windows_reparse_point(metadata: &fs::Metadata) -> bool {
+fn rejected_windows_reparse_point(path: &Path, metadata: &fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
-    metadata.file_attributes() & 0x400 != 0
+    if metadata.file_attributes() & 0x400 == 0 {
+        return false;
+    }
+    match windows_reparse::reparse_tag(path) {
+        Some(tag) => !is_cloud_reparse_tag(tag),
+        None => true,
+    }
 }
 
 #[cfg(not(windows))]
-fn windows_reparse_point(_: &fs::Metadata) -> bool {
+fn rejected_windows_reparse_point(_: &Path, _: &fs::Metadata) -> bool {
     false
+}
+
+#[cfg(windows)]
+mod windows_reparse {
+    #![allow(unsafe_code)]
+
+    use std::{mem::MaybeUninit, os::windows::ffi::OsStrExt, path::Path};
+
+    use windows_sys::Win32::{
+        Foundation::INVALID_HANDLE_VALUE,
+        Storage::FileSystem::{
+            FILE_ATTRIBUTE_REPARSE_POINT, FindClose, FindFirstFileW, WIN32_FIND_DATAW,
+        },
+    };
+
+    /// Reads the reparse tag of `path`, or `None` when the path carries no
+    /// reparse point or cannot be inspected. `dwReserved0` holds the tag only
+    /// while `FILE_ATTRIBUTE_REPARSE_POINT` is set in `dwFileAttributes`.
+    pub(super) fn reparse_tag(path: &Path) -> Option<u32> {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut data = MaybeUninit::<WIN32_FIND_DATAW>::uninit();
+        // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the
+        // call, and `data` points to writable storage of the exact structure
+        // FindFirstFileW fills.
+        let handle = unsafe { FindFirstFileW(wide.as_ptr(), data.as_mut_ptr()) };
+        if handle == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        // SAFETY: a valid handle guarantees the API initialized the structure.
+        let data = unsafe { data.assume_init() };
+        // SAFETY: the handle came from a successful FindFirstFileW call and is
+        // closed exactly once.
+        unsafe { FindClose(handle) };
+        if data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+            None
+        } else {
+            Some(data.dwReserved0)
+        }
+    }
 }

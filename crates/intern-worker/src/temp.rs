@@ -193,14 +193,14 @@ fn safe_relative_path(path: &Path) -> bool {
 
 impl Drop for TempWorkspace {
     fn drop(&mut self) {
-        if let Err(error) = fs::remove_dir_all(&self.path) {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                eprintln!(
-                    "{{\"level\":\"warning\",\"code\":\"TEMP_CLEANUP_FAILED\",\"message\":{}}}",
-                    serde_json::to_string(&error.to_string())
-                        .unwrap_or_else(|_| "\"temporary cleanup failed\"".to_owned())
-                );
-            }
+        if let Err(error) = fs::remove_dir_all(&self.path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!(
+                "{{\"level\":\"warning\",\"code\":\"TEMP_CLEANUP_FAILED\",\"message\":{}}}",
+                serde_json::to_string(&error.to_string())
+                    .unwrap_or_else(|_| "\"temporary cleanup failed\"".to_owned())
+            );
         }
     }
 }

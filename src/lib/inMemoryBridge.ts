@@ -1,5 +1,5 @@
 import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult, UpdateStatus } from './bridge';
-import type { AppSettings, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
 
 /** Exact size of the single pinned model file this build downloads. */
 export const PINNED_MODEL_BYTES = 1_280_835_840;
@@ -52,7 +52,16 @@ function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
 
 function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): DesktopBridge {
   let items = (options.items ?? seedItems).map((item) => ({ ...item }));
-  let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false };
+  let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '' };
+  // Deterministic classification so browser dev and e2e runs can exercise the
+  // cloud badge without a real sync client: the path only has to mention the
+  // provider. Mirrors the DTO the desktop backend returns from folder_classify.
+  const classifyPath = async (path: string): Promise<CloudLocation | null> => {
+    const lower = path.toLowerCase();
+    if (lower.includes('onedrive')) return { provider: 'onedrive_business', displayName: 'OneDrive – Contoso' };
+    if (lower.includes('sharepoint')) return { provider: 'sharepoint', displayName: 'Contoso' };
+    return null;
+  };
   // The pinned model's exact size from src-tauri/resources/model-manifest.json.
   // The previous value, 3_278_329_184, was a model plus a vision projector that
   // this pipeline does not download.
@@ -136,6 +145,33 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     // so rather than pretending to be up to date.
     checkForUpdate: async () => options.update ?? { state: 'unsupported' },
     installUpdate: async () => { throw new Error('Updates are only available in the desktop application'); },
+    // A coherent fake mirroring the current in-memory settings: enabled follows
+    // intakeEnabled, and the counts are small fixed numbers so the dialog's
+    // status block renders deterministically in dev and tests.
+    intakeStatus: async (): Promise<IntakeStatus> => {
+      const enabled = settings.intakeEnabled;
+      const now = Math.floor(Date.now() / 1000);
+      const machineName = settings.machineLabel.trim() || 'This machine';
+      return {
+        enabled,
+        watching: enabled,
+        folder: settings.intakeFolder,
+        machineId: 'dev-machine',
+        machineName,
+        cloud: await classifyPath(settings.intakeFolder),
+        machines: enabled ? [
+          { machineId: 'dev-machine', machineName, userName: 'dev', lastSeenAt: now, active: true },
+          { machineId: 'demo-peer', machineName: 'Front desk PC', userName: 'colleague', lastSeenAt: now - 90, active: true },
+        ] : [],
+        heldForOthers: enabled ? 2 : 0,
+        claimedByOthers: enabled ? 1 : 0,
+        processedHere: enabled ? 3 : 0,
+        lastScanAt: enabled ? now - 5 : null,
+        error: null,
+      };
+    },
+    scanIntakeNow: async () => { /* Nothing is watching in the browser; the desktop backend wakes its scan loop. */ },
+    classifyFolder: (path) => classifyPath(path),
   };
 }
 

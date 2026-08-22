@@ -1,7 +1,8 @@
 use std::fs;
 
 use intern_queue::paths::{
-    canonical_file, canonical_folder, canonical_model_file, collect_supported_files, parse_item_id,
+    canonical_file, canonical_folder, canonical_model_file, collect_supported_files,
+    is_cloud_reparse_tag, parse_item_id,
 };
 use tempfile::tempdir;
 
@@ -65,6 +66,39 @@ fn folder_expansion_is_recursive_deterministic_and_skips_hidden_lock_zero_byte_a
             nested.join("a.md").canonicalize().unwrap()
         ]
     );
+}
+
+#[test]
+fn cloud_files_reparse_tags_are_recognized_while_link_and_junction_tags_are_not() {
+    for cloud_tag in [0x9000_001A_u32, 0x9000_101A, 0x9000_F01A] {
+        assert!(is_cloud_reparse_tag(cloud_tag), "rejected {cloud_tag:#X}");
+    }
+    for other_tag in [0xA000_000C_u32, 0xA000_0003, 0] {
+        assert!(!is_cloud_reparse_tag(other_tag), "accepted {other_tag:#X}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_junctions_stay_rejected_despite_the_cloud_placeholder_exemption() {
+    use std::process::Command;
+
+    let temp = tempdir().unwrap();
+    let target = temp.path().join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("doc.pdf"), b"pdf").unwrap();
+    let junction = temp.path().join("junction");
+    let created = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&target)
+        .status()
+        .unwrap();
+    assert!(created.success());
+
+    assert!(canonical_folder(&junction).is_err());
+    let files = collect_supported_files(temp.path()).unwrap();
+    assert_eq!(files, vec![target.join("doc.pdf").canonicalize().unwrap()]);
 }
 
 #[test]
