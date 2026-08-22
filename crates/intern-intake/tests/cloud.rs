@@ -9,7 +9,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use intern_intake::{CloudProviderKind, CloudRoot, EnvProbe, classify, detect_cloud_roots_with};
+#[cfg(not(windows))]
+use intern_intake::detect_cloud_roots_with;
+use intern_intake::{CloudProviderKind, CloudRoot, EnvProbe, classify};
 
 #[derive(Default)]
 struct FakeEnv {
