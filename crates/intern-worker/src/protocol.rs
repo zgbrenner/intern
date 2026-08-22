@@ -216,6 +216,7 @@ impl<W: Write> EventSink for JsonLineSink<'_, W> {
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub fn run_control_loop<R, W, E, F>(
     reader: R,
     mut output: W,
@@ -312,14 +313,15 @@ impl ActiveRequestGuard {
 
 impl Drop for ActiveRequestGuard {
     fn drop(&mut self) {
-        if !self.cleared {
-            if let Ok(mut active) = self.active.lock() {
-                active.remove(&self.request_id);
-            }
+        if !self.cleared
+            && let Ok(mut active) = self.active.lock()
+        {
+            active.remove(&self.request_id);
         }
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub fn run_concurrent_worker<R, W, E, X>(
     reader: R,
     output: W,
