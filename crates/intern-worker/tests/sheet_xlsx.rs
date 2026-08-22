@@ -171,7 +171,7 @@ fn rows_beyond_the_cap_are_elided_with_a_marker_instead_of_flooding_the_page() {
     let text = &document.pages[0].text;
 
     assert!(
-        text.contains(&format!("| row {} |", MAX_SHEET_ROWS)),
+        text.contains(&format!("| row {MAX_SHEET_ROWS} |")),
         "{text}"
     );
     assert!(
@@ -199,7 +199,7 @@ fn columns_beyond_the_cap_are_elided_with_a_marker() {
     let text = &document.pages[0].text;
 
     assert!(
-        text.contains(&format!("| col {} |", MAX_SHEET_COLS)),
+        text.contains(&format!("| col {MAX_SHEET_COLS} |")),
         "{text}"
     );
     assert!(
