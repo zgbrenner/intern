@@ -596,15 +596,32 @@ impl PipelineScheduler {
     }
 }
 
-impl Drop for PipelineScheduler {
-    fn drop(&mut self) {
+impl PipelineScheduler {
+    /// Stop the scheduler and wait briefly for its thread to finish. The wait
+    /// is bounded: this runs while a window is closing, and the thread may be
+    /// mid-drain in work that outlives any patience a closing app can afford.
+    /// Interrupted work is requeued by recovery on the next launch, so
+    /// abandoning the join loses nothing.
+    fn stop(&self, deadline: Duration) {
         let _ = self.pipeline.shutdown();
         let _ = self.sender.send(SchedulerMessage::Shutdown);
-        if let Ok(join) = self.join.get_mut()
-            && let Some(join) = join.take()
-        {
-            let _ = join.join();
+        if let Ok(mut join) = self.join.lock() {
+            if let Some(handle) = join.take() {
+                let started = std::time::Instant::now();
+                while !handle.is_finished() && started.elapsed() < deadline {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                if handle.is_finished() {
+                    let _ = handle.join();
+                }
+            }
         }
+    }
+}
+
+impl Drop for PipelineScheduler {
+    fn drop(&mut self) {
+        self.stop(Duration::from_secs(5));
     }
 }
 
@@ -623,6 +640,11 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Shut the pipeline down ahead of a forced process exit on window close.
+    pub fn prepare_exit(&self) {
+        self.scheduler.stop(Duration::from_secs(5));
+    }
+
     pub fn initialize(app: &AppHandle) -> Result<Self, CommandError> {
         let data = app.path().app_local_data_dir().map_err(|_| CommandError {
             code: "APP_DATA_UNAVAILABLE".into(),

@@ -236,10 +236,10 @@ const FONT = {
   U: '10001100011000110001100011000101110', V: '10001100011000110001100010101000100',
   W: '10001100011000110101101011101110001', X: '10001100010101000100010101000110001',
   Y: '10001100010101000100001000010000100', Z: '11111000010001000100010001000011111',
-  0: '01110100011001110101110011000101110', 1: '00100011000010000100001000010001110',
+  0: '01110100011000110001100011000101110', 1: '00100011000010000100001000010001110',
   2: '01110100010000100010001000100011111', 3: '11110000010000101110000010000111110',
   4: '00010001100101010010111110001000010', 5: '11111100001000011110000010000111110',
-  6: '01111100001000011110100011000101110', 7: '11111000010001000100010000100001000',
+  6: '01111100001000011110100011000101110', 7: '11111000010001000100010001000010000',
   8: '01110100011000101110100011000101110', 9: '01110100011000101111000010000111110',
   '-': '00000000000000011111000000000000000', '.': '00000000000000000000000000011000110',
   '/': '00001000100001000100010001000010000', ':': '00000001100011000000001100011000000',
@@ -268,7 +268,32 @@ function rasterText(lines, width, height, scale = 3) {
       if (x + glyphWidth >= width) break;
     }
   });
-  return image;
+  return softenRaster(image);
+}
+
+// Real scanners never produce hard 1-bit pixel edges; a deterministic 3x3 box
+// blur gives the synthetic pages scan-like soft strokes, which is also what
+// OCR engines are trained on.
+function softenRaster(image) {
+  const source = image.pixels;
+  const output = Buffer.alloc(source.length);
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      let total = 0;
+      let count = 0;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const sampleY = y + dy;
+          const sampleX = x + dx;
+          if (sampleY < 0 || sampleY >= image.height || sampleX < 0 || sampleX >= image.width) continue;
+          total += source[sampleY * image.width + sampleX];
+          count += 1;
+        }
+      }
+      output[y * image.width + x] = Math.round(total / count);
+    }
+  }
+  return { width: image.width, height: image.height, pixels: output };
 }
 
 function rotateClockwise(image) {

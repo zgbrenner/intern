@@ -193,6 +193,13 @@ impl TesseractOcr {
         }
     }
 
+    fn io_context(operation: &str, path: &Path, error: std::io::Error) -> ExtractionError {
+        ExtractionError::io(std::io::Error::new(
+            error.kind(),
+            format!("{operation} {}: {error}", path.display()),
+        ))
+    }
+
     fn recognize_at(
         &self,
         workspace: &TempWorkspace,
@@ -211,13 +218,18 @@ impl TesseractOcr {
             .arg(&self.language)
             .arg("--tessdata-dir")
             .arg(&self.tessdata_directory)
+            // psm 3 segments automatically WITHOUT re-running OSD: this pass
+            // exists to score exactly the orientation it was given, and psm 1
+            // would let recognition rotate the page again on its own.
             .arg("--psm")
             .arg(RECOGNITION_SEGMENTATION)
             .args(TSV_RENDERER)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(ExtractionError::io)?;
+            .map_err(|error| {
+                Self::io_context("failed to launch Tesseract at", &self.executable, error)
+            })?;
         Self::require_success(self.wait_for_child(child, cancel)?)?;
         let output_path = output_base.with_extension("tsv");
         workspace.register_existing(&output_path)?;
@@ -292,7 +304,9 @@ impl OcrBackend for TesseractOcr {
             .stdout(Stdio::null())
             .stderr(Stdio::from(osd_stderr))
             .spawn()
-            .map_err(ExtractionError::io)?;
+            .map_err(|error| {
+                Self::io_context("failed to launch Tesseract at", &self.executable, error)
+            })?;
         let osd_status = self.wait_for_child(osd_child, cancel)?;
         workspace.register_existing(&osd_stderr_path)?;
         let mut osd_diagnostic = Vec::new();
@@ -304,8 +318,16 @@ impl OcrBackend for TesseractOcr {
         let osd_diagnostic = String::from_utf8_lossy(&osd_diagnostic);
         let rotation = if osd_status.success() {
             let osd_path = Self::osd_output_path(&osd_base);
-            workspace.register_existing(&osd_path)?;
-            self.parse_osd(&std::fs::read(osd_path).map_err(ExtractionError::io)?)?
+            workspace.register_existing(&osd_path).map_err(|error| {
+                ExtractionError::parse_failed(format!(
+                    "Tesseract OSD reported success but its output at {} is unusable ({error}); stderr: {}",
+                    osd_path.display(),
+                    Self::diagnostic_summary(&osd_diagnostic)
+                ))
+            })?;
+            self.parse_osd(&std::fs::read(&osd_path).map_err(|error| {
+                Self::io_context("failed to read Tesseract OSD output", &osd_path, error)
+            })?)?
         } else if osd_status.code() == Some(1) && Self::is_sparse_osd_diagnostic(&osd_diagnostic) {
             // Tesseract uses exit code 1 when OSD cannot determine an
             // orientation for sparse or blank input. OCR remains useful.
