@@ -27,6 +27,24 @@ export interface AppSettings {
   processOthersUploads: boolean;
   /** Overrides the hostname shown to other machines; "" = use hostname. */
   machineLabel: string;
+  /** Keep Intern in the system tray when the window is closed. */
+  runInBackground: boolean;
+  /** Start Intern automatically when the user signs in. */
+  startAtLogin: boolean;
+}
+
+/** One finished rename/undo operation from the durable receipt journal. */
+export interface HistoryEntry {
+  receiptId: string;
+  queueItemId: string;
+  /** Unix seconds when the operation reached its terminal stage. */
+  at: number;
+  direction: 'apply' | 'undo';
+  kind: 'rename' | 'verified_copy';
+  /** Only terminal receipts are listed. */
+  stage: 'complete' | 'rolled_back';
+  originalPath: string;
+  newPath: string;
 }
 
 /** A folder recognised as living inside a OneDrive/SharePoint sync root. */

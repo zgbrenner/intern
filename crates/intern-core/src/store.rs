@@ -22,6 +22,41 @@ pub struct QueueStore {
     session_id: String,
 }
 
+/// A completed item whose content matches a newly added file.
+///
+/// `filed_as` is the leaf name the content actually lives under: the
+/// destination of the latest completed apply receipt. A keep-original
+/// completion moved nothing and has no such receipt, so `filed_as` is `None`
+/// and the caller falls back to the item's original filename.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DuplicateInfo {
+    pub queue_item_id: i64,
+    pub source_path: PathBuf,
+    pub filed_as: Option<String>,
+}
+
+/// One finished journalled file operation, for the history view.
+///
+/// `at` is the receipt's `updated_at`: the moment the operation reached its
+/// terminal stage, not the moment it was planned. `original_path` and
+/// `new_path` are the receipt's source and destination as recorded — for an
+/// undo the "original" is therefore the previously applied name and the "new"
+/// path is the restored one, which is exactly what a history reader expects.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryEntry {
+    pub receipt_id: i64,
+    pub queue_item_id: i64,
+    pub at: i64,
+    pub direction: OperationDirection,
+    pub kind: OperationKind,
+    pub stage: OperationStage,
+    pub original_path: PathBuf,
+    pub new_path: PathBuf,
+}
+
+/// The most receipts a history listing will ever return.
+pub const HISTORY_LIMIT: usize = 500;
+
 impl QueueStore {
     pub fn open(path: impl AsRef<Path>) -> InternResult<Self> {
         let mut connection = Connection::open(path).map_err(InternError::from)?;
@@ -285,6 +320,89 @@ impl QueueStore {
 
     pub fn manual_retry(&self, id: i64) -> InternResult<QueueItem> {
         self.cas_status(id, QueueStatus::Failed, QueueStatus::Queued, true)
+    }
+
+    /// Finds the most recently completed item holding the same content at a
+    /// different path.
+    ///
+    /// Only `completed` rows count: an item whose apply was undone is back in
+    /// `ready`, its content back at its original path, and a still-pending item
+    /// has not been filed anywhere yet. Ties on the completion timestamp fall
+    /// to the newest row.
+    pub fn find_completed_duplicate(
+        &self,
+        source_hash: &str,
+        excluding_path_key: &str,
+    ) -> InternResult<Option<DuplicateInfo>> {
+        let connection = self.lock()?;
+        let Some((queue_item_id, source_path)) = connection
+            .query_row(
+                "SELECT id, source_path FROM queue_items
+                 WHERE status = 'completed' AND source_hash = ?1 AND source_path_key <> ?2
+                 ORDER BY updated_at DESC, id DESC LIMIT 1",
+                params![source_hash, excluding_path_key],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(InternError::from)?
+        else {
+            return Ok(None);
+        };
+        // The newest receipt is where the content actually is now. Anything
+        // other than a completed apply (no receipt at all, or an undo followed
+        // by keep-original) means the file kept its original name.
+        let filed_as = connection
+            .query_row(
+                "SELECT destination_path FROM operation_receipts
+                 WHERE queue_item_id = ?1
+                   AND id = (
+                     SELECT MAX(latest.id) FROM operation_receipts latest
+                     WHERE latest.queue_item_id = ?1
+                   )
+                   AND direction = 'apply' AND stage = 'complete'",
+                params![queue_item_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(InternError::from)?
+            .and_then(|destination| {
+                Path::new(&destination)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            });
+        Ok(Some(DuplicateInfo {
+            queue_item_id,
+            source_path: PathBuf::from(source_path),
+            filed_as,
+        }))
+    }
+
+    /// Requeues a duplicate-flagged review item so it analyzes normally.
+    ///
+    /// The compare-and-swap covers the error code as well as the status: only
+    /// the pre-processing DUPLICATE flag may take this shortcut back to the
+    /// queue, and a concurrent decision on the item makes the retry fail
+    /// closed.
+    pub fn retry_duplicate(&self, id: i64) -> InternResult<QueueItem> {
+        let connection = self.lock()?;
+        let changed = connection
+            .execute(
+                "UPDATE queue_items
+             SET status = 'queued', processing_failures = 0, error_code = NULL,
+                 owner_session = NULL, lease_expires_at = NULL,
+                 previous_status = NULL, active_receipt_id = NULL,
+                 reconciliation_receipt_id = NULL, updated_at = ?1
+             WHERE id = ?2 AND status = 'needs_review' AND error_code = 'DUPLICATE'",
+                params![now(), id],
+            )
+            .map_err(InternError::from)?;
+        if changed != 1 {
+            return Err(InternError::new(
+                ErrorCode::StateConflict,
+                "item is not a duplicate awaiting review",
+            ));
+        }
+        query_one(&connection, "WHERE id = ?1", params![id])
     }
 
     pub fn complete_keep_original(
@@ -795,6 +913,35 @@ impl QueueStore {
             .map_err(InternError::from)?;
         let rows = statement
             .query_map([], row_to_item)
+            .map_err(InternError::from)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(InternError::from)
+    }
+
+    /// Lists finished operations, newest first, for the history view.
+    ///
+    /// Only receipts in a terminal stage (`complete` or `rolled_back`) are
+    /// reported: an in-flight receipt is bookkeeping for the applier and may
+    /// still end either way. Receipts are joined to their queue items, so a
+    /// cleared history (which cascades receipt deletion) lists nothing stale.
+    /// `limit` is capped at [`HISTORY_LIMIT`].
+    pub fn list_operation_history(&self, limit: usize) -> InternResult<Vec<HistoryEntry>> {
+        let limit = i64::try_from(limit.min(HISTORY_LIMIT)).unwrap_or(0);
+        let connection = self.lock()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT receipts.id, receipts.queue_item_id, receipts.updated_at,
+                        receipts.direction, receipts.operation_kind, receipts.stage,
+                        receipts.source_path, receipts.destination_path
+                 FROM operation_receipts receipts
+                 JOIN queue_items items ON items.id = receipts.queue_item_id
+                 WHERE receipts.stage IN ('complete', 'rolled_back')
+                 ORDER BY receipts.updated_at DESC, receipts.id DESC
+                 LIMIT ?1",
+            )
+            .map_err(InternError::from)?;
+        let rows = statement
+            .query_map(params![limit], row_to_history_entry)
             .map_err(InternError::from)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(InternError::from)
@@ -1448,6 +1595,25 @@ fn row_to_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<OperationReceipt>
     })
 }
 
+fn row_to_history_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
+    let direction_text: String = row.get(3)?;
+    let kind_text: String = row.get(4)?;
+    let stage_text: String = row.get(5)?;
+    Ok(HistoryEntry {
+        receipt_id: row.get(0)?,
+        queue_item_id: row.get(1)?,
+        at: row.get(2)?,
+        direction: OperationDirection::from_db(&direction_text)
+            .ok_or_else(|| invalid_column(3, "unknown receipt direction"))?,
+        kind: OperationKind::from_db(&kind_text)
+            .ok_or_else(|| invalid_column(4, "unknown operation kind"))?,
+        stage: OperationStage::from_db(&stage_text)
+            .ok_or_else(|| invalid_column(5, "unknown operation stage"))?,
+        original_path: PathBuf::from(row.get::<_, String>(6)?),
+        new_path: PathBuf::from(row.get::<_, String>(7)?),
+    })
+}
+
 fn parse_status(value: String, index: usize) -> rusqlite::Result<QueueStatus> {
     QueueStatus::from_db(&value).ok_or_else(|| invalid_column(index, "unknown queue status"))
 }
@@ -1498,4 +1664,10 @@ fn windows_path_key(path: &str) -> String {
     path.replace('/', "\\")
         .trim_end_matches('\\')
         .to_lowercase()
+}
+
+/// The normalized key `enqueue` stores for a source path, for callers that
+/// need to compare against `source_path_key` (e.g. duplicate lookups).
+pub fn source_path_key(path: &Path) -> String {
+    windows_path_key(&path.to_string_lossy())
 }

@@ -34,7 +34,12 @@ page is covered by images. A page goes to OCR only when it has fewer than 20
 meaningful characters under heavy image coverage, or when more than 3% of its
 characters came back as replacement glyphs. Office containers go through AnyDoc
 to Markdown, which preserves headings and tables; plain text and Markdown are
-read directly.
+read directly. Excel workbooks are read sheet-per-page as Markdown tables,
+capped at 200 rows by 30 columns per sheet with an elision marker so a large
+workbook cannot flood distillation. `.eml` emails emit a fixed-order header
+block — the `Date:` line verbatim, so the sent date is checkable against the
+document like any other fact — followed by the plain-text body and a listing
+(never an extraction) of attachments.
 
 Two consequences of "OCR only when necessary" are enforced in code rather than
 documented as intent:

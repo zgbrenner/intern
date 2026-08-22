@@ -1179,3 +1179,230 @@ fn lost_processing_lease_cancels_worker_and_pauses_before_more_work() {
     assert!(pipeline.is_paused());
     assert_eq!(worker.cancellations.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn refiled_content_at_a_new_path_is_flagged_duplicate_and_retry_analyzes_it() {
+    let temp = tempdir().unwrap();
+    let original = source(temp.path(), "agreement.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(
+            "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+        )),
+        Ok(parsed(
+            "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+        )),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(proposal(0.94, false)),
+    ]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        Arc::clone(&model) as Arc<dyn AnalyzerBoundary>,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+    pipeline.enqueue_files(&[original]).unwrap();
+    pipeline.run_until_idle().unwrap();
+    let completed = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(completed.status, QueueStatus::Completed);
+    let filed_name = completed
+        .receipt
+        .unwrap()
+        .destination
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+
+    // The same bytes arrive again under a different name in another folder.
+    let copies = temp.path().join("copies");
+    std::fs::create_dir(&copies).unwrap();
+    std::fs::write(copies.join("copy-of-agreement.pdf"), "agreement.pdf").unwrap();
+    let copy = copies.join("copy-of-agreement.pdf").canonicalize().unwrap();
+    let added = pipeline.enqueue_files(&[copy]).unwrap().pop().unwrap();
+    assert_eq!(added.status, QueueStatus::NeedsReview);
+    assert_eq!(added.error_code, Some(ErrorCode::Duplicate));
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    let flagged = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == added.id)
+        .unwrap();
+    assert_eq!(flagged.duplicate_of.as_deref(), Some(filed_name.as_str()));
+
+    // "Process anyway": retry clears the flag and the item analyzes normally.
+    pipeline.retry(added.id).unwrap();
+    let requeued = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == added.id)
+        .unwrap();
+    assert_eq!(requeued.status, QueueStatus::Queued);
+    assert_eq!(requeued.error_code, None);
+    pipeline.run_until_idle().unwrap();
+    let settled = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == added.id)
+        .unwrap();
+    assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(settled.status, QueueStatus::Completed);
+}
+
+#[test]
+fn same_content_still_pending_does_not_flag_a_duplicate() {
+    let temp = tempdir().unwrap();
+    let first = source(temp.path(), "pending-a.pdf");
+    let second = source(temp.path(), "pending-b.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![]));
+    let model = Arc::new(FakeModel::new(vec![]));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&first, "shared-hash");
+    files.trust(&second, "shared-hash");
+    let pipeline = pipeline(temp.path(), worker, model, files, AppSettings::default());
+
+    let added = pipeline.enqueue_files(&[first, second]).unwrap();
+
+    assert_eq!(added.len(), 2);
+    assert!(added.iter().all(|item| item.status == QueueStatus::Queued));
+    assert!(added.iter().all(|item| item.error_code.is_none()));
+}
+
+#[test]
+fn undone_completion_is_not_flagged_as_a_duplicate_on_re_add() {
+    let temp = tempdir().unwrap();
+    let original = source(temp.path(), "undone.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+    pipeline
+        .enqueue_files(std::slice::from_ref(&original))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let completed = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(completed.status, QueueStatus::Completed);
+
+    pipeline.undo(completed.id).unwrap();
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+
+    // The apply was undone, so the content is not filed anywhere: a new copy
+    // must analyze normally instead of being flagged.
+    std::fs::write(temp.path().join("undone-copy.pdf"), "undone.pdf").unwrap();
+    let copy = temp.path().join("undone-copy.pdf").canonicalize().unwrap();
+    let added = pipeline.enqueue_files(&[copy]).unwrap().pop().unwrap();
+    assert_eq!(added.status, QueueStatus::Queued);
+    assert_eq!(added.error_code, None);
+}
+
+#[test]
+fn flagged_duplicates_support_keep_original_remove_and_cleared_history() {
+    let temp = tempdir().unwrap();
+    let original = source(temp.path(), "keeper.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+    pipeline.enqueue_files(&[original]).unwrap();
+    pipeline.run_until_idle().unwrap();
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Completed);
+
+    // Keep original completes the duplicate without touching the disk.
+    std::fs::write(temp.path().join("copy-two.pdf"), "keeper.pdf").unwrap();
+    let second = temp.path().join("copy-two.pdf").canonicalize().unwrap();
+    let kept = pipeline
+        .enqueue_files(std::slice::from_ref(&second))
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(kept.status, QueueStatus::NeedsReview);
+    pipeline.keep_original(kept.id).unwrap();
+    assert!(second.exists());
+    let kept_row = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == kept.id)
+        .unwrap();
+    assert_eq!(kept_row.status, QueueStatus::Completed);
+    assert_eq!(kept_row.error_code, None);
+
+    // The next copy points at the most recent completion; a keep-original one
+    // has no filed name, so its own filename is used.
+    std::fs::write(temp.path().join("copy-three.pdf"), "keeper.pdf").unwrap();
+    let third = temp.path().join("copy-three.pdf").canonicalize().unwrap();
+    let flagged = pipeline.enqueue_files(&[third]).unwrap().pop().unwrap();
+    assert_eq!(flagged.status, QueueStatus::NeedsReview);
+    assert_eq!(flagged.error_code, Some(ErrorCode::Duplicate));
+    let listed = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == flagged.id)
+        .unwrap();
+    assert_eq!(listed.duplicate_of.as_deref(), Some("copy-two.pdf"));
+
+    // Clearing the history removes the completed rows; the stale flag still
+    // lists without a referent and remains removable.
+    assert_eq!(pipeline.clear_history().unwrap(), 2);
+    let stale = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == flagged.id)
+        .unwrap();
+    assert_eq!(stale.status, QueueStatus::NeedsReview);
+    assert_eq!(stale.duplicate_of, None);
+    pipeline.remove(flagged.id).unwrap();
+    assert!(pipeline.list().unwrap().is_empty());
+
+    // With no completed rows left a fresh copy simply queues for analysis.
+    std::fs::write(temp.path().join("copy-four.pdf"), "keeper.pdf").unwrap();
+    let fourth = temp.path().join("copy-four.pdf").canonicalize().unwrap();
+    let requeued = pipeline.enqueue_files(&[fourth]).unwrap().pop().unwrap();
+    assert_eq!(requeued.status, QueueStatus::Queued);
+    assert_eq!(requeued.error_code, None);
+}

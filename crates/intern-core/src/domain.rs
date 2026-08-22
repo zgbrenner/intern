@@ -51,7 +51,10 @@ impl QueueStatus {
     pub(crate) fn can_transition_to(self, next: Self) -> bool {
         matches!(
             (self, next),
-            (Self::Queued, Self::Canceled)
+            // Queued → NeedsReview lets ingestion flag an item before any
+            // processing starts (e.g. its content is already filed as a
+            // completed duplicate).
+            (Self::Queued, Self::Canceled | Self::NeedsReview)
                 | (
                     Self::Extracting,
                     Self::Analyzing | Self::Queued | Self::Failed | Self::Canceled
@@ -63,6 +66,18 @@ impl QueueStatus {
                 | (Self::Ready, Self::Canceled)
                 | (Self::NeedsReview, Self::Ready | Self::Canceled)
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::QueueStatus;
+
+    #[test]
+    fn queued_may_be_flagged_for_review_before_processing_but_not_finished() {
+        assert!(QueueStatus::Queued.can_transition_to(QueueStatus::NeedsReview));
+        assert!(!QueueStatus::Queued.can_transition_to(QueueStatus::Ready));
+        assert!(!QueueStatus::Queued.can_transition_to(QueueStatus::Completed));
     }
 }
 

@@ -71,11 +71,20 @@ built into the installer. If you already have the file, **Choose existing model
 files** points Intern at it and skips the download. Nothing else needs
 installing — PDF text extraction, OCR, and inference all ship inside the app.
 
-Then drag documents or a folder onto the window. Names Intern can support with
-verbatim text from the document appear ready to apply; anything else goes to
-review with the reason shown. Nothing on disk is renamed until you approve it,
-either one item at a time or with **Apply all ready**, and a rename can be
-undone.
+Then drag documents or a folder onto the window — PDFs, Word documents, Excel
+workbooks, `.eml` emails, plain text, Markdown, and scanned images. Names
+Intern can support with verbatim text from the document appear ready to apply;
+anything else goes to review with the reason shown. Nothing on disk is renamed
+until you approve it, either one item at a time or with **Apply all ready**,
+and a rename can be undone. A document whose content Intern has already filed
+is flagged as a duplicate of the filed name instead of being renamed into a
+second copy, and the **History** view in Completed lists every rename and undo
+Intern has ever applied, exportable as CSV.
+
+Intern can also **run in the background**: with the setting on, closing the
+window keeps Intern in the system tray — watched folders keep working — and
+**Start Intern when you sign in** makes it a quiet always-on service. Both are
+off by default.
 
 ## Watched intake folders, OneDrive, and SharePoint
 

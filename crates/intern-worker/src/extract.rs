@@ -451,7 +451,7 @@ pub fn extract_anydoc(
     })
 }
 
-fn enforce_office_decompressed_limit(
+pub(crate) fn enforce_office_decompressed_limit(
     path: &Path,
     limits: &ResourceLimits,
     cancel: &CancellationToken,
@@ -461,7 +461,7 @@ fn enforce_office_decompressed_limit(
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !matches!(extension.as_str(), "docx" | "docm") {
+    if !matches!(extension.as_str(), "docx" | "docm" | "xlsx") {
         return Ok(());
     }
     let file = File::open(path).map_err(ExtractionError::io)?;

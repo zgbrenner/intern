@@ -157,6 +157,27 @@ describe('review actions', () => {
     })));
   });
 
+  it('saves run in background with start at login, gating start minimized on the tray', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(base.saveSettings);
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    // Minimized-without-tray would strand the app invisibly, so the checkbox
+    // only unlocks once background mode is on.
+    expect(await screen.findByLabelText('Start minimized')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Run in background'));
+    fireEvent.click(screen.getByLabelText('Start Intern when you sign in'));
+    fireEvent.click(screen.getByLabelText('Start minimized'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      runInBackground: true,
+      startAtLogin: true,
+      startMinimized: true,
+    })));
+  });
+
   it('browses for the destination and intake folders at the selection boundary', async () => {
     const pickFolder = vi.fn()
       .mockResolvedValueOnce({ path: 'C:\\Filed', displayName: 'Filed' })
@@ -183,7 +204,7 @@ describe('review actions', () => {
 
   it('renders the live intake status with the held-for-others count', async () => {
     const bridge = createInMemoryBridge();
-    await bridge.saveSettings({ destination: 'C:\\Filed', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '' });
+    await bridge.saveSettings({ destination: 'C:\\Filed', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false });
     render(<App bridge={bridge} />);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
 
