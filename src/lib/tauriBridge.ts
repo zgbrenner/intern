@@ -1,6 +1,6 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
 import type {
   DesktopBridge,
   ExistingModelFiles,
@@ -58,6 +58,17 @@ interface QueueItemDto {
   progress?: number;
   undoable?: boolean;
   proposalRevision?: string | number;
+}
+
+interface HistoryEntryDto {
+  receiptId: string | number;
+  queueItemId: string | number;
+  at: number;
+  direction: HistoryEntry['direction'];
+  kind: HistoryEntry['kind'];
+  stage: HistoryEntry['stage'];
+  originalPath: string;
+  newPath: string;
 }
 
 interface ChangedPayload { paused?: boolean }
@@ -123,6 +134,19 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
     return this.transport.invoke('setup_choose_existing', { files });
   }
   clearHistory(): Promise<void> { return this.transport.invoke('history_clear'); }
+
+  async historyList(): Promise<HistoryEntry[]> {
+    const entries = await this.transport.invoke<HistoryEntryDto[]>('history_list');
+    return entries.map((entry) => ({
+      ...entry,
+      receiptId: String(entry.receiptId),
+      queueItemId: String(entry.queueItemId),
+    }));
+  }
+
+  historyExport(path: string): Promise<number> {
+    return this.transport.invoke('history_export', { path });
+  }
 
   discardWaiting(): Promise<number> { return this.transport.invoke('queue_discard_waiting'); }
 
@@ -231,6 +255,16 @@ export function createTauriSelectionBoundary(transport: TauriTransport = default
     pickExistingModelFiles: async () => {
       const modelPath = await openGgufDialog(transport, 'Choose the model GGUF', 'GGUF model files');
       return modelPath ? { modelPath } : undefined;
+    },
+    pickHistoryExportPath: async () => {
+      const result = await transport.invoke<unknown>('plugin:dialog|save', {
+        options: {
+          title: 'Export rename history',
+          defaultPath: 'intern-history.csv',
+          filters: [{ name: 'CSV', extensions: ['csv'] }],
+        },
+      });
+      return typeof result === 'string' ? result : undefined;
     },
     resolveDrop: async (payload: unknown): Promise<SelectionResult> => {
       const drop = payload as { paths?: unknown; kind?: unknown };

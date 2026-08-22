@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppHeader } from './components/AppHeader';
 import { DropZone } from './components/DropZone';
+import { HistoryDialog } from './components/HistoryDialog';
 import { QueueTable } from './components/QueueTable';
 import { ReviewInspector } from './components/ReviewInspector';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -17,6 +18,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const bridgeRef = useRef<DesktopBridge>(suppliedBridge ?? createInMemoryBridge());
   const seededSelection = useRef(false);
   const settingsTrigger = useRef<HTMLElement | null>(null);
+  const historyTrigger = useRef<HTMLElement | null>(null);
   const reviewTrigger = useRef<{ element: HTMLButtonElement; itemId: string } | null>(null);
   const focusRestoreVersion = useRef(0);
   const bridge = suppliedBridge ?? bridgeRef.current;
@@ -24,7 +26,8 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const [view, setView] = useState<QueueView>('queue');
   const [selectedId, setSelectedId] = useState<string>();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>({ destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '' });
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>({ destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false });
   const [setup, setSetup] = useState<SetupState | undefined>(suppliedBridge ? undefined : { state: 'ready', downloadedBytes: 0, totalBytes: 0 });
   const [setupAction, setSetupAction] = useState<'start' | 'cancel' | 'choose'>();
   const [setupError, setSetupError] = useState('');
@@ -170,6 +173,8 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   };
   const openSettings = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; settingsTrigger.current = trigger; setSettingsOpen(true); };
   const closeSettings = () => { setSettingsOpen(false); settingsTrigger.current?.focus(); };
+  const openHistory = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; historyTrigger.current = trigger; setHistoryOpen(true); };
+  const closeHistory = () => { setHistoryOpen(false); historyTrigger.current?.focus(); };
   const applySelection = (result: SelectionResult) => {
     const focusAfter = async (run: () => Promise<void>, displayName: string) => {
       await run();
@@ -233,10 +238,14 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
         {waitingItems.length > 0 && <button type="button" aria-label="Discard waiting items" disabled={actionPending} onClick={() => void (async () => { const dropped = waitingItems.length; await runQueueAction(() => bridge.discardWaiting(), `Discarded ${dropped} waiting ${dropped === 1 ? 'item' : 'items'}.`); })()}>Discard waiting <span>{waitingItems.length}</span></button>}
         {readyItems.length > 0 && <button type="button" className="primary" aria-label="Apply all ready" disabled={actionPending} onClick={() => void applyAllReady()}>Apply all ready <span>{readyItems.length}</span></button>}
       </div>}
-      {view === 'completed' && filtered.length > 0 && <div className="queue-actions"><button type="button" disabled={actionPending} onClick={() => void (async () => { if (await runQueueAction(() => bridge.clearHistory(), 'History cleared.')) queueMicrotask(() => document.querySelector<HTMLButtonElement>('.sidebar button[aria-label="Completed"]')?.focus()); })()}>Clear history</button></div>}
+      {view === 'completed' && filtered.length > 0 && <div className="queue-actions">
+        <button type="button" disabled={actionPending} onClick={(event) => openHistory(event.currentTarget)}>History</button>
+        <button type="button" disabled={actionPending} onClick={() => void (async () => { if (await runQueueAction(() => bridge.clearHistory(), 'History cleared.')) queueMicrotask(() => document.querySelector<HTMLButtonElement>('.sidebar button[aria-label="Completed"]')?.focus()); })()}>Clear history</button>
+      </div>}
       <QueueTable items={filtered} selectedId={selectedId} onSelect={select} /><p className="item-count">{filtered.length} items</p></section>
       {selected && <ReviewInspector busy={actionPending} drawer={drawerOpen} item={selected} onClose={closeReview} onApprove={(filename, description) => void refreshAndClear(() => bridge.approve(selected.id, filename, description), 'Rename applied.')} onKeep={() => void refreshAndClear(() => bridge.keepOriginal(selected.id), 'Original filename kept.')} onCancel={() => void refreshAndClear(() => bridge.cancel(selected.id), 'Processing canceled.')} onRetry={() => void refreshAndClear(() => bridge.retry(selected.id), 'Item queued for retry.')} onRemove={() => void refreshAndClear(() => bridge.remove(selected.id), 'Item removed.')} onUndo={() => void refreshAndClear(() => bridge.undo(selected.id), 'Operation undone.')} />}
     </div>
+    {historyOpen && <HistoryDialog bridge={bridge} selection={selection} onClose={closeHistory} />}
     {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={closeSettings} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); closeSettings(); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
   </main>;
 }

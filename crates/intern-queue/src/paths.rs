@@ -6,7 +6,7 @@ use std::{
 use crate::pipeline::{PipelineError, PipelineResult};
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "pdf", "docx", "txt", "md", "markdown", "png", "jpg", "jpeg", "tif", "tiff",
+    "pdf", "docx", "xlsx", "eml", "txt", "md", "markdown", "png", "jpg", "jpeg", "tif", "tiff",
 ];
 
 pub fn parse_item_id(value: &str) -> PipelineResult<i64> {

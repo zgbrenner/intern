@@ -22,6 +22,12 @@ pub struct AppSettings {
     pub process_others_uploads: bool,
     #[serde(default)]
     pub machine_label: String,
+    /// Keep Intern alive in the system tray when the window is closed.
+    #[serde(default)]
+    pub run_in_background: bool,
+    /// Register Intern to start when the user signs in.
+    #[serde(default)]
+    pub start_at_login: bool,
 }
 
 #[derive(Clone, Debug)]

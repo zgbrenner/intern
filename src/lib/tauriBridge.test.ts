@@ -29,7 +29,7 @@ describe('TauriBridge', () => {
   it('maps the exact narrow command names and JSON-safe payloads', async () => {
     const fake = fakeTransport({
       queue_list: [],
-      settings_get: { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '' },
+      settings_get: { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false },
       setup_get: { state: 'required', downloadedBytes: 0, totalBytes: 3278329184 },
       intake_status: {
         enabled: false, watching: false, folder: '', machineId: 'm-1', machineName: 'Reception',
@@ -37,6 +37,8 @@ describe('TauriBridge', () => {
         lastScanAt: null, error: null,
       },
       folder_classify: { provider: 'onedrive_business', displayName: 'OneDrive – Contoso' },
+      history_list: [],
+      history_export: 0,
     });
     const bridge = new TauriBridge(fake.transport);
 
@@ -52,12 +54,14 @@ describe('TauriBridge', () => {
     await bridge.keepOriginal('7');
     await bridge.undo('7');
     await bridge.getSettings();
-    await bridge.saveSettings({ destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception' });
+    await bridge.saveSettings({ destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true });
     await bridge.getSetup();
     await bridge.startModelDownload();
     await bridge.setupCancel();
     await bridge.setupChooseExisting({ modelPath: 'C:\\Models\\intern-q4.gguf' });
     await bridge.clearHistory();
+    await bridge.historyList();
+    await bridge.historyExport('C:\\Exports\\intern-history.csv');
     await bridge.intakeStatus();
     await bridge.scanIntakeNow();
     await bridge.classifyFolder('C:\\OneDrive\\Scans');
@@ -75,12 +79,14 @@ describe('TauriBridge', () => {
       { command: 'proposal_keep_original', args: { id: '7' } },
       { command: 'operation_undo', args: { id: '7' } },
       { command: 'settings_get', args: undefined },
-      { command: 'settings_save', args: { settings: { destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception' } } },
+      { command: 'settings_save', args: { settings: { destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true } } },
       { command: 'setup_get', args: undefined },
       { command: 'setup_start', args: undefined },
       { command: 'setup_cancel', args: undefined },
       { command: 'setup_choose_existing', args: { files: { modelPath: 'C:\\Models\\intern-q4.gguf' } } },
       { command: 'history_clear', args: undefined },
+      { command: 'history_list', args: undefined },
+      { command: 'history_export', args: { path: 'C:\\Exports\\intern-history.csv' } },
       { command: 'intake_status', args: undefined },
       { command: 'intake_scan_now', args: undefined },
       { command: 'folder_classify', args: { path: 'C:\\OneDrive\\Scans' } },
@@ -176,6 +182,39 @@ describe('TauriBridge', () => {
     expect(fake.unlisten.get('intake://changed')).toHaveBeenCalledTimes(1);
     fake.listeners.get('intake://changed')?.({ event: 'intake://changed', id: 6, payload: status });
     expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes history entry ids to strings from the wire DTO', async () => {
+    const fake = fakeTransport({
+      history_list: [{
+        receiptId: 9, queueItemId: 4, at: 1716282600, direction: 'undo', kind: 'rename',
+        stage: 'complete', originalPath: 'C:\\Filed\\2024 Agreement.pdf', newPath: 'C:\\Drop\\scan.pdf',
+      }],
+    });
+
+    const entries = await new TauriBridge(fake.transport).historyList();
+
+    expect(entries).toEqual([{
+      receiptId: '9', queueItemId: '4', at: 1716282600, direction: 'undo', kind: 'rename',
+      stage: 'complete', originalPath: 'C:\\Filed\\2024 Agreement.pdf', newPath: 'C:\\Drop\\scan.pdf',
+    }]);
+  });
+
+  it('offers the history CSV save dialog at the selection boundary and reports cancellation', async () => {
+    const fake = fakeTransport({ 'plugin:dialog|save': 'C:\\Exports\\intern-history.csv' });
+    const selection = createTauriSelectionBoundary(fake.transport);
+
+    expect(await selection.pickHistoryExportPath?.()).toBe('C:\\Exports\\intern-history.csv');
+    expect(fake.calls).toEqual([
+      { command: 'plugin:dialog|save', args: { options: {
+        title: 'Export rename history',
+        defaultPath: 'intern-history.csv',
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+      } } },
+    ]);
+
+    const canceled = createTauriSelectionBoundary(fakeTransport({ 'plugin:dialog|save': null }).transport);
+    expect(await canceled.pickHistoryExportPath?.()).toBeUndefined();
   });
 
   it('reports an absent cloud classification as null, never undefined', async () => {

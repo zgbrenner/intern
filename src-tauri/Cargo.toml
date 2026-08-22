@@ -24,7 +24,8 @@ intern-intake = { path = "../crates/intern-intake" }
 intern-queue = { path = "../crates/intern-queue" }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
-tauri = { version = "2.11.2", features = [] }
+tauri = { version = "2.11.2", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2.5.1"
 tauri-plugin-dialog = "2.4.0"
 # Pinned exactly, and kept in lockstep with @tauri-apps/plugin-updater in
 # package.json. Tauri refuses to build when a plugin's Rust crate and npm

@@ -34,6 +34,7 @@ function saveFailure(error: unknown): string {
     case 'INTAKE_FOLDER_MISSING': return 'The intake folder could not be found. Choose an existing folder to watch. (INTAKE_FOLDER_MISSING)';
     case 'INTAKE_NEEDS_DESTINATION': return 'Watched intake needs a destination folder outside the intake folder. (INTAKE_NEEDS_DESTINATION)';
     case 'DESTINATION_INSIDE_INTAKE': return 'The destination folder is inside the intake folder, so renamed files would be picked up as new documents. Choose a destination outside it. (DESTINATION_INSIDE_INTAKE)';
+    case 'AUTOSTART_FAILED': return 'Your system would not let Intern change whether it starts at sign-in, so nothing was saved. Try again. (AUTOSTART_FAILED)';
   }
   if (error instanceof Error && error.message.trim()) return error.message.trim();
   if (typeof error === 'object' && error && 'message' in error && typeof error.message === 'string' && error.message.trim()) return error.message.trim();
@@ -171,7 +172,13 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
       {selection && <button type="button" aria-label="Browse for destination folder" onClick={() => void browse((path) => setNext((current) => ({ ...current, destination: path })))}>Browse…</button>}
     </div>
     {destinationCloud && <p className="cloud-badge">{cloudBadgeText(destinationCloud)}</p>}
-    <label className="check-label"><input type="checkbox" checked={next.startMinimized} onChange={(event) => setNext({ ...next, startMinimized: event.target.checked })} />Start minimized</label>
+    <label className="check-label"><input type="checkbox" checked={next.runInBackground} onChange={(event) => setNext({ ...next, runInBackground: event.target.checked })} />Run in background</label>
+    <p className="check-hint">Keep Intern in the system tray when the window is closed — watched folders keep working.</p>
+    <label className="check-label"><input type="checkbox" checked={next.startAtLogin} onChange={(event) => setNext({ ...next, startAtLogin: event.target.checked })} />Start Intern when you sign in</label>
+    {/* Without the tray a minimized start would leave no way back to the
+        window, so the checkbox is only offered while background mode is on. */}
+    <label className="check-label"><input type="checkbox" disabled={!next.runInBackground} checked={next.startMinimized} onChange={(event) => setNext({ ...next, startMinimized: event.target.checked })} />Start minimized</label>
+    {!next.runInBackground && <p className="check-hint">Available when “Run in background” is on, so the tray can bring the window back.</p>}
     <label className="check-label"><input type="checkbox" checked={Boolean(next.automaticRename)} onChange={(event) => setNext({ ...next, automaticRename: event.target.checked })} />Automatically rename high-confidence files</label>
     <section className="intake">
       <h3>Shared intake</h3>
