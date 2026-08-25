@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "status": "accepted",
-  "release_inputs_sha256": "d4e1290146109cba58733c4f9d30c22802125211b1407df36b5eb282603cf0f8",
+  "release_inputs_sha256": "0ff02d813957e9cabdcf1707cbefe0ef536c0a0885699584fe4e9d2bbe2f191c",
   "screenshot_path": "docs/qa/latest-implementation.png",
   "screenshot_sha256": "9f5b22cd5bc6d4a59c66b14d1e842f3e781e8d3eaa194035846c12c2ffddac23",
   "reviewer": "Codex primary with Sol Advisor read-only review",
-  "reviewed_at": "2026-08-25T17:50:40Z",
-  "notes": "Inspected fresh 1536x1024 hosted capture against accepted concept; core hierarchy/interaction emphasis aligned; no clipping, collisions, illegible copy, excessive density, or ambiguous focus/selection; expanded formats, date-first filenames, bulk actions, pause control, and changed counts are acceptable alpha.3 evolution; native title bar/1024/hover/motion rely on automated and installed-app gates. Scope is a rendered fidelity review, not a pixel-equality claim."
+  "reviewed_at": "2026-08-25T21:52:04Z",
+  "notes": "Inspected the fresh 1536x1024 hosted capture from Whole-product QA evidence run 32901120674 at commit a86e81b3d13a38d49bfb4691e56b7372570dbaad against the accepted concept; core hierarchy/interaction emphasis aligned; no clipping, collisions, illegible copy, excessive density, or ambiguous focus/selection; expanded formats, date-first filenames, bulk actions, pause control, and changed counts are acceptable alpha.3 evolution; native title bar/1024/hover/motion rely on automated and installed-app gates. Scope is a rendered fidelity review, not a pixel-equality claim."
 }

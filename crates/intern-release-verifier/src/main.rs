@@ -10,6 +10,11 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use minisign_verify::{PublicKey, Signature};
 use serde::Deserialize;
 
+// Tauri CLI 2.11.4 writes `.sig` as STANDARD.encode(SignatureBox::to_string()).
+// The updater manifest carries that encoded file content verbatim; it is not a
+// raw Minisign text file.
+const MAX_TAURI_SIGNATURE_BYTES: usize = 4096;
+
 #[derive(Deserialize)]
 struct TauriConfig {
     plugins: Plugins,
@@ -88,6 +93,32 @@ fn parse_args() -> Result<Input, String> {
     })
 }
 
+fn parse_tauri_updater_signature(signature_text: &str) -> Result<Signature, String> {
+    if signature_text.is_empty()
+        || signature_text.len() > MAX_TAURI_SIGNATURE_BYTES
+        || signature_text
+            .as_bytes()
+            .iter()
+            .any(u8::is_ascii_whitespace)
+    {
+        return Err("Tauri updater signature must be one bounded standard Base64 value".to_owned());
+    }
+    let signature_box = STANDARD
+        .decode(signature_text)
+        .map_err(|_| "malformed Tauri updater signature Base64 wrapper".to_owned())?;
+    let signature_box = std::str::from_utf8(&signature_box)
+        .map_err(|_| "Tauri updater signature wrapper is not UTF-8 Minisign text".to_owned())?;
+    if signature_box.trim() != signature_box {
+        return Err(
+            "Tauri updater signature wrapper must contain an exact Minisign SignatureBox"
+                .to_owned(),
+        );
+    }
+    Signature::decode(signature_box).map_err(|_| {
+        "Tauri updater signature wrapper does not contain a valid Minisign SignatureBox".to_owned()
+    })
+}
+
 fn verify(input: &Input) -> Result<(), String> {
     let tag_version = input
         .tag
@@ -115,8 +146,7 @@ fn verify(input: &Input) -> Result<(), String> {
         .map_err(|error| format!("malformed Tauri updater public key: {error}"))?;
     let signature_text = fs::read_to_string(&input.signature)
         .map_err(|error| format!("cannot read updater signature: {error}"))?;
-    let signature = Signature::decode(signature_text.trim())
-        .map_err(|error| format!("malformed updater signature: {error}"))?;
+    let signature = parse_tauri_updater_signature(&signature_text)?;
     let installer =
         fs::read(&input.installer).map_err(|error| format!("cannot read installer: {error}"))?;
     public_key
@@ -134,7 +164,7 @@ fn verify(input: &Input) -> Result<(), String> {
         .platforms
         .get("windows-x86_64")
         .ok_or_else(|| "latest.json omits windows-x86_64".to_owned())?;
-    if platform.signature.trim() != signature_text.trim() {
+    if platform.signature != signature_text {
         return fail("latest.json signature does not match the detached signature");
     }
     let expected_url = format!(
@@ -170,7 +200,8 @@ mod tests {
         let latest_json = directory.path().join("latest.json");
         let tauri_config = directory.path().join("tauri.conf.json");
         fs::write(&installer, b"test").unwrap();
-        fs::write(&signature, SIGNATURE).unwrap();
+        let tauri_signature = STANDARD.encode(SIGNATURE);
+        fs::write(&signature, &tauri_signature).unwrap();
         fs::write(
             &tauri_config,
             format!(
@@ -179,7 +210,7 @@ mod tests {
             ),
         )
         .unwrap();
-        fs::write(&latest_json, format!(r#"{{"version":"0.1.0-alpha.3","platforms":{{"windows-x86_64":{{"signature":{},"url":"https://github.com/zgbrenner/intern/releases/download/v0.1.0-alpha.3/Intern_0.1.0-alpha.3_x64-setup.exe"}}}}}}"#, serde_json::to_string(SIGNATURE).unwrap())).unwrap();
+        fs::write(&latest_json, format!(r#"{{"version":"0.1.0-alpha.3","platforms":{{"windows-x86_64":{{"signature":{},"url":"https://github.com/zgbrenner/intern/releases/download/v0.1.0-alpha.3/Intern_0.1.0-alpha.3_x64-setup.exe"}}}}}}"#, serde_json::to_string(&tauri_signature).unwrap())).unwrap();
         (
             directory,
             Input {
@@ -194,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_the_exact_signed_installer_and_manifest() {
+    fn accepts_the_tauri_base64_wrapped_signed_installer_and_manifest() {
         let (_directory, input) = fixture();
         verify(&input).unwrap();
     }
@@ -226,10 +257,14 @@ mod tests {
         assert!(
             verify(&input)
                 .unwrap_err()
-                .contains("malformed updater signature")
+                .contains("must be one bounded standard Base64 value")
         );
         let (_directory, input) = fixture();
-        fs::write(&input.signature, SIGNATURE.replacen("y/rU", "z/rU", 1)).unwrap();
+        fs::write(
+            &input.signature,
+            STANDARD.encode(SIGNATURE.replacen("y/rU", "z/rU", 1)),
+        )
+        .unwrap();
         assert!(verify(&input).unwrap_err().contains("does not verify"));
         let (_directory, input) = fixture();
         fs::write(
@@ -250,15 +285,54 @@ mod tests {
         fs::write(&input.latest_json, latest).unwrap();
         assert!(verify(&input).unwrap_err().contains("URL does not name"));
         let (_directory, input) = fixture();
-        let latest = fs::read_to_string(&input.latest_json).unwrap().replace(
-            "signature from minisign secret key",
-            "a different signature",
-        );
+        let tauri_signature = STANDARD.encode(SIGNATURE);
+        let latest = fs::read_to_string(&input.latest_json)
+            .unwrap()
+            .replace(&tauri_signature, &format!("x{tauri_signature}"));
         fs::write(&input.latest_json, latest).unwrap();
         assert!(
             verify(&input)
                 .unwrap_err()
                 .contains("signature does not match")
+        );
+    }
+
+    #[test]
+    fn rejects_raw_double_wrapped_and_oversized_signature_representations() {
+        let (_directory, input) = fixture();
+        fs::write(&input.signature, SIGNATURE).unwrap();
+        assert!(
+            verify(&input)
+                .unwrap_err()
+                .contains("must be one bounded standard Base64 value")
+        );
+
+        let (_directory, input) = fixture();
+        fs::write(
+            &input.signature,
+            STANDARD.encode(STANDARD.encode(SIGNATURE)),
+        )
+        .unwrap();
+        assert!(
+            verify(&input)
+                .unwrap_err()
+                .contains("does not contain a valid Minisign SignatureBox")
+        );
+
+        let (_directory, input) = fixture();
+        fs::write(&input.signature, STANDARD.encode(format!("\n{SIGNATURE}"))).unwrap();
+        assert!(
+            verify(&input)
+                .unwrap_err()
+                .contains("must contain an exact Minisign SignatureBox")
+        );
+
+        let (_directory, input) = fixture();
+        fs::write(&input.signature, "A".repeat(MAX_TAURI_SIGNATURE_BYTES + 1)).unwrap();
+        assert!(
+            verify(&input)
+                .unwrap_err()
+                .contains("must be one bounded standard Base64 value")
         );
     }
 }
