@@ -5,12 +5,13 @@ members = [
     "crates/intern-engine",
     "crates/intern-intake",
     "crates/intern-queue",
+    "crates/intern-release-verifier",
     "crates/intern-worker",
     "src-tauri",
 ]
 
 [workspace.package]
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"

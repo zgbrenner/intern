@@ -1,0 +1,15 @@
+[package]
+name = "intern-release-verifier"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+base64 = "=0.22.1"
+minisign-verify = "=0.2.5"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+
+[dev-dependencies]
+tempfile = "=3.23.0"

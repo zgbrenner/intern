@@ -18,7 +18,26 @@ it('runs non-publishing browser, Windows, model, and installer QA and uploads ev
   expect(workflow).toContain('validate-release-evidence.mjs');
   expect(workflow).toContain('docs/qa/release-evidence-manifest.json');
   expect(workflow).toContain('if: always()');
-  expect(workflow).toContain('actions/upload-artifact@v4');
+  expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4');
+});
+
+it('records bounded Rust workspace test evidence without a PowerShell pipe', async () => {
+  const workflow = await readFile('.github/workflows/qa.yml', 'utf8');
+  const startMarker = '      - name: Run Rust workspace tests with evidence log';
+  const endMarker = '      - name: Build parser worker and the corpus evaluator';
+  const start = workflow.indexOf(startMarker);
+  const end = workflow.indexOf(endMarker);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const rustTestStep = workflow.slice(start, end);
+
+  expect(rustTestStep).toContain('timeout-minutes: 45');
+  expect(rustTestStep).toContain('New-Item -ItemType Directory docs\\qa\\logs -Force | Out-Null');
+  expect(rustTestStep).toContain('& cmd /c "cargo test --locked --workspace --all-targets > docs\\qa\\logs\\cargo-test.log 2>&1"');
+  expect(rustTestStep).toContain('$TestExit = $LASTEXITCODE');
+  expect(rustTestStep).toContain('Get-Content -LiteralPath docs\\qa\\logs\\cargo-test.log');
+  expect(rustTestStep).toContain('if ($TestExit -ne 0) { throw "Rust workspace tests failed" }');
+  expect(rustTestStep).not.toContain('| Tee-Object');
 });
 
 it('never publishes as a side effect of merging to main', async () => {
@@ -26,7 +45,7 @@ it('never publishes as a side effect of merging to main', async () => {
   // Releasing is dispatched deliberately; a merge must not tag or publish.
   expect(workflow).toContain('workflow_dispatch:');
   expect(workflow).not.toContain('branches: [main]');
-  expect(workflow).toContain('group: intern-v0.1.0-alpha.2-release');
+  expect(workflow).toContain('group: intern-v0.1.0-alpha.3-release');
   expect(workflow).toContain('release_target:');
 });
 
@@ -129,15 +148,15 @@ it('attests the installer, and only after its evidence has been accepted', async
   // permissions have to be granted explicitly for the OIDC token to exist.
   expect(workflow).toContain('id-token: write');
   expect(workflow).toContain('attestations: write');
-  expect(workflow).toContain('actions/attest-build-provenance@v2');
+  expect(workflow).toContain('actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2');
   expect(workflow).toContain('subject-path: release/*_x64-setup.exe');
   // Ordering is the substance of this test. Attesting before validation would
   // publish a signed claim about a build that failed its own gates, and
   // attesting after publication would leave the downloadable file unattested.
   expect(workflow.indexOf('validate-release-evidence.mjs')).toBeLessThan(
-    workflow.indexOf('actions/attest-build-provenance@v2'),
+    workflow.indexOf('actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45'),
   );
-  expect(workflow.indexOf('actions/attest-build-provenance@v2')).toBeLessThan(
+  expect(workflow.indexOf('actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45')).toBeLessThan(
     workflow.indexOf('gh release create'),
   );
 });
