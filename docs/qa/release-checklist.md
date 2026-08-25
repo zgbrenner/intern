@@ -1,36 +1,38 @@
 # Intern v0.1.0-alpha.3 release checklist
 
 **Release status: blocked pending exact-main validation and the deliberately
-dispatched release workflow.** Hosted QA run `32873975629` completed every
+dispatched release workflow.** Hosted QA run `32901120674` completed every
 substantive automated gate, then correctly concluded failed at evidence binding
-because its checked-in accepted alpha.2 sign-off was stale. The fresh alpha.3
+because its prior accepted alpha.3 sign-off was bound to stale digest
+`d4e1290146109cba58733c4f9d30c22802125211b1407df36b5eb282603cf0f8`. The fresh alpha.3
 fidelity inspection accepted afterward from that run's uploaded capture, model,
 and installed-smoke artifacts; neither that run nor this checklist authorizes a
 tag or publication.
 
 Historical record: before the fresh hosted capture was reviewed, rendered
-fidelity was **pending/blocked** for alpha.3 because the alpha.2 capture and
-sign-off could not bind the alpha.3 release inputs.
+fidelity was **pending/blocked** for alpha.3 because the prior sign-off could
+not bind the signature-fix release inputs.
 
 ## Hosted QA artifacts and post-run accepted alpha.3 evidence
 
-- Workflow: Whole-product QA evidence, run `32873975629`, attempt `1`.
-- Commit: `0031251523b33818200c9c0a9ab06af2ece876fc`; runner: Windows/X64.
+- Workflow: Whole-product QA evidence, run `32901120674`, attempt `1`.
+- Commit: `a86e81b3d13a38d49bfb4691e56b7372570dbaad`; runner: Windows/X64.
 - Execution result: every substantive automated gate below passed; the final
-  evidence-binding step failed closed on the stale alpha.2 fidelity sign-off.
+  evidence-binding step failed closed on the prior stale-digest fidelity sign-off.
 - Release-input digest:
-  `d4e1290146109cba58733c4f9d30c22802125211b1407df36b5eb282603cf0f8`.
+  `0ff02d813957e9cabdcf1707cbefe0ef536c0a0885699584fe4e9d2bbe2f191c`.
 - Capture: `docs/qa/latest-implementation.png`, 1536×1024, SHA-256
   `9f5b22cd5bc6d4a59c66b14d1e842f3e781e8d3eaa194035846c12c2ffddac23`.
 - Post-run fidelity reviewer: Codex primary with Sol Advisor read-only review,
-  recorded at `2026-08-25T17:50:40Z` in `rendered-fidelity-signoff.json`.
+  recorded at `2026-08-25T21:52:04Z` in `rendered-fidelity-signoff.json`.
 
-| Gate | Status | Hosted run 32873975629 artifact or post-run evidence |
+| Gate | Status | Hosted run 32901120674 artifact or post-run evidence |
 |---|---|---|
+| Frontend unit, lint, and build check | pass | `npm run check`: 18 Vitest files / 141 tests; TypeScript and Vite build passed. |
 | Browser core interaction, accessibility, and 1024-pixel layout | pass | `npm run test:e2e`: 4 Playwright tests; 1536×1024 capture written. |
-| Rendered fidelity review | accepted post-run | Fresh capture, model report, and installed-smoke artifact from the hosted run were reviewed after its stale-sign-off binding failure; the replacement alpha.3 sign-off is bound to the digest above. |
+| Rendered fidelity review | accepted post-run | Fresh capture, model report, and installed-smoke artifact from the hosted run were reviewed after its stale-digest sign-off binding failure; the replacement alpha.3 sign-off is bound to the digest above. |
 | Rust formatting and workspace lint | pass | `cargo fmt --all -- --check`; `cargo clippy --locked --workspace --all-targets -- -D warnings`. |
-| Rust workspace tests | pass | `cargo test --locked --workspace --all-targets`: 272 tests. |
+| Rust workspace tests | pass | `cargo test --locked --workspace --all-targets`: 273 tests. |
 | Pinned runtime assets and native fixtures | pass | `npm run assets:verify -- --require-bundled`: 51 runtime files and 23 license files; 4 native fixture tests. |
 | Windows Tauri/NSIS build | pass | `npm run tauri build -- --bundles nsis -- --locked`: one NSIS installer. |
 | Installer and installed-core smoke | pass | App launch, clean shutdown, runtime inventory, installed worker core path, uninstall, and retained user data all accepted. |
