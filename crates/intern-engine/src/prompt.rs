@@ -67,6 +67,7 @@ and decide what each one means before you choose.
   agreement, statement of work, or order form -> its own effective, start, or commencement date
   notice -> its notice date, or the termination date the notice exists to bring about
   invoice -> the invoice date, never the payment due date
+  email -> the date it was sent; an email is defined by its sent date
   amendment -> the amendment's own date
   filing or certificate -> its filing or issue date
 Never a payment due date, deadline, renewal date, return-by date, or end date. A signature or

@@ -1,5 +1,5 @@
 import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult, UpdateStatus } from './bridge';
-import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
 
 /** Exact size of the single pinned model file this build downloads. */
 export const PINNED_MODEL_BYTES = 1_280_835_840;
@@ -8,16 +8,28 @@ const seedItems: QueueItem[] = [
   { id: 'employment', originalFilename: 'Employment Agreement - John Smith.pdf', status: 'ready', proposedFilename: '2024-04-12 Employment Agreement with John Smith.pdf', confidence: 0.98 },
   { id: 'lease', originalFilename: 'Lease Agreement - 123 Main St.pdf', status: 'review', proposedFilename: '2023-09-15 Lease Agreement between ABC Properties LLC and TenantCo Inc.pdf', confidence: 0.72, description: 'Commercial lease agreement between landlord and tenant for 123 Main St.', evidence: { date: 'Sep 15, 2023', type: 'Lease Agreement', parties: 'ABC Properties LLC; TenantCo Inc.' }, reason: 'Lower confidence due to unclear document type keywords and multiple possible dates.' },
   { id: 'nda', originalFilename: 'NDA - Acme Corp.docx', status: 'ready', proposedFilename: '2024-03-01 Non-Disclosure Agreement with Acme Corp.docx', confidence: 0.95 },
-  // Not a spreadsheet: .xlsx is not in SUPPORTED_EXTENSIONS, so a real one is
-  // rejected with UNSUPPORTED_FORMAT and can never reach `processing`. The demo
-  // queue showed it mid-run at 60% next to a drop zone whose own caption lists
-  // the supported formats and omits spreadsheets.
+  // Stays a PDF even though .xlsx is now supported: the reviewed QA capture
+  // pins this queue's rendered contents, and changing a demo row would force a
+  // re-sign-off for no product reason.
   { id: 'financials', originalFilename: 'Q1 Financials.pdf', status: 'processing', proposedFilename: '2024-03-31 Q1 Financial Statements.pdf', progress: 60 },
   { id: 'service', originalFilename: 'Service Agreement - BlueSky LLC.pdf', status: 'ready', proposedFilename: '2024-02-28 Service Agreement with BlueSky LLC.pdf', confidence: 0.96 },
   { id: 'minutes', originalFilename: 'Board Meeting Minutes - May 7, 2024.docx', status: 'waiting' },
   { id: 'invoice', originalFilename: 'Invoice INV-1001.pdf', status: 'waiting' },
   { id: 'notes', originalFilename: 'Notes from Call - 2024-05-02.txt', status: 'waiting' },
   { id: 'completed', originalFilename: 'Completed lease.pdf', status: 'completed', proposedFilename: '2024-01-22 Lease Agreement.pdf', confidence: 0.93, undoable: true, description: 'Residential lease agreement for a twelve-month term beginning January 22, 2024.' },
+];
+
+/**
+ * Plausible finished operations for browser dev and tests, newest first —
+ * the order the desktop backend returns. Timestamps are fixed so renders are
+ * deterministic.
+ */
+const seedHistory: HistoryEntry[] = [
+  { receiptId: '9', queueItemId: 'completed', at: 1716282900, direction: 'undo', kind: 'rename', stage: 'complete', originalPath: 'C:\\Filed\\2024-05-07 Board Meeting Minutes.docx', newPath: 'C:\\Drop\\Board Meeting Minutes - May 7, 2024.docx' },
+  { receiptId: '7', queueItemId: 'completed', at: 1716282600, direction: 'apply', kind: 'rename', stage: 'complete', originalPath: 'C:\\Drop\\Board Meeting Minutes - May 7, 2024.docx', newPath: 'C:\\Filed\\2024-05-07 Board Meeting Minutes.docx' },
+  { receiptId: '5', queueItemId: 'completed', at: 1716196500, direction: 'apply', kind: 'verified_copy', stage: 'complete', originalPath: 'C:\\Drop\\Invoice INV-1001.pdf', newPath: 'D:\\Archive\\2024-05-02 Invoice INV-1001 from BlueSky LLC.pdf', },
+  { receiptId: '3', queueItemId: 'completed', at: 1716108300, direction: 'apply', kind: 'rename', stage: 'complete', originalPath: 'C:\\Drop\\Completed lease.pdf', newPath: 'C:\\Filed\\2024-01-22 Lease Agreement.pdf' },
+  { receiptId: '1', queueItemId: 'completed', at: 1716021900, direction: 'apply', kind: 'rename', stage: 'complete', originalPath: 'C:\\Drop\\NDA - Acme Corp.docx', newPath: 'C:\\Filed\\2024-03-01 Non-Disclosure Agreement with Acme Corp.docx' },
 ];
 
 export interface InMemoryBridgeOptions {
@@ -52,7 +64,8 @@ function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
 
 function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): DesktopBridge {
   let items = (options.items ?? seedItems).map((item) => ({ ...item }));
-  let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '' };
+  let history = seedHistory.map((entry) => ({ ...entry }));
+  let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false };
   // Deterministic classification so browser dev and e2e runs can exercise the
   // cloud badge without a real sync client: the path only has to mention the
   // provider. Mirrors the DTO the desktop backend returns from folder_classify.
@@ -135,7 +148,13 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
       if (setup.state === 'downloading') throw { code: 'SETUP_BUSY', message: 'a model setup operation is already active' };
       setup = { ...setup, state: 'ready', downloadedBytes: setup.totalBytes, error: undefined };
     },
-    clearHistory: async () => { items = items.filter((item) => item.status !== 'completed' && item.status !== 'failed'); },
+    // Mirrors the backend: clearing history deletes terminal queue rows and,
+    // through cascade, the receipts the history view lists.
+    clearHistory: async () => { items = items.filter((item) => item.status !== 'completed' && item.status !== 'failed'); history = []; },
+    historyList: async () => history.map((entry) => ({ ...entry })),
+    // No file is written in the browser; resolve with the same count the
+    // desktop export reports.
+    historyExport: async () => history.length,
     discardWaiting: async () => {
       const waiting = items.filter((item) => item.status === 'waiting');
       items = items.filter((item) => item.status !== 'waiting');

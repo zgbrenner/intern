@@ -7,7 +7,10 @@ use std::{
     time::Duration,
 };
 
-use intern_core::{OperationDirection, OperationStage, QueueStatus};
+use intern_core::{
+    HISTORY_LIMIT, HistoryEntry, OperationDirection, OperationKind, OperationStage, QueueStatus,
+    QueueStore,
+};
 use intern_engine::{
     DocumentAnalysis, DocumentSource, Engine, LlamaServer, ModelClient, ModelManifest,
     ServerOptions, SupervisedWorker, prepare_worker_temp_root,
@@ -620,6 +623,12 @@ pub struct AppState {
     /// Why the watcher is not running even though intake is enabled — a stale
     /// intake folder must surface in `intake_status`, not block launch/save.
     intake_error: Mutex<Option<String>>,
+    /// A dedicated read-only connection to the queue database for the history
+    /// view. The pipeline owns its store privately; history listing and CSV
+    /// export are pure reads, so they take their own SQLite session (WAL
+    /// readers never block the pipeline's writes) instead of widening the
+    /// pipeline's surface.
+    history: QueueStore,
 }
 
 impl AppState {
@@ -683,6 +692,12 @@ impl AppState {
             settings.clone(),
         )?);
         pipeline.recover()?;
+        // Opened after the pipeline so the pipeline's own store has already
+        // migrated the schema this connection reads.
+        let history = QueueStore::open(data.join("queue.sqlite3")).map_err(|_| CommandError {
+            code: "APP_DATA_UNAVAILABLE".into(),
+            message: "the rename history database is unavailable".into(),
+        })?;
         let scheduler = PipelineScheduler::start(
             Arc::clone(&pipeline),
             Arc::clone(&setup.model_ready),
@@ -708,6 +723,7 @@ impl AppState {
             identity: Mutex::new(identity),
             intake: Mutex::new(None),
             intake_error: Mutex::new(None),
+            history,
         };
         if matches!(state.setup.get()?.state, SetupStatus::Ready) {
             state.schedule()?;
@@ -815,6 +831,35 @@ impl AppState {
         let _ = self.app.emit("intake://changed", dto);
         Ok(())
     }
+
+    /// The settings as currently stored, for startup decisions (tray,
+    /// start-hidden). A missing file is the defaults, same as `load`.
+    pub(crate) fn settings_snapshot(&self) -> AppSettings {
+        self.settings.load().unwrap_or_default()
+    }
+
+    /// Whether a main-window close should hide to the tray instead of running
+    /// the normal exit path. Read fresh on every close so a settings save
+    /// takes effect on the very next close, and erring toward `false`: a
+    /// broken settings file must fall back to the ordinary exit, never to a
+    /// window that hides with no tray to bring it back.
+    pub(crate) fn hide_window_on_close(&self) -> bool {
+        self.settings
+            .load()
+            .map(|settings| crate::tray::close_hides_to_tray(settings.run_in_background))
+            .unwrap_or(false)
+    }
+}
+
+/// The explicit quit path, used by the tray's "Quit Intern" item: shut the
+/// pipeline (and with it the local model process) down deliberately, then
+/// leave without starting window teardown - the same shape as the close-time
+/// exit, which deliberately avoids wedging in WebView destruction.
+pub(crate) fn shutdown_and_exit(app: &AppHandle) -> ! {
+    if let Some(state) = app.try_state::<AppState>() {
+        let _ = state.pipeline.shutdown();
+    }
+    std::process::exit(0);
 }
 
 fn intake_state_conflict() -> CommandError {
@@ -945,7 +990,16 @@ pub fn settings_save(
             .to_string_lossy()
             .into_owned();
     }
+    // Applied before anything persists so an operating system that refuses
+    // the login entry leaves the stored settings unchanged - the dialog shows
+    // the error against a state that is still true.
+    if previous.start_at_login != settings.start_at_login {
+        apply_autostart(&state.app, settings.start_at_login)?;
+    }
     state.settings.save(&settings)?;
+    if previous.run_in_background != settings.run_in_background {
+        crate::tray::sync_tray(&state.app, settings.run_in_background);
+    }
     if previous.intake_folder != settings.intake_folder
         || previous.intake_enabled != settings.intake_enabled
         || previous.process_others_uploads != settings.process_others_uploads
@@ -955,6 +1009,29 @@ pub fn settings_save(
         state.emit_intake_changed()?;
     }
     Ok(())
+}
+
+/// Enables or disables the start-at-login entry to match the setting.
+///
+/// Registration lives with the operating system and can be refused (a locked
+/// registry key, a read-only autostart directory); that refusal becomes an
+/// ordinary save error the dialog can show, never a crash.
+fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), CommandError> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    let result = if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+    result.map_err(|_| CommandError {
+        code: "AUTOSTART_FAILED".into(),
+        message: if enabled {
+            "starting Intern at sign-in could not be enabled".into()
+        } else {
+            "starting Intern at sign-in could not be disabled".into()
+        },
+    })
 }
 
 /// Intake-related validation for `settings_save`, before anything persists.
@@ -1059,6 +1136,168 @@ pub fn history_clear(state: State<'_, AppState>) -> Result<(), CommandError> {
     Ok(())
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntryDto {
+    receipt_id: String,
+    queue_item_id: String,
+    /// Unix seconds; the frontend formats it locally, the CSV as ISO-8601 UTC.
+    at: i64,
+    /// "apply" | "undo" (serde snake_case of the core enum).
+    direction: OperationDirection,
+    /// "rename" | "verified_copy".
+    kind: OperationKind,
+    /// "complete" | "rolled_back" — only terminal stages are listed.
+    stage: OperationStage,
+    original_path: String,
+    new_path: String,
+}
+
+fn history_entry_dto(entry: HistoryEntry) -> HistoryEntryDto {
+    HistoryEntryDto {
+        receipt_id: entry.receipt_id.to_string(),
+        queue_item_id: entry.queue_item_id.to_string(),
+        at: entry.at,
+        direction: entry.direction,
+        kind: entry.kind,
+        stage: entry.stage,
+        original_path: entry.original_path.to_string_lossy().into_owned(),
+        new_path: entry.new_path.to_string_lossy().into_owned(),
+    }
+}
+
+fn history_read_error(error: intern_core::InternError) -> CommandError {
+    CommandError {
+        code: error.code().as_str().into(),
+        message: "the rename history could not be read".into(),
+    }
+}
+
+fn history_export_failed(message: impl Into<String>) -> CommandError {
+    CommandError {
+        code: "HISTORY_EXPORT_FAILED".into(),
+        message: message.into(),
+    }
+}
+
+#[tauri::command]
+pub fn history_list(state: State<'_, AppState>) -> Result<Vec<HistoryEntryDto>, CommandError> {
+    Ok(state
+        .history
+        .list_operation_history(HISTORY_LIMIT)
+        .map_err(history_read_error)?
+        .into_iter()
+        .map(history_entry_dto)
+        .collect())
+}
+
+/// Writes the rename history to `path` as RFC 4180 CSV and reports how many
+/// operations were written.
+///
+/// The path comes from the native save dialog, so it is expected to be
+/// absolute with an existing parent folder; anything else is refused before a
+/// byte is written rather than being resolved against whatever the process's
+/// working directory happens to be.
+#[tauri::command]
+pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize, CommandError> {
+    let destination = Path::new(&path);
+    if !destination.is_absolute() {
+        return Err(history_export_failed("the export path must be absolute"));
+    }
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| history_export_failed("the export path has no parent folder"))?;
+    if !parent.is_dir() {
+        return Err(history_export_failed("the export folder does not exist"));
+    }
+    let entries = state
+        .history
+        .list_operation_history(HISTORY_LIMIT)
+        .map_err(history_read_error)?;
+    std::fs::write(destination, history_csv(&entries))
+        .map_err(|_| history_export_failed("the history CSV could not be written"))?;
+    Ok(entries.len())
+}
+
+/// Renders history entries as RFC 4180 CSV: CRLF row endings, and any field
+/// containing a comma, quote, or line break is quoted with quotes doubled.
+fn history_csv(entries: &[HistoryEntry]) -> String {
+    let mut csv = String::from("at,direction,kind,stage,originalPath,newPath\r\n");
+    for entry in entries {
+        let fields = [
+            iso8601_utc(entry.at),
+            match entry.direction {
+                OperationDirection::Apply => "apply".into(),
+                OperationDirection::Undo => "undo".into(),
+            },
+            match entry.kind {
+                OperationKind::Rename => "rename".into(),
+                OperationKind::VerifiedCopy => "verified_copy".into(),
+            },
+            match entry.stage {
+                OperationStage::Complete => "complete".to_owned(),
+                OperationStage::RolledBack => "rolled_back".to_owned(),
+                // Unreachable for listed history (terminal stages only), but a
+                // receipt must never be silently mislabeled if that changes.
+                other => format!("{other:?}").to_lowercase(),
+            },
+            entry.original_path.to_string_lossy().into_owned(),
+            entry.new_path.to_string_lossy().into_owned(),
+        ];
+        let row = fields
+            .iter()
+            .map(|field| csv_field(field))
+            .collect::<Vec<_>>()
+            .join(",");
+        csv.push_str(&row);
+        csv.push_str("\r\n");
+    }
+    csv
+}
+
+fn csv_field(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
+
+/// Formats unix seconds as ISO-8601 UTC ("2024-04-12T09:30:00Z") without
+/// pulling in a date-time dependency (days-from-civil inverse, Howard
+/// Hinnant's algorithm).
+fn iso8601_utc(unix_seconds: i64) -> String {
+    let days = unix_seconds.div_euclid(86_400);
+    let seconds = unix_seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        seconds / 3600,
+        (seconds / 60) % 60,
+        seconds % 60
+    )
+}
+
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
+    let year = if month <= 2 { year + 1 } else { year };
+    (year, month as u32, day as u32)
+}
+
 /// Abandons every item still waiting, for a folder chosen by mistake.
 ///
 /// Returns the number dropped so the interface can say what it did rather than
@@ -1105,7 +1344,15 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
         evidence,
         reason: proposal
             .filter(|record| !record.reasons.is_empty())
-            .map(|record| record.reasons.join(", ")),
+            .map(|record| record.reasons.join(", "))
+            // A DUPLICATE flag is raised before analysis, so no proposal
+            // carries its reason; name the file the content is already
+            // filed under.
+            .or_else(|| {
+                item.duplicate_of
+                    .as_deref()
+                    .map(|name| format!("Duplicate of {name}"))
+            }),
         error_code: item.error_code.map(|code| code.as_str().to_owned()),
         undoable: item.status == QueueStatus::Completed
             && item.receipt.as_ref().is_some_and(|receipt| {
@@ -1420,5 +1667,138 @@ mod scheduler_tests {
             }))
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use std::path::PathBuf;
+
+    use intern_core::{HistoryEntry, OperationDirection, OperationKind, OperationStage};
+
+    use super::{history_csv, history_entry_dto, iso8601_utc};
+
+    fn entry(at: i64, original: &str, new: &str) -> HistoryEntry {
+        HistoryEntry {
+            receipt_id: 3,
+            queue_item_id: 7,
+            at,
+            direction: OperationDirection::Apply,
+            kind: OperationKind::Rename,
+            stage: OperationStage::Complete,
+            original_path: PathBuf::from(original),
+            new_path: PathBuf::from(new),
+        }
+    }
+
+    #[test]
+    fn timestamps_render_as_iso_8601_utc_from_unix_seconds() {
+        assert_eq!(iso8601_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso8601_utc(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(iso8601_utc(1_713_173_696), "2024-04-15T09:34:56Z");
+        assert_eq!(iso8601_utc(1_755_849_600), "2025-08-22T08:00:00Z");
+        // Before the epoch still renders a real calendar date, not garbage.
+        assert_eq!(iso8601_utc(-1), "1969-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn history_csv_is_rfc_4180_with_quoting_only_where_needed() {
+        let plain = entry(0, "C:\\drop\\scan.pdf", "C:\\filed\\2024 Agreement.pdf");
+        let awkward = HistoryEntry {
+            direction: OperationDirection::Undo,
+            kind: OperationKind::VerifiedCopy,
+            stage: OperationStage::RolledBack,
+            ..entry(
+                1_713_173_696,
+                "C:\\drop\\comma, quote \" and\nnewline.pdf",
+                "C:\\filed\\plain.pdf",
+            )
+        };
+
+        let csv = history_csv(&[awkward, plain]);
+
+        let mut lines = csv.split("\r\n");
+        assert_eq!(
+            lines.next(),
+            Some("at,direction,kind,stage,originalPath,newPath")
+        );
+        assert_eq!(
+            lines.next(),
+            Some(
+                "2024-04-15T09:34:56Z,undo,verified_copy,rolled_back,\
+                 \"C:\\drop\\comma, quote \"\" and\nnewline.pdf\",C:\\filed\\plain.pdf"
+            )
+        );
+        assert_eq!(
+            lines.next(),
+            Some(
+                "1970-01-01T00:00:00Z,apply,rename,complete,C:\\drop\\scan.pdf,C:\\filed\\2024 Agreement.pdf"
+            )
+        );
+        assert_eq!(lines.next(), Some(""));
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn history_dto_serializes_the_camel_case_wire_contract() {
+        let json = serde_json::to_value(history_entry_dto(entry(
+            1_713_173_696,
+            "C:/drop/scan.pdf",
+            "C:/filed/2024 Agreement.pdf",
+        )))
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "receiptId": "3",
+                "queueItemId": "7",
+                "at": 1_713_173_696i64,
+                "direction": "apply",
+                "kind": "rename",
+                "stage": "complete",
+                "originalPath": "C:/drop/scan.pdf",
+                "newPath": "C:/filed/2024 Agreement.pdf",
+            })
+        );
+    }
+}
+
+#[cfg(test)]
+mod duplicate_reason_tests {
+    use std::path::PathBuf;
+
+    use intern_core::{ErrorCode, QueueStatus};
+    use intern_queue::PipelineItem;
+
+    use super::queue_item_dto;
+
+    fn duplicate_item(duplicate_of: Option<&str>) -> PipelineItem {
+        PipelineItem {
+            id: 7,
+            source_path: PathBuf::from("C:/drop/copy.pdf"),
+            source_hash: "hash".into(),
+            status: QueueStatus::NeedsReview,
+            processing_failures: 0,
+            error_code: Some(ErrorCode::Duplicate),
+            proposal: None,
+            receipt: None,
+            duplicate_of: duplicate_of.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn duplicate_review_items_surface_the_filed_name_as_their_reason() {
+        let dto = queue_item_dto(duplicate_item(Some("2024 - Filed Agreement.pdf"))).unwrap();
+        assert_eq!(
+            dto.reason.as_deref(),
+            Some("Duplicate of 2024 - Filed Agreement.pdf")
+        );
+        assert_eq!(dto.error_code.as_deref(), Some("DUPLICATE"));
+
+        // A cleared history leaves the flag without a referent: no fabricated
+        // reason, and the item stays actionable through its error code.
+        let stale = queue_item_dto(duplicate_item(None)).unwrap();
+        assert_eq!(stale.reason, None);
+        assert_eq!(stale.error_code.as_deref(), Some("DUPLICATE"));
     }
 }

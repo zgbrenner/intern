@@ -10,11 +10,23 @@ use tempfile::tempdir;
 fn canonical_file_accepts_only_existing_supported_regular_files() {
     let temp = tempdir().unwrap();
     let pdf = temp.path().join("Contract.PDF");
-    let unsupported = temp.path().join("sheet.xlsx");
+    let sheet = temp.path().join("sheet.xlsx");
+    let email = temp.path().join("message.eml");
+    let unsupported = temp.path().join("deck.pptx");
     fs::write(&pdf, b"pdf").unwrap();
-    fs::write(&unsupported, b"sheet").unwrap();
+    fs::write(&sheet, b"sheet").unwrap();
+    fs::write(&email, b"email").unwrap();
+    fs::write(&unsupported, b"deck").unwrap();
 
     assert_eq!(canonical_file(&pdf).unwrap(), pdf.canonicalize().unwrap());
+    assert_eq!(
+        canonical_file(&sheet).unwrap(),
+        sheet.canonicalize().unwrap()
+    );
+    assert_eq!(
+        canonical_file(&email).unwrap(),
+        email.canonicalize().unwrap()
+    );
     assert!(canonical_file(&unsupported).is_err());
     assert!(canonical_file(&temp.path().join("missing.pdf")).is_err());
 }

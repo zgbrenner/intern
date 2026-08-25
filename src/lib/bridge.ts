@@ -1,4 +1,4 @@
-import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
 
 /** A JSON-safe local document reference that Task 6 can pass to Tauri. */
 export interface FileSelection {
@@ -28,6 +28,12 @@ export interface SelectionBoundary {
   pickFolder(): Promise<FolderSelection | undefined>;
   pickExistingModelFiles(): Promise<ExistingModelFiles | undefined>;
   resolveDrop(payload: unknown): Promise<SelectionResult>;
+  /**
+   * Native "save as" for the history CSV. Resolves with the chosen path, or
+   * undefined when the dialog is canceled. Optional: the browser boundary has
+   * no native save dialog, and the in-memory export ignores the path anyway.
+   */
+  pickHistoryExportPath?(): Promise<string | undefined>;
 }
 
 export interface DesktopBridge {
@@ -49,6 +55,14 @@ export interface DesktopBridge {
   setupCancel(): Promise<void>;
   setupChooseExisting(files: ExistingModelFiles): Promise<void>;
   clearHistory(): Promise<void>;
+  /** Finished rename/undo operations, newest first (capped at 500). */
+  historyList(): Promise<HistoryEntry[]>;
+  /**
+   * Write the rename history to `path` as CSV. Resolves with the number of
+   * operations written. The path must be absolute in the desktop app; the
+   * in-memory bridge ignores it.
+   */
+  historyExport(path: string): Promise<number>;
   /**
    * Abandon every item still waiting, for a folder chosen by mistake.
    *

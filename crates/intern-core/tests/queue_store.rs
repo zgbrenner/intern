@@ -5,11 +5,36 @@ use std::{
     thread,
 };
 
-use intern_core::{ErrorCode, FileApplier, FileSystem, QueueStatus, QueueStore, StdFileSystem};
+use intern_core::{
+    ErrorCode, FileApplier, FileSystem, HISTORY_LIMIT, OperationDirection, OperationKind,
+    OperationStage, QueueStatus, QueueStore, StdFileSystem, source_path_key,
+};
 use tempfile::TempDir;
 
 fn store(temp: &TempDir) -> QueueStore {
     QueueStore::open(temp.path().join("queue.sqlite3")).unwrap()
+}
+
+fn advance_to_ready(db: &QueueStore, id: i64) {
+    assert_eq!(db.claim_next().unwrap().unwrap().id, id);
+    db.transition(id, QueueStatus::Extracting, QueueStatus::Analyzing, None)
+        .unwrap();
+    db.transition(id, QueueStatus::Analyzing, QueueStatus::Ready, None)
+        .unwrap();
+}
+
+/// Enqueues `source` and completes it through a real journalled apply so the
+/// completed row carries an apply/complete receipt naming `destination`.
+fn complete_via_apply(db: &Arc<QueueStore>, source: &Path, destination: &Path) -> i64 {
+    let hash = StdFileSystem.hash(source).unwrap();
+    let item = db.enqueue(source, &hash).unwrap();
+    advance_to_ready(db, item.id);
+    db.begin_applying(item.id, QueueStatus::Ready).unwrap();
+    let receipt = FileApplier::local(Arc::clone(db))
+        .apply(item.id, source, destination, &hash)
+        .unwrap();
+    db.complete_apply(item.id, receipt.id).unwrap();
+    item.id
 }
 
 #[test]
@@ -666,4 +691,219 @@ fn v2_empty_second_undo_does_not_bind_historical_first_undo_receipt() {
     assert_eq!(store.list().unwrap()[0].status, QueueStatus::Applying);
     assert!(!original.exists());
     assert!(second_published.exists());
+}
+
+#[test]
+fn find_completed_duplicate_reports_the_filed_name_and_skips_pending_or_undone_items() {
+    let temp = TempDir::new().unwrap();
+    let db = Arc::new(store(&temp));
+    let original = temp.path().join("original.pdf");
+    fs::write(&original, b"same-content").unwrap();
+    let hash = StdFileSystem.hash(&original).unwrap();
+    let filed = temp.path().join("2024 - Filed Agreement.pdf");
+    let completed_id = complete_via_apply(&db, &original, &filed);
+
+    // A pending twin holding the same content has been filed nowhere yet.
+    let pending = temp.path().join("pending.pdf");
+    fs::write(&pending, b"same-content").unwrap();
+    db.enqueue(&pending, &hash).unwrap();
+
+    let incoming_key = source_path_key(&temp.path().join("incoming.pdf"));
+    let found = db
+        .find_completed_duplicate(&hash, &incoming_key)
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.queue_item_id, completed_id);
+    assert_eq!(
+        found.filed_as.as_deref(),
+        Some("2024 - Filed Agreement.pdf")
+    );
+    assert_eq!(found.source_path, original);
+
+    // The completed item's own path is excluded: re-adding the same file at
+    // the same place is the existing same-item dedupe, not a duplicate flag.
+    assert!(
+        db.find_completed_duplicate(&hash, &source_path_key(&original))
+            .unwrap()
+            .is_none()
+    );
+
+    // Undo returns the content home and the item to Ready; it no longer
+    // counts as a filed duplicate.
+    db.begin_applying(completed_id, QueueStatus::Completed)
+        .unwrap();
+    let receipt = db.load_receipt(completed_id).unwrap().unwrap();
+    let undo = FileApplier::local(Arc::clone(&db))
+        .undo(completed_id, &receipt)
+        .unwrap();
+    db.complete_undo(completed_id, undo.id).unwrap();
+    assert!(
+        db.find_completed_duplicate(&hash, &incoming_key)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn most_recent_completed_duplicate_wins_and_keep_original_reports_no_filed_name() {
+    let temp = TempDir::new().unwrap();
+    let db = Arc::new(store(&temp));
+    let first = temp.path().join("first.pdf");
+    fs::write(&first, b"shared-content").unwrap();
+    let hash = StdFileSystem.hash(&first).unwrap();
+    complete_via_apply(&db, &first, &temp.path().join("First Filed.pdf"));
+
+    let second = temp.path().join("second.pdf");
+    fs::write(&second, b"shared-content").unwrap();
+    let kept = db.enqueue(&second, &hash).unwrap();
+    advance_to_ready(&db, kept.id);
+    db.complete_keep_original(kept.id, QueueStatus::Ready)
+        .unwrap();
+
+    let found = db
+        .find_completed_duplicate(&hash, &source_path_key(&temp.path().join("third.pdf")))
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.queue_item_id, kept.id);
+    assert_eq!(found.filed_as, None);
+    assert_eq!(found.source_path, second);
+}
+
+#[test]
+fn operation_history_lists_finished_work_newest_first_and_hides_in_flight_receipts() {
+    let temp = TempDir::new().unwrap();
+    let db = Arc::new(store(&temp));
+    let original = temp.path().join("scan.pdf");
+    fs::write(&original, b"content").unwrap();
+    let filed = temp.path().join("2024-04-12 Employment Agreement.pdf");
+    let item_id = complete_via_apply(&db, &original, &filed);
+
+    // Undoing the rename records a second, newer terminal receipt.
+    db.begin_applying(item_id, QueueStatus::Completed).unwrap();
+    let applied = db.load_receipt(item_id).unwrap().unwrap();
+    let undo = FileApplier::local(Arc::clone(&db))
+        .undo(item_id, &applied)
+        .unwrap();
+    db.complete_undo(item_id, undo.id).unwrap();
+
+    // A receipt still mid-operation is applier bookkeeping, not history.
+    let pending = db
+        .enqueue(Path::new("in-flight.pdf"), "in-flight-hash")
+        .unwrap();
+    let inspector = rusqlite::Connection::open(temp.path().join("queue.sqlite3")).unwrap();
+    inspector
+        .execute(
+            "INSERT INTO operation_receipts(
+               queue_item_id, direction, source_path, destination_path, pre_hash,
+               operation_kind, stage, source_exists, destination_exists, temporary_exists,
+               created_at, updated_at
+             ) VALUES(?1, 'apply', 'in-flight.pdf', 'renamed.pdf', 'in-flight-hash',
+                      'rename', 'published', 0, 1, 0, 9999999999, 9999999999)",
+            [pending.id],
+        )
+        .unwrap();
+
+    let history = db.list_operation_history(10).unwrap();
+    assert_eq!(history.len(), 2);
+    let newest = &history[0];
+    assert_eq!(newest.receipt_id, undo.id);
+    assert_eq!(newest.queue_item_id, item_id);
+    assert_eq!(newest.direction, OperationDirection::Undo);
+    assert_eq!(newest.stage, OperationStage::Complete);
+    assert_eq!(newest.original_path, filed);
+    assert_eq!(newest.new_path, original);
+    let earlier = &history[1];
+    assert_eq!(earlier.queue_item_id, item_id);
+    assert_eq!(earlier.direction, OperationDirection::Apply);
+    assert_eq!(earlier.kind, OperationKind::Rename);
+    assert_eq!(earlier.stage, OperationStage::Complete);
+    assert_eq!(earlier.original_path, original);
+    assert_eq!(earlier.new_path, filed);
+    assert!(newest.at >= earlier.at);
+}
+
+#[test]
+fn operation_history_honors_the_requested_limit_and_caps_at_five_hundred() {
+    let temp = TempDir::new().unwrap();
+    let db = store(&temp);
+    let item = db.enqueue(Path::new("bulk.pdf"), "bulk-hash").unwrap();
+    let inspector = rusqlite::Connection::open(temp.path().join("queue.sqlite3")).unwrap();
+    let mut insert = inspector
+        .prepare(
+            "INSERT INTO operation_receipts(
+               queue_item_id, direction, source_path, destination_path, pre_hash,
+               operation_kind, stage, source_exists, destination_exists, temporary_exists,
+               created_at, updated_at
+             ) VALUES(?1, 'apply', 'bulk.pdf', 'renamed.pdf', 'bulk-hash',
+                      'rename', 'complete', 0, 1, 0, ?2, ?2)",
+        )
+        .unwrap();
+    let total = HISTORY_LIMIT + 5;
+    for moment in 0..total {
+        insert
+            .execute(rusqlite::params![item.id, moment as i64])
+            .unwrap();
+    }
+
+    assert_eq!(db.list_operation_history(3).unwrap().len(), 3);
+    let capped = db.list_operation_history(total + 100).unwrap();
+    assert_eq!(capped.len(), HISTORY_LIMIT);
+    assert_eq!(capped[0].at, (total - 1) as i64);
+    assert!(capped.windows(2).all(|pair| pair[0].at >= pair[1].at));
+}
+
+#[test]
+fn duplicate_flag_and_retry_are_compare_and_swap_guarded() {
+    let temp = TempDir::new().unwrap();
+    let db = store(&temp);
+    let item = db.enqueue(Path::new("dup.pdf"), "h1").unwrap();
+
+    let flagged = db
+        .transition(
+            item.id,
+            QueueStatus::Queued,
+            QueueStatus::NeedsReview,
+            Some(ErrorCode::Duplicate),
+        )
+        .unwrap();
+    assert_eq!(flagged.status, QueueStatus::NeedsReview);
+    assert_eq!(flagged.error_code, Some(ErrorCode::Duplicate));
+
+    let retried = db.retry_duplicate(item.id).unwrap();
+    assert_eq!(retried.status, QueueStatus::Queued);
+    assert_eq!(retried.error_code, None);
+
+    // Once a session claims the item, the flag loses the race and the claim
+    // is left untouched.
+    assert_eq!(db.claim_next().unwrap().unwrap().id, item.id);
+    let conflict = db
+        .transition(
+            item.id,
+            QueueStatus::Queued,
+            QueueStatus::NeedsReview,
+            Some(ErrorCode::Duplicate),
+        )
+        .unwrap_err();
+    assert_eq!(conflict.code(), ErrorCode::StateConflict);
+    assert_eq!(db.list().unwrap()[0].status, QueueStatus::Extracting);
+
+    // A review item that is not a duplicate cannot take the requeue shortcut.
+    db.transition(
+        item.id,
+        QueueStatus::Extracting,
+        QueueStatus::Analyzing,
+        None,
+    )
+    .unwrap();
+    db.transition(
+        item.id,
+        QueueStatus::Analyzing,
+        QueueStatus::NeedsReview,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        db.retry_duplicate(item.id).unwrap_err().code(),
+        ErrorCode::StateConflict
+    );
 }

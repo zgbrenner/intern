@@ -9,7 +9,7 @@ use std::{
 
 use intern_core::{
     ErrorCode, FileApplier, InternError, OperationReceipt, QueueItem, QueueStatus, QueueStore,
-    StdFileSystem,
+    StdFileSystem, source_path_key,
 };
 use intern_engine::{DocumentAnalysis, DocumentSource, ExtractProgress, ProposalStatus};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -356,6 +356,11 @@ pub struct PipelineItem {
     pub error_code: Option<ErrorCode>,
     pub proposal: Option<ProposalRecord>,
     pub receipt: Option<OperationReceipt>,
+    /// For an item flagged DUPLICATE: the name its content is already filed
+    /// under (the completed apply's destination leaf, or the completed item's
+    /// original filename for keep-original completions). `None` once the
+    /// completed row is gone, e.g. after the history was cleared.
+    pub duplicate_of: Option<String>,
 }
 
 pub struct Pipeline {
@@ -453,12 +458,40 @@ impl Pipeline {
         let mut queued = Vec::with_capacity(paths.len());
         for path in paths {
             let fingerprint = self.files.fingerprint(path)?;
-            queued.push(self.store.enqueue(path, &fingerprint)?);
+            let mut item = self.store.enqueue(path, &fingerprint)?;
+            if item.status == QueueStatus::Queued {
+                item = self.flag_if_completed_duplicate(item)?;
+            }
+            queued.push(item);
         }
         if !queued.is_empty() {
             self.events.queue_changed();
         }
         Ok(queued)
+    }
+
+    /// Flags a just-queued item whose content is already filed as completed.
+    ///
+    /// Enqueue holds no run lock, so the flag is a compare-and-swap on the
+    /// Queued status: if the scheduler claimed the item between the lookup and
+    /// the transition, the claim wins and the item analyzes normally.
+    fn flag_if_completed_duplicate(&self, item: QueueItem) -> PipelineResult<QueueItem> {
+        let duplicate = self
+            .store
+            .find_completed_duplicate(&item.source_hash, &source_path_key(&item.source_path))?;
+        if duplicate.is_none() {
+            return Ok(item);
+        }
+        match self.store.transition(
+            item.id,
+            QueueStatus::Queued,
+            QueueStatus::NeedsReview,
+            Some(ErrorCode::Duplicate),
+        ) {
+            Ok(flagged) => Ok(flagged),
+            Err(error) if error.code() == ErrorCode::StateConflict => Ok(item),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn list(&self) -> PipelineResult<Vec<PipelineItem>> {
@@ -468,6 +501,27 @@ impl Pipeline {
             .map(|item| {
                 let proposal = self.repository.load_proposal(item.id)?;
                 let receipt = self.store.load_receipt(item.id)?;
+                let duplicate_of = if item.status == QueueStatus::NeedsReview
+                    && item.error_code == Some(ErrorCode::Duplicate)
+                {
+                    self.store
+                        .find_completed_duplicate(
+                            &item.source_hash,
+                            &source_path_key(&item.source_path),
+                        )?
+                        .map(|duplicate| {
+                            duplicate.filed_as.unwrap_or_else(|| {
+                                duplicate
+                                    .source_path
+                                    .file_name()
+                                    .unwrap_or(duplicate.source_path.as_os_str())
+                                    .to_string_lossy()
+                                    .into_owned()
+                            })
+                        })
+                } else {
+                    None
+                };
                 Ok(PipelineItem {
                     id: item.id,
                     source_path: item.source_path,
@@ -477,6 +531,7 @@ impl Pipeline {
                     error_code: item.error_code,
                     proposal,
                     receipt,
+                    duplicate_of,
                 })
             })
             .collect()
@@ -941,6 +996,15 @@ impl Pipeline {
             let result = self.files.reconcile(&claimed);
             self.events.queue_changed();
             return result;
+        }
+        if item.status == QueueStatus::NeedsReview && item.error_code == Some(ErrorCode::Duplicate)
+        {
+            // "Process anyway": the duplicate flag was set before any
+            // analysis, so clearing it simply returns the item to the queue
+            // for a normal run.
+            self.store.retry_duplicate(id)?;
+            self.events.queue_changed();
+            return Ok(());
         }
         match item.status {
             QueueStatus::Failed => {

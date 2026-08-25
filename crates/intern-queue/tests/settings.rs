@@ -25,6 +25,8 @@ fn settings_saved_before_the_intake_fields_existed_load_with_defaults() {
             intake_enabled: false,
             process_others_uploads: false,
             machine_label: String::new(),
+            run_in_background: false,
+            start_at_login: false,
         }
     );
 }
@@ -44,6 +46,8 @@ fn save_replaces_existing_content_atomically_and_round_trips_the_intake_fields()
         intake_enabled: true,
         process_others_uploads: true,
         machine_label: "study desk".into(),
+        run_in_background: true,
+        start_at_login: true,
     };
     store.save(&settings).unwrap();
 
@@ -55,6 +59,8 @@ fn save_replaces_existing_content_atomically_and_round_trips_the_intake_fields()
         "intakeEnabled",
         "processOthersUploads",
         "machineLabel",
+        "runInBackground",
+        "startAtLogin",
     ] {
         assert!(written.contains(key), "missing camelCase key {key}");
     }

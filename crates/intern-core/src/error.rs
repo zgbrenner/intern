@@ -17,6 +17,7 @@ pub enum ErrorCode {
     IoError,
     InvalidData,
     ModelOutputInvalid,
+    Duplicate,
 }
 
 impl ErrorCode {
@@ -32,6 +33,7 @@ impl ErrorCode {
             Self::IoError => "IO_ERROR",
             Self::InvalidData => "INVALID_DATA",
             Self::ModelOutputInvalid => "MODEL_OUTPUT_INVALID",
+            Self::Duplicate => "DUPLICATE",
         }
     }
 
@@ -47,6 +49,7 @@ impl ErrorCode {
             "IO_ERROR" => Self::IoError,
             "INVALID_DATA" => Self::InvalidData,
             "MODEL_OUTPUT_INVALID" => Self::ModelOutputInvalid,
+            "DUPLICATE" => Self::Duplicate,
             _ => return None,
         })
     }
