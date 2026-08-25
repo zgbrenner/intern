@@ -21,6 +21,25 @@ it('runs non-publishing browser, Windows, model, and installer QA and uploads ev
   expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4');
 });
 
+it('records bounded Rust workspace test evidence without a PowerShell pipe', async () => {
+  const workflow = await readFile('.github/workflows/qa.yml', 'utf8');
+  const startMarker = '      - name: Run Rust workspace tests with evidence log';
+  const endMarker = '      - name: Build parser worker and the corpus evaluator';
+  const start = workflow.indexOf(startMarker);
+  const end = workflow.indexOf(endMarker);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const rustTestStep = workflow.slice(start, end);
+
+  expect(rustTestStep).toContain('timeout-minutes: 45');
+  expect(rustTestStep).toContain('New-Item -ItemType Directory docs\\qa\\logs -Force | Out-Null');
+  expect(rustTestStep).toContain('& cmd /c "cargo test --locked --workspace --all-targets > docs\\qa\\logs\\cargo-test.log 2>&1"');
+  expect(rustTestStep).toContain('$TestExit = $LASTEXITCODE');
+  expect(rustTestStep).toContain('Get-Content -LiteralPath docs\\qa\\logs\\cargo-test.log');
+  expect(rustTestStep).toContain('if ($TestExit -ne 0) { throw "Rust workspace tests failed" }');
+  expect(rustTestStep).not.toContain('| Tee-Object');
+});
+
 it('never publishes as a side effect of merging to main', async () => {
   const workflow = await readFile('.github/workflows/release.yml', 'utf8');
   // Releasing is dispatched deliberately; a merge must not tag or publish.

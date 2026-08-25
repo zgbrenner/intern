@@ -93,9 +93,16 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Run Rust workspace tests with evidence log
         shell: pwsh
+        # Cargo tests can leave descendant processes holding a PowerShell
+        # pipeline pipe open after cargo itself exits. Redirect through cmd to a
+        # real file handle so the step cannot hang after the suite completes.
+        timeout-minutes: 45
         run: |
-          & cargo test --locked --workspace --all-targets 2>&1 | Tee-Object -FilePath docs\qa\logs\cargo-test.log
-          if ($LASTEXITCODE -ne 0) { throw "Rust workspace tests failed" }
+          New-Item -ItemType Directory docs\qa\logs -Force | Out-Null
+          & cmd /c "cargo test --locked --workspace --all-targets > docs\qa\logs\cargo-test.log 2>&1"
+          $TestExit = $LASTEXITCODE
+          Get-Content -LiteralPath docs\qa\logs\cargo-test.log
+          if ($TestExit -ne 0) { throw "Rust workspace tests failed" }
       - name: Build parser worker and the corpus evaluator
         shell: pwsh
         run: |
