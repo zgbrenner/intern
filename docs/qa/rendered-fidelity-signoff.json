@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "status": "accepted",
-  "release_inputs_sha256": "cf9b330b4f2736665246d571c9162d9c9755191d7e81ae8c696da2c745c03171",
+  "release_inputs_sha256": "d4e1290146109cba58733c4f9d30c22802125211b1407df36b5eb282603cf0f8",
   "screenshot_path": "docs/qa/latest-implementation.png",
-  "screenshot_sha256": "c213cd87326937899512c055a452afb7d05ad64769f73c99911f07c3d6fb8556",
-  "reviewer": "zach.brenner@vistage.com",
-  "reviewed_at": "2026-08-13T15:30:00Z",
-  "notes": "Inspected the 1536x1024 implementation capture recorded above for v0.1.0-alpha.2. The primary screen renders as intended: header with the local-only indicator, Queue/Needs Review/Completed counts, the drop target and its supported-format list, the queue table with original name, status, proposed filename and confidence, and the review panel with filename, description, evidence rows for date, type and parties, the reason for review, and the Approve and Keep original actions. Proposed filenames read in the documented format, date first and space separated, and each carries its one-sentence description beneath it. New since the previous sign-off: a Discard waiting control beside Apply all ready, both showing counts, which is the way out of a queue pointed at the wrong folder. Asserted geometry is unchanged and still passes at 1536x1024 and 1024x768. Scope: the implementation capture itself, not a pixel diff against the concept art, which remains on file at docs/design/intern-primary-screen.png. This record is bound to release_inputs_sha256 above, which is derived from the commit's own tree, so any change to a committed file outside docs/qa invalidates it and requires a fresh review."
+  "screenshot_sha256": "9f5b22cd5bc6d4a59c66b14d1e842f3e781e8d3eaa194035846c12c2ffddac23",
+  "reviewer": "Codex primary with Sol Advisor read-only review",
+  "reviewed_at": "2026-08-25T17:50:40Z",
+  "notes": "Inspected fresh 1536x1024 hosted capture against accepted concept; core hierarchy/interaction emphasis aligned; no clipping, collisions, illegible copy, excessive density, or ambiguous focus/selection; expanded formats, date-first filenames, bulk actions, pause control, and changed counts are acceptable alpha.3 evolution; native title bar/1024/hover/motion rely on automated and installed-app gates. Scope is a rendered fidelity review, not a pixel-equality claim."
 }
