@@ -23,6 +23,16 @@ const paths = {
 };
 const logs = option('log', { multiple: true });
 requireValue(logs.length > 0, 'at least one --log is required');
+const distributionPaths = {
+  latest_json: option('latest-json', { required: false }),
+  runtime_assets: option('runtime-assets', { required: false }),
+  third_party_notices: option('notices', { required: false }),
+  checksums: option('checksum', { required: false }),
+  sboms: option('sbom', { required: false, multiple: true }),
+};
+const distributionValues = [...Object.entries(distributionPaths).filter(([key]) => key !== 'sboms').map(([, value]) => value), ...distributionPaths.sboms];
+requireValue(distributionValues.every(Boolean) || distributionValues.every((value) => !value), 'release distribution evidence must be complete or omitted for pending QA');
+const hasDistribution = distributionValues.some(Boolean);
 
 const artifacts = {
   model_evaluation: await artifact(root, paths.model_evaluation),
@@ -34,11 +44,20 @@ const artifacts = {
   logs: await Promise.all([...new Set(logs)].sort().map((path) => artifact(root, path))),
 };
 const signoffs = await deriveSignoffs(root, paths, artifacts, context);
+const distribution = !hasDistribution ? undefined : {
+  latest_json: await artifact(root, distributionPaths.latest_json),
+  runtime_assets: await artifact(root, distributionPaths.runtime_assets),
+  third_party_notices: await artifact(root, distributionPaths.third_party_notices),
+  checksums: await artifact(root, distributionPaths.checksums),
+  sboms: await Promise.all([...new Set(distributionPaths.sboms)].sort().map((path) => artifact(root, path))),
+};
+if (distribution) requireValue(distribution.sboms.length > 0, 'at least one SPDX SBOM is required for release distribution evidence');
 const manifest = {
   schema_version: 1,
   status: Object.values(signoffs).every((status) => status === 'accepted') ? 'accepted' : 'blocked',
   subject: context,
   artifacts,
+  ...(distribution ? { distribution } : {}),
   signoffs,
 };
 await mkdir(dirname(output), { recursive: true });

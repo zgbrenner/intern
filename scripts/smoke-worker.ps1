@@ -140,7 +140,7 @@ function Assert-RejectedFixture {
 
 try {
     $Hello = Invoke-WorkerCommand -RequestId "hello" -Command @{ type = "hello" }
-    if ($Hello.type -ne "hello" -or $Hello.worker_version -ne "0.1.0-alpha.2") {
+    if ($Hello.type -ne "hello" -or $Hello.worker_version -ne "0.1.0-alpha.3") {
         throw "Worker hello did not report the release protocol: $($Hello | ConvertTo-Json -Compress -Depth 8)"
     }
 

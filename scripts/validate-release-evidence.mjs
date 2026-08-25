@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { artifact, deriveSignoffs, exactKeys, option, requireValue, safeArtifactPath } from './release-evidence-lib.mjs';
+import { basename, resolve } from 'node:path';
+import { artifact, deriveSignoffs, exactKeys, option, requireValue, safeArtifactPath, validateSha256Sums, validateSpdx } from './release-evidence-lib.mjs';
 
 const positional = process.argv.slice(2).find((argument) => !argument.startsWith('--'));
 requireValue(positional, 'release evidence manifest path is required');
@@ -14,7 +14,9 @@ const expected = {
 };
 const manifest = JSON.parse(await readFile(resolve(positional), 'utf8'));
 
-exactKeys(manifest, ['schema_version', 'status', 'subject', 'artifacts', 'signoffs'], 'release evidence manifest');
+exactKeys(manifest, manifest.distribution
+  ? ['schema_version', 'status', 'subject', 'artifacts', 'distribution', 'signoffs']
+  : ['schema_version', 'status', 'subject', 'artifacts', 'signoffs'], 'release evidence manifest');
 requireValue(manifest.schema_version === 1, 'release evidence schema_version must be 1');
 requireValue(['accepted', 'blocked'].includes(manifest.status), 'release evidence status is invalid');
 exactKeys(manifest.subject, ['commit', 'workflow', 'run_id', 'run_attempt'], 'release evidence subject');
@@ -34,6 +36,37 @@ for (const key of ['model_evaluation', 'implementation_screenshot', 'release_che
   await verifyEntry(manifest.artifacts[key], key);
 }
 for (const [index, log] of manifest.artifacts.logs.entries()) await verifyEntry(log, `log ${index}`);
+if (manifest.distribution) {
+  exactKeys(manifest.distribution, ['latest_json', 'runtime_assets', 'third_party_notices', 'checksums', 'sboms'], 'release distribution evidence');
+  for (const key of ['latest_json', 'runtime_assets', 'third_party_notices', 'checksums']) await verifyEntry(manifest.distribution[key], key);
+  requireValue(Array.isArray(manifest.distribution.sboms) && manifest.distribution.sboms.length > 0, 'release SBOMs are missing');
+  const workflowMatch = /^Release v(0\.1\.0-alpha\.3)$/.exec(manifest.subject.workflow);
+  requireValue(workflowMatch, 'release evidence workflow must be exactly Release v0.1.0-alpha.3');
+  const releaseVersion = workflowMatch[1];
+  const applicationLeaf = `Intern-v${releaseVersion}.spdx.json`;
+  const runtimePrefix = `Intern-v${releaseVersion}-runtime-`;
+  let applicationSboms = 0;
+  for (const [index, sbom] of manifest.distribution.sboms.entries()) {
+    await verifyEntry(sbom, `SBOM ${index}`);
+    const leaf = basename(sbom.path);
+    const runtimeComponent = leaf.startsWith(runtimePrefix) && leaf.endsWith('.spdx.json')
+      ? leaf.slice(runtimePrefix.length, -'.spdx.json'.length)
+      : '';
+    const kind = leaf === applicationLeaf
+      ? 'application'
+      : /^[A-Za-z0-9._-]+$/.test(runtimeComponent) ? 'runtime' : undefined;
+    requireValue(kind, `SBOM filename does not match the generated application or runtime contract: ${leaf}`);
+    if (kind === 'application') applicationSboms += 1;
+    await validateSpdx(root, sbom, { kind, releaseVersion });
+  }
+  requireValue(applicationSboms === 1, `release evidence requires exactly one application SBOM named ${applicationLeaf}`);
+  await validateSha256Sums(root, manifest.distribution.checksums);
+  const requiredLogs = ['cargo-test.log', 'model-evaluation.log', 'installer-smoke.log'];
+  const logNames = new Set(manifest.artifacts.logs.map((log) => basename(log.path)));
+  for (const requiredLog of requiredLogs) requireValue(logNames.has(requiredLog), `release evidence is missing required log ${requiredLog}`);
+} else if (!allowPending) {
+  throw new Error('accepted release evidence must bind release distribution artifacts');
+}
 
 const paths = {
   model_evaluation: manifest.artifacts.model_evaluation.path,

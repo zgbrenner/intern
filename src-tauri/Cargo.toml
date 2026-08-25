@@ -33,6 +33,3 @@ tauri-plugin-dialog = "2.4.0"
 # against an npm 2.9.0 that had been pinned exactly - which failed the release
 # with "Found version mismatched Tauri packages". Change both or neither.
 tauri-plugin-updater = "=2.10.1"
-
-[dev-dependencies]
-tempfile = "=3.23.0"

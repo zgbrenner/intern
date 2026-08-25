@@ -1,5 +1,9 @@
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
+
+const exec = promisify(execFile);
 
 it('packages the license directory as a tree so vcpkg subpaths match the signed install manifest', async () => {
   const config = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8'));
@@ -56,4 +60,22 @@ it('leaves packaged-path collision detection to the checker that can actually se
   // contents. Match the invocation, not the comment above it.
   expect(fetch.indexOf('$Manifest.bundled_files = $BundledFiles'))
     .toBeLessThan(fetch.lastIndexOf('verify-assets.mjs'));
+});
+
+it('keeps the release verifier outside Tauri binary discovery and invokes its workspace tool', async () => {
+  const [{ stdout }, release] = await Promise.all([
+    exec('cargo', ['metadata', '--locked', '--no-deps', '--format-version', '1']),
+    readFile('.github/workflows/release.yml', 'utf8'),
+  ]);
+  const metadata = JSON.parse(stdout);
+  const app = metadata.packages.find((pkg: { name: string }) => pkg.name === 'intern-app');
+  const verifier = metadata.packages.find((pkg: { name: string }) => pkg.name === 'intern-release-verifier');
+  expect(app).toBeDefined();
+  expect(verifier).toBeDefined();
+  const binaries = app.targets.filter((target: { kind: string[] }) => target.kind.includes('bin')).map((target: { name: string }) => target.name);
+  expect(binaries).toEqual(['intern']);
+  expect(binaries).not.toContain('verify-updater-artifact');
+  expect(verifier.targets.filter((target: { kind: string[] }) => target.kind.includes('bin')).map((target: { name: string }) => target.name)).toEqual(['intern-release-verifier']);
+  expect(release).toContain('cargo run --locked -p intern-release-verifier --');
+  expect(release).not.toContain('-p intern-app --bin verify-updater-artifact');
 });
