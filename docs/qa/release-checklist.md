@@ -1,10 +1,10 @@
 # Intern v0.1.0-alpha.3 release checklist
 
 **Release status: blocked pending exact-main validation and the deliberately
-dispatched release workflow.** Hosted QA run `32901120674` completed every
+dispatched release workflow.** Hosted QA run `32912835096` completed every
 substantive automated gate, then correctly concluded failed at evidence binding
 because its prior accepted alpha.3 sign-off was bound to stale digest
-`d4e1290146109cba58733c4f9d30c22802125211b1407df36b5eb282603cf0f8`. The fresh alpha.3
+`0ff02d813957e9cabdcf1707cbefe0ef536c0a0885699584fe4e9d2bbe2f191c`. The fresh alpha.3
 fidelity inspection accepted afterward from that run's uploaded capture, model,
 and installed-smoke artifacts; neither that run nor this checklist authorizes a
 tag or publication.
@@ -15,18 +15,18 @@ not bind the signature-fix release inputs.
 
 ## Hosted QA artifacts and post-run accepted alpha.3 evidence
 
-- Workflow: Whole-product QA evidence, run `32901120674`, attempt `1`.
-- Commit: `a86e81b3d13a38d49bfb4691e56b7372570dbaad`; runner: Windows/X64.
+- Workflow: Whole-product QA evidence, run `32912835096`, attempt `1`.
+- Commit: `225735657269088235b0838941d6dee63c36d635`; runner: Windows/X64.
 - Execution result: every substantive automated gate below passed; the final
   evidence-binding step failed closed on the prior stale-digest fidelity sign-off.
 - Release-input digest:
-  `0ff02d813957e9cabdcf1707cbefe0ef536c0a0885699584fe4e9d2bbe2f191c`.
+  `34b2039eca40ca9157369e81b5f0acd8a5b2dba096a52d219a1e42db0e060e25`.
 - Capture: `docs/qa/latest-implementation.png`, 1536×1024, SHA-256
   `9f5b22cd5bc6d4a59c66b14d1e842f3e781e8d3eaa194035846c12c2ffddac23`.
 - Post-run fidelity reviewer: Codex primary with Sol Advisor read-only review,
-  recorded at `2026-08-25T21:52:04Z` in `rendered-fidelity-signoff.json`.
+  recorded at `2026-08-26T00:20:04Z` in `rendered-fidelity-signoff.json`.
 
-| Gate | Status | Hosted run 32901120674 artifact or post-run evidence |
+| Gate | Status | Hosted run 32912835096 artifact or post-run evidence |
 |---|---|---|
 | Frontend unit, lint, and build check | pass | `npm run check`: 18 Vitest files / 141 tests; TypeScript and Vite build passed. |
 | Browser core interaction, accessibility, and 1024-pixel layout | pass | `npm run test:e2e`: 4 Playwright tests; 1536×1024 capture written. |
