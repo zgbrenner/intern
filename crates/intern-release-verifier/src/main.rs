@@ -14,6 +14,8 @@ use serde::Deserialize;
 // The updater manifest carries that encoded file content verbatim; it is not a
 // raw Minisign text file.
 const MAX_TAURI_SIGNATURE_BYTES: usize = 4096;
+const TAURI_UNTRUSTED_COMMENT: &str = "untrusted comment: signature from tauri secret key";
+const TAURI_TRUSTED_COMMENT_PREFIX: &str = "trusted comment: timestamp:";
 
 #[derive(Deserialize)]
 struct TauriConfig {
@@ -93,7 +95,10 @@ fn parse_args() -> Result<Input, String> {
     })
 }
 
-fn parse_tauri_updater_signature(signature_text: &str) -> Result<Signature, String> {
+fn parse_tauri_updater_signature(
+    signature_text: &str,
+    installer_name: &str,
+) -> Result<Signature, String> {
     if signature_text.is_empty()
         || signature_text.len() > MAX_TAURI_SIGNATURE_BYTES
         || signature_text
@@ -106,13 +111,51 @@ fn parse_tauri_updater_signature(signature_text: &str) -> Result<Signature, Stri
     let signature_box = STANDARD
         .decode(signature_text)
         .map_err(|_| "malformed Tauri updater signature Base64 wrapper".to_owned())?;
+    if STANDARD.encode(&signature_box) != signature_text {
+        return Err("Tauri updater signature Base64 wrapper is not canonical".to_owned());
+    }
     let signature_box = std::str::from_utf8(&signature_box)
         .map_err(|_| "Tauri updater signature wrapper is not UTF-8 Minisign text".to_owned())?;
-    if signature_box.trim() != signature_box {
+    if signature_box.contains('\r') {
         return Err(
-            "Tauri updater signature wrapper must contain an exact Minisign SignatureBox"
-                .to_owned(),
+            "Tauri updater signature wrapper must use LF, not CRLF, line endings".to_owned(),
         );
+    }
+    let signature_box = signature_box
+        .strip_suffix('\n')
+        .ok_or_else(|| "Tauri updater signature wrapper must end with exactly one LF".to_owned())?;
+    let lines = signature_box.split('\n').collect::<Vec<_>>();
+    if lines.len() != 4 || lines.iter().any(|line| line.is_empty()) {
+        return Err(
+            "Tauri updater signature wrapper must contain exactly four Minisign lines".to_owned(),
+        );
+    }
+    if lines[0] != TAURI_UNTRUSTED_COMMENT {
+        return Err("Tauri updater signature has a noncanonical untrusted comment".to_owned());
+    }
+    let trusted_comment = lines[2]
+        .strip_prefix(TAURI_TRUSTED_COMMENT_PREFIX)
+        .ok_or_else(|| "Tauri updater signature has a noncanonical trusted comment".to_owned())?;
+    let (timestamp, filename) = trusted_comment
+        .split_once("\tfile:")
+        .ok_or_else(|| "Tauri updater signature has a noncanonical trusted comment".to_owned())?;
+    if timestamp.is_empty()
+        || !timestamp.bytes().all(|byte| byte.is_ascii_digit())
+        || filename.is_empty()
+        || filename.contains('\t')
+        || filename != installer_name
+    {
+        return Err("Tauri updater signature has a noncanonical trusted comment".to_owned());
+    }
+    for encoded_line in [lines[1], lines[3]] {
+        let decoded = STANDARD.decode(encoded_line).map_err(|_| {
+            "Tauri updater signature has noncanonical Minisign Base64 lines".to_owned()
+        })?;
+        if STANDARD.encode(decoded) != encoded_line {
+            return Err(
+                "Tauri updater signature has noncanonical Minisign Base64 lines".to_owned(),
+            );
+        }
     }
     Signature::decode(signature_box).map_err(|_| {
         "Tauri updater signature wrapper does not contain a valid Minisign SignatureBox".to_owned()
@@ -146,7 +189,7 @@ fn verify(input: &Input) -> Result<(), String> {
         .map_err(|error| format!("malformed Tauri updater public key: {error}"))?;
     let signature_text = fs::read_to_string(&input.signature)
         .map_err(|error| format!("cannot read updater signature: {error}"))?;
-    let signature = parse_tauri_updater_signature(&signature_text)?;
+    let signature = parse_tauri_updater_signature(&signature_text, installer_name)?;
     let installer =
         fs::read(&input.installer).map_err(|error| format!("cannot read installer: {error}"))?;
     public_key
@@ -191,11 +234,11 @@ mod tests {
     use tempfile::tempdir;
 
     const PUBKEY: &str = "untrusted comment: minisign public key E7620F1842B4E81F\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
-    const SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
+    const SIGNATURE: &str = "untrusted comment: signature from tauri secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==\n";
 
     fn fixture() -> (tempfile::TempDir, Input) {
         let directory = tempdir().unwrap();
-        let installer = directory.path().join("Intern_0.1.0-alpha.3_x64-setup.exe");
+        let installer = directory.path().join("test");
         let signature = directory.path().join("installer.sig");
         let latest_json = directory.path().join("latest.json");
         let tauri_config = directory.path().join("tauri.conf.json");
@@ -210,7 +253,7 @@ mod tests {
             ),
         )
         .unwrap();
-        fs::write(&latest_json, format!(r#"{{"version":"0.1.0-alpha.3","platforms":{{"windows-x86_64":{{"signature":{},"url":"https://github.com/zgbrenner/intern/releases/download/v0.1.0-alpha.3/Intern_0.1.0-alpha.3_x64-setup.exe"}}}}}}"#, serde_json::to_string(&tauri_signature).unwrap())).unwrap();
+        fs::write(&latest_json, format!(r#"{{"version":"0.1.0-alpha.3","platforms":{{"windows-x86_64":{{"signature":{},"url":"https://github.com/zgbrenner/intern/releases/download/v0.1.0-alpha.3/test"}}}}}}"#, serde_json::to_string(&tauri_signature).unwrap())).unwrap();
         (
             directory,
             Input {
@@ -298,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_raw_double_wrapped_and_oversized_signature_representations() {
+    fn rejects_noncanonical_tauri_signature_representations() {
         let (_directory, input) = fixture();
         fs::write(&input.signature, SIGNATURE).unwrap();
         assert!(
@@ -316,15 +359,71 @@ mod tests {
         assert!(
             verify(&input)
                 .unwrap_err()
-                .contains("does not contain a valid Minisign SignatureBox")
+                .contains("must end with exactly one LF")
         );
 
         let (_directory, input) = fixture();
-        fs::write(&input.signature, STANDARD.encode(format!("\n{SIGNATURE}"))).unwrap();
+        fs::write(
+            &input.signature,
+            STANDARD.encode(SIGNATURE.strip_suffix('\n').unwrap()),
+        )
+        .unwrap();
         assert!(
             verify(&input)
                 .unwrap_err()
-                .contains("must contain an exact Minisign SignatureBox")
+                .contains("must end with exactly one LF")
+        );
+
+        for signature_box in [
+            format!(" {SIGNATURE}"),
+            format!("\t{SIGNATURE}"),
+            SIGNATURE.replace('\n', "\r\n"),
+            format!("{SIGNATURE}\n"),
+            format!("{} \n", SIGNATURE.strip_suffix('\n').unwrap()),
+        ] {
+            let (_directory, input) = fixture();
+            fs::write(&input.signature, STANDARD.encode(signature_box)).unwrap();
+            assert!(verify(&input).is_err());
+        }
+
+        let (_directory, input) = fixture();
+        let unpadded = STANDARD.encode(SIGNATURE).trim_end_matches('=').to_owned();
+        fs::write(&input.signature, unpadded).unwrap();
+        assert!(
+            verify(&input)
+                .unwrap_err()
+                .contains("malformed Tauri updater signature Base64 wrapper")
+        );
+
+        let (_directory, input) = fixture();
+        fs::write(&input.signature, STANDARD.encode([0xff, 0xfe])).unwrap();
+        assert!(
+            verify(&input)
+                .unwrap_err()
+                .contains("not UTF-8 Minisign text")
+        );
+
+        let (_directory, input) = fixture();
+        fs::write(
+            &input.signature,
+            STANDARD.encode(SIGNATURE.replace("\tfile:test", "\tfile:other")),
+        )
+        .unwrap();
+        assert!(
+            verify(&input)
+                .unwrap_err()
+                .contains("noncanonical trusted comment")
+        );
+
+        let (_directory, input) = fixture();
+        let invalid_minisign = format!(
+            "{TAURI_UNTRUSTED_COMMENT}\nQQ==\ntrusted comment: timestamp:1\tfile:test\nQQ==\n"
+        );
+        fs::write(&input.signature, STANDARD.encode(invalid_minisign)).unwrap();
+        assert!(
+            verify(&input)
+                .unwrap_err()
+                .contains("does not contain a valid Minisign SignatureBox")
         );
 
         let (_directory, input) = fixture();
