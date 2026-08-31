@@ -14,8 +14,8 @@ use std::{
 
 use common::{MockClock, facts_for, identity, wait_until};
 use intern_intake::{
-    COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome, IntakeConfig,
-    Hydration, IntakeHost, IntakeStatus, IntakeWatcher, ItemState, scan::is_conflict_copy,
+    COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome, Hydration,
+    IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState, scan::is_conflict_copy,
 };
 use tempfile::TempDir;
 

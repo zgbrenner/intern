@@ -1008,11 +1008,11 @@ struct SyncLockedFileSystem {
 
 impl SyncLockedFileSystem {
     fn take_hold(&self) -> Option<io::Error> {
-        let held = self
-            .remaining_holds
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
-                remaining.checked_sub(1)
-            });
+        let held =
+            self.remaining_holds
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                });
         held.ok().map(|_| io::Error::from_raw_os_error(32))
     }
 }

@@ -514,6 +514,7 @@ impl Scanner<'_> {
         // the life of the process and a later file landing on the same key
         // would inherit a stale forgiveness.
         let owned = &*self.owned;
-        self.awaiting_hydration.retain(|key| owned.contains_key(key));
+        self.awaiting_hydration
+            .retain(|key| owned.contains_key(key));
     }
 }
