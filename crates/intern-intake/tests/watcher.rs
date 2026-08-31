@@ -109,8 +109,10 @@ impl FakeHydration {
 }
 
 impl Hydration for FakeHydration {
+    /// A file that is gone is not a placeholder, which is what the real
+    /// attribute probe reports too.
     fn is_dehydrated(&self, path: &Path) -> bool {
-        self.dehydrated.lock().unwrap().contains(path)
+        path.exists() && self.dehydrated.lock().unwrap().contains(path)
     }
 }
 
@@ -604,4 +606,26 @@ fn a_failure_with_the_content_local_still_tombstones() {
     let claim = rig.read_claim(&key);
     assert_eq!(claim.state, ClaimState::Done);
     assert_eq!(claim.outcome, Some(DoneOutcome::Failed));
+}
+
+#[test]
+fn a_document_deleted_while_awaiting_hydration_stops_being_waited_on() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("contract.pdf", b"an online-only document");
+    rig.step();
+    rig.step();
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+
+    rig.hydration.set_dehydrated(&path, true);
+    rig.host.set_state(&path, ItemState::Failed);
+    rig.step();
+    assert_eq!(rig.watcher.status().awaiting_hydration, 1);
+
+    // The user gave up and deleted it. Nothing is owed to the cloud any more.
+    fs::remove_file(&path).unwrap();
+    rig.step();
+
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+    assert!(!rig.claim_file(&key).exists());
 }

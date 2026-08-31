@@ -460,13 +460,16 @@ impl Scanner<'_> {
     /// forgive a document exactly once per trip through the cloud.
     fn finish_failed(&mut self, key: &str, path: &Path) {
         if self.hydration.is_dehydrated(path) {
-            self.awaiting_hydration.insert(key.to_owned());
-            self.status.awaiting_hydration += 1;
+            // Counted only once the lease is actually held: a document we just
+            // abandoned is not one we are waiting on.
             if self.store.renew(key).is_err() {
                 self.owned.remove(key);
                 self.awaiting_hydration.remove(key);
                 self.host.abandon(path);
+                return;
             }
+            self.awaiting_hydration.insert(key.to_owned());
+            self.status.awaiting_hydration += 1;
             return;
         }
         if self.awaiting_hydration.remove(key) {
@@ -506,5 +509,11 @@ impl Scanner<'_> {
             }
             self.manage_owned(&key, &path, path.exists());
         }
+        // A claim we no longer hold - deleted, taken over, abandoned - is not
+        // one we are waiting on the cloud for. Without this the set grows for
+        // the life of the process and a later file landing on the same key
+        // would inherit a stale forgiveness.
+        let owned = &*self.owned;
+        self.awaiting_hydration.retain(|key| owned.contains_key(key));
     }
 }
