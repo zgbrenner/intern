@@ -70,6 +70,8 @@ export interface IntakeStatus {
   cloud: CloudLocation | null;
   machines: IntakeMachine[];
   heldForOthers: number;
+  syncConflicts: number;
+  awaitingHydration: number;
   claimedByOthers: number;
   processedHere: number;
   lastScanAt: number | null;

@@ -30,6 +30,7 @@ pub use coordination::{
 };
 pub use identity::MachineIdentity;
 pub use scan::{
-    DEFAULT_SCAN_INTERVAL, IntakeConfig, IntakeHost, IntakeStatus, ItemState, StabilityTracker,
+    DEFAULT_SCAN_INTERVAL, Hydration, IntakeConfig, IntakeHost, IntakeStatus, ItemState,
+    StabilityTracker, SystemHydration, is_conflict_copy,
 };
 pub use watcher::IntakeWatcher;

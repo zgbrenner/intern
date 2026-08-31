@@ -3,13 +3,14 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 use intern_core::{
-    ErrorCode, FileApplier, FileIdentity, FileSystem, LockedFile, OperationKind, OperationStage,
-    QueueStatus, QueueStore, StdFileSystem,
+    ErrorCode, FileApplier, FileIdentity, FileSystem, LockRetry, LockedFile, OperationKind,
+    OperationStage, QueueStatus, QueueStore, StdFileSystem,
 };
 use tempfile::TempDir;
 
@@ -996,4 +997,102 @@ mod windows_safety {
         assert_eq!(fs::read(&source).unwrap(), b"source");
         assert_eq!(fs::read(&destination).unwrap(), b"winner");
     }
+}
+
+/// A source the sync client is holding: the first `holds` opens fail the way
+/// Windows reports ERROR_SHARING_VIOLATION, and everything after that succeeds.
+struct SyncLockedFileSystem {
+    inner: StdFileSystem,
+    remaining_holds: AtomicUsize,
+}
+
+impl SyncLockedFileSystem {
+    fn take_hold(&self) -> Option<io::Error> {
+        let held = self
+            .remaining_holds
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            });
+        held.ok().map(|_| io::Error::from_raw_os_error(32))
+    }
+}
+
+impl FileSystem for SyncLockedFileSystem {
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        match self.take_hold() {
+            Some(error) => Err(error),
+            None => self.inner.hash(path),
+        }
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(true)
+    }
+    fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+        self.inner.rename_no_replace(source, destination)
+    }
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
+        self.inner.copy_new_locked(source, destination)
+    }
+    fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
+        self.inner.lock_for_delete(path)
+    }
+}
+
+fn sync_locked(holds: usize) -> Arc<SyncLockedFileSystem> {
+    Arc::new(SyncLockedFileSystem {
+        inner: StdFileSystem,
+        remaining_holds: AtomicUsize::new(holds),
+    })
+}
+
+#[cfg(windows)]
+#[test]
+fn a_source_the_sync_client_releases_is_applied_rather_than_sent_to_review() {
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("statement.pdf");
+    let destination = temp.path().join("2026-04-01 Statement of Work.pdf");
+    write(&source, b"statement bytes");
+
+    // Two holds: one spent on the fingerprint, one on the pre-rename hash.
+    let filesystem = sync_locked(2);
+    let (applier, _store, item_id) = applying(&temp, &source, filesystem);
+    let applier = applier.with_lock_retry(LockRetry::new(5, Duration::from_millis(1)));
+
+    let fingerprint = applier.fingerprint(&source).unwrap();
+    applier
+        .apply(item_id, &source, &destination, &fingerprint)
+        .unwrap();
+
+    assert!(destination.exists());
+    assert!(!source.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_source_still_held_after_the_retries_reads_as_locked_not_as_changed() {
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("statement.pdf");
+    write(&source, b"statement bytes");
+
+    let filesystem = sync_locked(usize::MAX);
+    let (applier, _store, _item_id) = applying(&temp, &source, filesystem);
+    let applier = applier.with_lock_retry(LockRetry::immediate());
+
+    let error = applier.fingerprint(&source).unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::SourceLocked);
+    assert_eq!(ErrorCode::SourceLocked.as_str(), "SOURCE_LOCKED");
+    // The operating system's own error survives into the message; "os error 32"
+    // is the difference between a sync client mid-upload and a real problem.
+    assert!(
+        error.to_string().contains("os error 32"),
+        "expected the OS error to be carried, got: {error}"
+    );
 }

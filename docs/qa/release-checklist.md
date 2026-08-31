@@ -1,42 +1,33 @@
-# Intern v0.1.0-alpha.3 release checklist
+# Intern v0.1.0-alpha.4 release checklist
 
-**Release status: blocked pending exact-main validation and the deliberately
-dispatched release workflow.** Hosted QA run `32912835096` completed every
-substantive automated gate, then correctly concluded failed at evidence binding
-because its prior accepted alpha.3 sign-off was bound to stale digest
-`0ff02d813957e9cabdcf1707cbefe0ef536c0a0885699584fe4e9d2bbe2f191c`. The fresh alpha.3
-fidelity inspection accepted afterward from that run's uploaded capture, model,
-and installed-smoke artifacts; neither that run nor this checklist authorizes a
-tag or publication.
+**Release status: blocked pending whole-product QA, rendered fidelity sign-off,
+exact-main validation, and the deliberately dispatched release workflow.** No
+hosted QA run has been recorded for alpha.4 yet, so every gate below is
+**pending/blocked** until a hosted run produces artifacts bound to the alpha.4
+release inputs. Nothing in this checklist authorizes a tag or publication.
 
-Historical record: before the fresh hosted capture was reviewed, rendered
-fidelity was **pending/blocked** for alpha.3 because the prior sign-off could
-not bind the signature-fix release inputs.
+## Hosted QA artifacts and accepted alpha.4 evidence
 
-## Hosted QA artifacts and post-run accepted alpha.3 evidence
+- Workflow: Whole-product QA evidence, run `pending`, attempt `pending`.
+- Commit: `pending`; runner: `pending`.
+- Execution result: pending — no alpha.4 hosted QA run has been executed.
+- Release-input digest: `pending`.
+- Capture: `docs/qa/latest-implementation.png`, dimensions and SHA-256 pending a
+  fresh alpha.4 capture.
+- Fidelity reviewer: pending; a fresh sign-off must be recorded in
+  `rendered-fidelity-signoff.json` and bound to the alpha.4 release-input digest.
 
-- Workflow: Whole-product QA evidence, run `32912835096`, attempt `1`.
-- Commit: `225735657269088235b0838941d6dee63c36d635`; runner: Windows/X64.
-- Execution result: every substantive automated gate below passed; the final
-  evidence-binding step failed closed on the prior stale-digest fidelity sign-off.
-- Release-input digest:
-  `34b2039eca40ca9157369e81b5f0acd8a5b2dba096a52d219a1e42db0e060e25`.
-- Capture: `docs/qa/latest-implementation.png`, 1536×1024, SHA-256
-  `9f5b22cd5bc6d4a59c66b14d1e842f3e781e8d3eaa194035846c12c2ffddac23`.
-- Post-run fidelity reviewer: Codex primary with Sol Advisor read-only review,
-  recorded at `2026-08-26T00:20:04Z` in `rendered-fidelity-signoff.json`.
-
-| Gate | Status | Hosted run 32912835096 artifact or post-run evidence |
+| Gate | Status | Hosted run artifact or post-run evidence |
 |---|---|---|
-| Frontend unit, lint, and build check | pass | `npm run check`: 18 Vitest files / 141 tests; TypeScript and Vite build passed. |
-| Browser core interaction, accessibility, and 1024-pixel layout | pass | `npm run test:e2e`: 4 Playwright tests; 1536×1024 capture written. |
-| Rendered fidelity review | accepted post-run | Fresh capture, model report, and installed-smoke artifact from the hosted run were reviewed after its stale-digest sign-off binding failure; the replacement alpha.3 sign-off is bound to the digest above. |
-| Rust formatting and workspace lint | pass | `cargo fmt --all -- --check`; `cargo clippy --locked --workspace --all-targets -- -D warnings`. |
-| Rust workspace tests | pass | `cargo test --locked --workspace --all-targets`: 273 tests. |
-| Pinned runtime assets and native fixtures | pass | `npm run assets:verify -- --require-bundled`: 51 runtime files and 23 license files; 4 native fixture tests. |
-| Windows Tauri/NSIS build | pass | `npm run tauri build -- --bundles nsis -- --locked`: one NSIS installer. |
-| Installer and installed-core smoke | pass | App launch, clean shutdown, runtime inventory, installed worker core path, uninstall, and retained user data all accepted. |
-| Corpus evaluation and model acceptance | pass | 18 documents scored with `Qwen3.5-2B-Q4_K_M.gguf`; `validate-model-evaluation.mjs` accepted the evaluation. |
+| Frontend unit, lint, and build check | pending | `npm run check` has not been recorded for alpha.4. |
+| Browser core interaction, accessibility, and 1024-pixel layout | pending | `npm run test:e2e` capture has not been recorded for alpha.4. |
+| Rendered fidelity review | pending/blocked | A fresh alpha.4 capture must be reviewed and its sign-off bound to the alpha.4 release-input digest. |
+| Rust formatting and workspace lint | pending | `cargo fmt --all -- --check`; `cargo clippy --locked --workspace --all-targets -- -D warnings`. |
+| Rust workspace tests | pending | `cargo test --locked --workspace --all-targets`. |
+| Pinned runtime assets and native fixtures | pending | `npm run assets:verify -- --require-bundled`. |
+| Windows Tauri/NSIS build | pending | `npm run tauri build -- --bundles nsis -- --locked`. |
+| Installer and installed-core smoke | pending | App launch, clean shutdown, runtime inventory, installed worker core path, uninstall, and retained user data. |
+| Corpus evaluation and model acceptance | pending | `validate-model-evaluation.mjs` must accept a fresh alpha.4 evaluation. |
 | Exact-main validation | pending | The release workflow must verify its dispatch target is the exact current `main` commit. |
 | Deliberately dispatched release workflow | pending | Rebuild, updater signature verification, checksums/SBOM/evidence acceptance, provenance, annotated tag, and publication remain release-job gates. |
 

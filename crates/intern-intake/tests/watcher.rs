@@ -1,7 +1,7 @@
 mod common;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -15,7 +15,7 @@ use std::{
 use common::{MockClock, facts_for, identity, wait_until};
 use intern_intake::{
     COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome, IntakeConfig,
-    IntakeHost, IntakeStatus, IntakeWatcher, ItemState,
+    Hydration, IntakeHost, IntakeStatus, IntakeWatcher, ItemState, scan::is_conflict_copy,
 };
 use tempfile::TempDir;
 
@@ -86,7 +86,32 @@ struct Rig {
     temp: TempDir,
     clock: Arc<MockClock>,
     host: Arc<FakeHost>,
+    hydration: Arc<FakeHydration>,
     watcher: IntakeWatcher,
+}
+
+/// Stands in for Files On-Demand: no test can create a real placeholder, so
+/// the set of paths whose bytes are "still in the cloud" is scripted.
+#[derive(Default)]
+struct FakeHydration {
+    dehydrated: Mutex<HashSet<PathBuf>>,
+}
+
+impl FakeHydration {
+    fn set_dehydrated(&self, path: &Path, dehydrated: bool) {
+        let mut paths = self.dehydrated.lock().unwrap();
+        if dehydrated {
+            paths.insert(path.to_path_buf());
+        } else {
+            paths.remove(path);
+        }
+    }
+}
+
+impl Hydration for FakeHydration {
+    fn is_dehydrated(&self, path: &Path) -> bool {
+        self.dehydrated.lock().unwrap().contains(path)
+    }
 }
 
 impl Rig {
@@ -100,11 +125,13 @@ impl Rig {
         let mut config = IntakeConfig::new(temp.path(), vec!["pdf".to_string(), "txt".to_string()]);
         config.process_others_uploads = process_others_uploads;
         config.scan_interval = Duration::from_secs(3600);
-        let watcher = IntakeWatcher::start_with_clock(
+        let hydration = Arc::new(FakeHydration::default());
+        let watcher = IntakeWatcher::start_with_seams(
             config,
             identity("here-machine", "here"),
             host.clone(),
             clock.clone(),
+            hydration.clone(),
         );
         wait_until("the initial scan", || {
             watcher.status().last_scan_at.is_some()
@@ -113,6 +140,7 @@ impl Rig {
             temp,
             clock,
             host,
+            hydration,
             watcher,
         }
     }
@@ -468,11 +496,112 @@ fn dropping_the_watcher_joins_the_scan_thread() {
         temp,
         clock,
         host,
+        hydration,
         watcher,
     } = rig;
     // A hang here (a detached or stuck thread) fails the test by timeout.
     drop(watcher);
     drop(clock);
     drop(host);
+    drop(hydration);
     drop(temp);
+}
+
+#[test]
+fn a_sync_conflict_copy_is_counted_and_left_alone() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    // OneDrive names the losing side of a conflict after the machine that
+    // wrote it; SharePoint and Dropbox spell it out instead.
+    rig.write("report-here.pdf", b"onedrive conflict copy");
+    rig.write(
+        "report (Jane's conflicted copy 2026-08-31).pdf",
+        b"spelled-out conflict copy",
+    );
+    // A hyphen and a capitalised trailing word do not make a conflict copy.
+    let genuine = rig.write("Invoice-ACME.pdf", b"an ordinary document");
+    rig.step();
+    rig.step();
+
+    assert_eq!(rig.host.enqueued(), vec![genuine]);
+    let status = rig.watcher.status();
+    assert_eq!(status.sync_conflicts, 2);
+    assert_eq!(status.held_for_others, 0);
+}
+
+#[test]
+fn a_machine_suffix_is_only_a_conflict_copy_when_the_folder_knows_that_machine() {
+    let machines = vec!["DESKTOP-A1B2C3".to_string(), "  ".to_string()];
+
+    assert!(is_conflict_copy(
+        Path::new("report-desktop-a1b2c3.pdf"),
+        &machines
+    ));
+    assert!(is_conflict_copy(
+        Path::new("report (Jane's conflicted copy 2026-08-31).pdf"),
+        &[]
+    ));
+
+    // A machine this folder has never seen proves nothing about the name.
+    assert!(!is_conflict_copy(
+        Path::new("report-LAPTOP-ZZZ.pdf"),
+        &machines
+    ));
+    assert!(!is_conflict_copy(Path::new("Invoice-ACME.pdf"), &machines));
+    // A blank presence record must not match every file in the folder.
+    assert!(!is_conflict_copy(Path::new("Invoice-.pdf"), &machines));
+    assert!(!is_conflict_copy(Path::new("Invoice.pdf"), &machines));
+}
+
+#[test]
+fn a_document_that_failed_while_still_in_the_cloud_is_held_not_tombstoned() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("contract.pdf", b"an online-only document");
+    rig.step();
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+
+    // Offline: the placeholder never hydrated, so extraction failed without
+    // anything having read the document.
+    rig.hydration.set_dehydrated(&path, true);
+    rig.host.set_state(&path, ItemState::Failed);
+    rig.step();
+
+    assert_eq!(rig.watcher.status().awaiting_hydration, 1);
+    let claim = rig.read_claim(&key);
+    assert_eq!(
+        claim.state,
+        ClaimState::Claimed,
+        "a document nothing could read must not be tombstoned"
+    );
+
+    // Back online: the bytes arrive, so the claim is released and the next
+    // scan re-acquires it to give the document a real attempt.
+    rig.hydration.set_dehydrated(&path, false);
+    rig.step();
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+    assert!(
+        !rig.claim_file(&key).exists(),
+        "the released claim leaves nothing behind to block a retry"
+    );
+}
+
+#[test]
+fn a_failure_with_the_content_local_still_tombstones() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("contract.pdf", b"a document that is simply broken");
+    rig.step();
+    rig.step();
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+
+    rig.host.set_state(&path, ItemState::Failed);
+    rig.step();
+
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+    let claim = rig.read_claim(&key);
+    assert_eq!(claim.state, ClaimState::Done);
+    assert_eq!(claim.outcome, Some(DoneOutcome::Failed));
 }

@@ -183,6 +183,8 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
           { machineId: 'demo-peer', machineName: 'Front desk PC', userName: 'colleague', lastSeenAt: now - 90, active: true },
         ] : [],
         heldForOthers: enabled ? 2 : 0,
+        syncConflicts: 0,
+        awaitingHydration: 0,
         claimedByOthers: enabled ? 1 : 0,
         processedHere: enabled ? 3 : 0,
         lastScanAt: enabled ? now - 5 : null,

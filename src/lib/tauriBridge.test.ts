@@ -33,7 +33,7 @@ describe('TauriBridge', () => {
       setup_get: { state: 'required', downloadedBytes: 0, totalBytes: 3278329184 },
       intake_status: {
         enabled: false, watching: false, folder: '', machineId: 'm-1', machineName: 'Reception',
-        cloud: null, machines: [], heldForOthers: 0, claimedByOthers: 0, processedHere: 0,
+        cloud: null, machines: [], heldForOthers: 0, syncConflicts: 0, awaitingHydration: 0, claimedByOthers: 0, processedHere: 0,
         lastScanAt: null, error: null,
       },
       folder_classify: { provider: 'onedrive_business', displayName: 'OneDrive – Contoso' },
@@ -171,7 +171,7 @@ describe('TauriBridge', () => {
       enabled: true, watching: true, folder: 'C:\\OneDrive\\Scans', machineId: 'm-1', machineName: 'Reception',
       cloud: { provider: 'onedrive_business' as const, displayName: 'OneDrive – Contoso' },
       machines: [{ machineId: 'm-1', machineName: 'Reception', userName: 'pat', lastSeenAt: 1755850000, active: true }],
-      heldForOthers: 3, claimedByOthers: 1, processedHere: 7, lastScanAt: 1755850000, error: null,
+      heldForOthers: 3, syncConflicts: 0, awaitingHydration: 0, claimedByOthers: 1, processedHere: 7, lastScanAt: 1755850000, error: null,
     };
 
     fake.listeners.get('intake://changed')?.({ event: 'intake://changed', id: 5, payload: status });

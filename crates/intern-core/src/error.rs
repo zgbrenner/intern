@@ -8,6 +8,7 @@ use crate::OperationReceipt;
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     FileChanged,
+    SourceLocked,
     DestinationUnavailable,
     MoveVerificationFailed,
     SourceDeleteFailed,
@@ -24,6 +25,7 @@ impl ErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::FileChanged => "FILE_CHANGED",
+            Self::SourceLocked => "SOURCE_LOCKED",
             Self::DestinationUnavailable => "DESTINATION_UNAVAILABLE",
             Self::MoveVerificationFailed => "MOVE_VERIFICATION_FAILED",
             Self::SourceDeleteFailed => "SOURCE_DELETE_FAILED",
@@ -40,6 +42,7 @@ impl ErrorCode {
     pub(crate) fn from_str(value: &str) -> Option<Self> {
         Some(match value {
             "FILE_CHANGED" => Self::FileChanged,
+            "SOURCE_LOCKED" => Self::SourceLocked,
             "DESTINATION_UNAVAILABLE" => Self::DestinationUnavailable,
             "MOVE_VERIFICATION_FAILED" => Self::MoveVerificationFailed,
             "SOURCE_DELETE_FAILED" => Self::SourceDeleteFailed,

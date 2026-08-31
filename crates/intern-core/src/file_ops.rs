@@ -6,7 +6,8 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(not(windows))]
@@ -18,6 +19,94 @@ use sha2::{Digest, Sha256};
 use crate::{ErrorCode, InternError, InternResult, QueueItem, QueueStore};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+/// Windows refuses to open a file another process is holding with an
+/// incompatible sharing mode, and reports it as ERROR_SHARING_VIOLATION (32) or
+/// ERROR_LOCK_VIOLATION (33). The OneDrive sync engine takes exactly such a hold
+/// while it uploads a file, as do indexers and Office. These are moments, not
+/// states: the holder lets go and the identical call succeeds. Reporting one as
+/// a changed document sends an intact file to review and asks a person to fix a
+/// lock that has already been released.
+#[cfg(windows)]
+pub fn is_transient_lock(error: &io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(32 | 33))
+}
+
+/// POSIX does not deny an open because another process holds the file, so there
+/// is no equivalent condition to wait out.
+#[cfg(not(windows))]
+pub fn is_transient_lock(_error: &io::Error) -> bool {
+    false
+}
+
+/// How long to wait out a transient lock before giving up on a document.
+///
+/// Five attempts with doubling backoff from 200ms is roughly three seconds of
+/// waiting: long enough to outlast a sync client finishing an ordinary upload,
+/// short enough that one genuinely stuck file does not stall the queue behind
+/// it. A file still held after that is reported as locked - not as changed - so
+/// the reason a person reads names what actually happened.
+#[derive(Clone, Copy, Debug)]
+pub struct LockRetry {
+    attempts: u32,
+    backoff: Duration,
+}
+
+impl Default for LockRetry {
+    fn default() -> Self {
+        Self {
+            attempts: 5,
+            backoff: Duration::from_millis(200),
+        }
+    }
+}
+
+impl LockRetry {
+    pub const fn new(attempts: u32, backoff: Duration) -> Self {
+        Self { attempts, backoff }
+    }
+
+    /// No waiting at all. Tests use this so that exercising the exhausted path
+    /// does not cost the wall-clock time the real policy deliberately spends.
+    pub const fn immediate() -> Self {
+        Self {
+            attempts: 1,
+            backoff: Duration::ZERO,
+        }
+    }
+
+    fn run<T>(self, mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+        let mut backoff = self.backoff;
+        for _ in 1..self.attempts.max(1) {
+            match operation() {
+                Err(error) if is_transient_lock(&error) => {
+                    if !backoff.is_zero() {
+                        thread::sleep(backoff);
+                    }
+                    backoff = backoff.saturating_mul(2);
+                }
+                settled => return settled,
+            }
+        }
+        operation()
+    }
+}
+
+/// Classify a failure to read or move the source. A lock that outlived the
+/// retry policy is its own outcome; anything else is the pre-existing
+/// "changed or unavailable" verdict. Either way the operating system's own
+/// error is carried into the message rather than discarded, because "os error
+/// 32" is the difference between a sync client mid-upload and a real problem.
+fn source_failure(error: &io::Error, changed: &'static str) -> InternError {
+    if is_transient_lock(error) {
+        InternError::new(
+            ErrorCode::SourceLocked,
+            format!("source is still held by another process ({error})"),
+        )
+    } else {
+        InternError::new(ErrorCode::FileChanged, format!("{changed} ({error})"))
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -195,21 +284,44 @@ impl FileSystem for StdFileSystem {
 pub struct FileApplier {
     filesystem: Arc<dyn FileSystem>,
     store: Arc<QueueStore>,
+    lock_retry: LockRetry,
 }
 
 impl FileApplier {
     pub fn new(filesystem: Arc<dyn FileSystem>, store: Arc<QueueStore>) -> Self {
-        Self { filesystem, store }
+        Self {
+            filesystem,
+            store,
+            lock_retry: LockRetry::default(),
+        }
     }
 
     pub fn local(store: Arc<QueueStore>) -> Self {
         Self::new(Arc::new(StdFileSystem), store)
     }
 
+    #[must_use]
+    pub const fn with_lock_retry(mut self, lock_retry: LockRetry) -> Self {
+        self.lock_retry = lock_retry;
+        self
+    }
+
     pub fn fingerprint(&self, path: &Path) -> InternResult<String> {
-        self.filesystem
-            .hash(path)
-            .map_err(|_| InternError::new(ErrorCode::IoError, "could not fingerprint source file"))
+        self.lock_retry
+            .run(|| self.filesystem.hash(path))
+            .map_err(|error| {
+                if is_transient_lock(&error) {
+                    InternError::new(
+                        ErrorCode::SourceLocked,
+                        format!("source is still held by another process ({error})"),
+                    )
+                } else {
+                    InternError::new(
+                        ErrorCode::IoError,
+                        format!("could not fingerprint source file ({error})"),
+                    )
+                }
+            })
     }
 
     pub fn apply(
@@ -624,9 +736,10 @@ impl FileApplier {
                 )
             })?;
         if same_volume {
-            let pre_hash = self.filesystem.hash(source).map_err(|_| {
-                InternError::new(ErrorCode::FileChanged, "source is unavailable or changed")
-            })?;
+            let pre_hash = self
+                .lock_retry
+                .run(|| self.filesystem.hash(source))
+                .map_err(|error| source_failure(&error, "source is unavailable or changed"))?;
             if pre_hash != expected_fingerprint {
                 return Err(InternError::new(
                     ErrorCode::FileChanged,
@@ -645,12 +758,10 @@ impl FileApplier {
             return self.same_volume_transfer(receipt);
         }
 
-        let mut locked = self.filesystem.lock_for_delete(source).map_err(|_| {
-            InternError::new(
-                ErrorCode::FileChanged,
-                "source cannot be exclusively verified",
-            )
-        })?;
+        let mut locked = self
+            .lock_retry
+            .run(|| self.filesystem.lock_for_delete(source))
+            .map_err(|error| source_failure(&error, "source cannot be exclusively verified"))?;
         let identity = locked.identity().map_err(|_| {
             InternError::new(ErrorCode::FileChanged, "source identity is unavailable")
         })?;
@@ -711,15 +822,24 @@ impl FileApplier {
         &self,
         mut receipt: OperationReceipt,
     ) -> InternResult<OperationReceipt> {
-        self.filesystem
-            .rename_no_replace(&receipt.source, &receipt.destination)
+        self.lock_retry
+            .run(|| {
+                self.filesystem
+                    .rename_no_replace(&receipt.source, &receipt.destination)
+            })
             .map_err(|error| {
                 let code = if error.kind() == io::ErrorKind::AlreadyExists {
                     ErrorCode::DestinationUnavailable
+                } else if is_transient_lock(&error) {
+                    ErrorCode::SourceLocked
                 } else {
                     ErrorCode::IoError
                 };
-                self.reconciliation_error(receipt.clone(), code, "atomic no-replace rename failed")
+                self.reconciliation_error(
+                    receipt.clone(),
+                    code,
+                    format!("atomic no-replace rename failed ({error})"),
+                )
             })?;
 
         receipt.source_exists = false;
@@ -1159,7 +1279,7 @@ impl FileApplier {
         &self,
         receipt: OperationReceipt,
         code: ErrorCode,
-        message: &str,
+        message: impl Into<String>,
     ) -> InternError {
         let journaled = if code == ErrorCode::SourceDeleteFailed
             && receipt.direction == OperationDirection::Apply
