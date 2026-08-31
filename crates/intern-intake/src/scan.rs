@@ -66,6 +66,10 @@ pub struct IntakeStatus {
     pub last_scan_at: Option<i64>,
     /// Eligible-extension files we are NOT claiming (scope/ownership rules).
     pub held_for_others: u32,
+    /// Files skipped because their name is a sync client's conflict copy.
+    pub sync_conflicts: u32,
+    /// Claims held open because the document's content is not on this disk yet.
+    pub awaiting_hydration: u32,
     pub claimed_by_others: u32,
     /// Done-by-us claims seen.
     pub processed_here: u32,
@@ -81,6 +85,8 @@ impl IntakeStatus {
             folder,
             last_scan_at: None,
             held_for_others: 0,
+            sync_conflicts: 0,
+            awaiting_hydration: 0,
             claimed_by_others: 0,
             processed_here: 0,
             machines: Vec::new(),
@@ -201,6 +207,74 @@ fn supported(path: &Path, extensions: &[String]) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .is_some_and(|extension| extensions.contains(&extension.to_ascii_lowercase()))
+}
+
+/// Whether a document's bytes are still in the cloud rather than on this disk.
+///
+/// A seam, because no test can conjure a real Files On-Demand placeholder.
+pub trait Hydration: Send + Sync {
+    fn is_dehydrated(&self, path: &Path) -> bool;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemHydration;
+
+impl Hydration for SystemHydration {
+    /// OneDrive and SharePoint mark an online-only file with the recall
+    /// attributes; Windows sets them without the content ever being fetched, so
+    /// reading them costs nothing and hydrates nothing. `symlink_metadata` is
+    /// deliberate - following the placeholder is the one thing that would pull
+    /// the file down.
+    #[cfg(windows)]
+    fn is_dehydrated(&self, path: &Path) -> bool {
+        use std::os::windows::fs::MetadataExt;
+
+        const FILE_ATTRIBUTE_OFFLINE: u32 = 0x0000_1000;
+        const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+        const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+
+        fs::symlink_metadata(path).is_ok_and(|metadata| {
+            metadata.file_attributes()
+                & (FILE_ATTRIBUTE_OFFLINE
+                    | FILE_ATTRIBUTE_RECALL_ON_OPEN
+                    | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+                != 0
+        })
+    }
+
+    /// No sync client outside Windows presents placeholders to Intern, so
+    /// everything readable here is already local.
+    #[cfg(not(windows))]
+    fn is_dehydrated(&self, _path: &Path) -> bool {
+        false
+    }
+}
+
+/// A name a sync client produced by resolving an edit conflict, rather than a
+/// document a person put in the folder.
+///
+/// OneDrive and SharePoint resolve a conflict by keeping both versions and
+/// suffixing the losing one with the machine that wrote it -
+/// `report-DESKTOP-A1B2C3.pdf`. That shape is indistinguishable from an
+/// ordinary hyphenated filename, and `Invoice-ACME.pdf` is a real document, so
+/// the suffix is believed only when it names a machine this shared folder has
+/// actually seen. Silently skipping a document someone meant to file would be
+/// the worse failure of the two, so the guess is never made on shape alone.
+///
+/// The other wording sync clients use - `(Jane's conflicted copy 2026-08-31)` -
+/// carries no such ambiguity and stands on its own.
+pub fn is_conflict_copy(path: &Path, machines: &[String]) -> bool {
+    let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let stem = stem.to_lowercase();
+    if stem.contains("conflicted copy") {
+        return true;
+    }
+    machines.iter().any(|machine| {
+        let machine = machine.trim().to_lowercase();
+        !machine.is_empty() && stem.ends_with(&format!("-{machine}"))
+    })
 }
 
 fn skipped_name(path: &Path) -> bool {

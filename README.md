@@ -41,7 +41,7 @@ extraction nor OCR can read goes to review rather than being guessed at.
 
 ## Install and first run
 
-Windows 10 or 11, x86-64. Download `Intern_0.1.0-alpha.3_x64-setup.exe` from the
+Windows 10 or 11, x86-64. Download `Intern_0.1.0-alpha.4_x64-setup.exe` from the
 [latest release](https://github.com/zgbrenner/intern/releases/latest) and run it.
 It installs per-user, so it does not ask for administrator rights, and
 uninstalling it leaves your documents and Intern's own data alone.
@@ -55,7 +55,7 @@ installer carries a keyless Sigstore build-provenance attestation naming the
 repository, workflow, and commit that produced those exact bytes:
 
 ```sh
-gh attestation verify Intern_0.1.0-alpha.3_x64-setup.exe --repo zgbrenner/intern
+gh attestation verify Intern_0.1.0-alpha.4_x64-setup.exe --repo zgbrenner/intern
 ```
 
 `SHA256SUMS.txt` is published beside the installer and catches a corrupted or
@@ -232,7 +232,7 @@ digest for every file in `src-tauri/resources/runtime-assets.json`.
 Tauri produces a per-user NSIS installer. To smoke-test a clean installer:
 
 ```powershell
-./scripts/smoke-installer.ps1 -InstallerPath target/release/bundle/nsis/Intern_0.1.0-alpha.3_x64-setup.exe
+./scripts/smoke-installer.ps1 -InstallerPath target/release/bundle/nsis/Intern_0.1.0-alpha.4_x64-setup.exe
 ```
 
 The installer includes third-party notices and the generated `licenses/`

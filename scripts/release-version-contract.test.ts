@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, it } from 'vitest';
 
-const version = '0.1.0-alpha.3';
+const version = '0.1.0-alpha.4';
 const tag = `v${version}`;
 
 it('keeps every current alpha.3 release surface synchronized without rewriting historical alpha.2 records', async () => {
@@ -47,14 +47,14 @@ it('keeps every current alpha.3 release surface synchronized without rewriting h
 });
 
 it('pins every release-critical action to an immutable commit and preserves the release gate order', async () => {
-  const workflows = await Promise.all(['ci.yml', 'lockfile.yml', 'qa.yml', 'release.yml']
+  const workflows = await Promise.all(['ci.yml', 'lockfile.yml', 'pages.yml', 'qa.yml', 'release.yml']
     .map((name) => readFile(`.github/workflows/${name}`, 'utf8')));
   for (const workflow of workflows) {
     const uses = workflow.split('\n').filter((line) => line.includes('uses: actions/'));
     expect(uses.length).toBeGreaterThan(0);
     for (const line of uses) expect(line).toMatch(/actions\/[\w/-]+@[a-f0-9]{40}\s+# v\d+/);
   }
-  const release = workflows[3];
+  const release = workflows[4];
   const gateMarkers = [
     'cargo run --locked -p intern-release-verifier --',
     'SHA256SUMS.txt',

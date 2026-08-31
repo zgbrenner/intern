@@ -17,7 +17,8 @@ use crate::{
     },
     identity::MachineIdentity,
     scan::{
-        FileFacts, IntakeConfig, IntakeHost, IntakeStatus, ItemState, StabilityTracker, walk_intake,
+        FileFacts, Hydration, IntakeConfig, IntakeHost, IntakeStatus, ItemState, StabilityTracker,
+        SystemHydration, is_conflict_copy, walk_intake,
     },
 };
 
@@ -54,6 +55,16 @@ impl IntakeWatcher {
         host: Arc<dyn IntakeHost>,
         clock: Arc<dyn Clock>,
     ) -> IntakeWatcher {
+        Self::start_with_seams(config, identity, host, clock, Arc::new(SystemHydration))
+    }
+
+    pub fn start_with_seams(
+        config: IntakeConfig,
+        identity: MachineIdentity,
+        host: Arc<dyn IntakeHost>,
+        clock: Arc<dyn Clock>,
+        hydration: Arc<dyn Hydration>,
+    ) -> IntakeWatcher {
         let shared = Arc::new(Shared {
             status: Mutex::new(IntakeStatus::idle(config.intake_root.clone())),
             control: Mutex::new(Control {
@@ -68,7 +79,7 @@ impl IntakeWatcher {
             .name("intern-intake-watcher".to_string())
             .spawn({
                 let shared = shared.clone();
-                move || run(&shared, &identity, host, clock)
+                move || run(&shared, &identity, host, clock, hydration)
             })
             .expect("intake watcher thread could not be spawned");
         IntakeWatcher {
@@ -129,6 +140,9 @@ struct ScanState {
     /// Claims this machine believes it holds, so a takeover or sync conflict
     /// that rewrites a claim file is noticed and the local item abandoned.
     owned: HashMap<String, PathBuf>,
+    /// Claims kept open because the document failed while its content was
+    /// still in the cloud. Their fate is decided once the bytes arrive.
+    awaiting_hydration: HashSet<String>,
 }
 
 fn run(
@@ -136,6 +150,7 @@ fn run(
     identity: &MachineIdentity,
     host: Arc<dyn IntakeHost>,
     clock: Arc<dyn Clock>,
+    hydration: Arc<dyn Hydration>,
 ) {
     let mut state = ScanState::default();
     let mut state_generation = 0_u64;
@@ -153,7 +168,14 @@ fn run(
             state = ScanState::default();
             state_generation = generation;
         }
-        let status = scan_once(&config, identity, host.as_ref(), &clock, &mut state);
+        let status = scan_once(
+            &config,
+            identity,
+            host.as_ref(),
+            &clock,
+            hydration.as_ref(),
+            &mut state,
+        );
         *lock(&shared.status) = status.clone();
         if last_reported
             .as_ref()
@@ -183,6 +205,7 @@ fn scan_once(
     identity: &MachineIdentity,
     host: &dyn IntakeHost,
     clock: &Arc<dyn Clock>,
+    hydration: &dyn Hydration,
     state: &mut ScanState,
 ) -> IntakeStatus {
     // Stamped at the start of the walk: the timestamp then vouches that
@@ -196,6 +219,7 @@ fn scan_once(
         backlog,
         backlog_recorded,
         owned,
+        awaiting_hydration,
     } = state;
     if store.is_none() {
         match ClaimStore::with_clock(&config.intake_root, identity.clone(), clock.clone()) {
@@ -216,16 +240,29 @@ fn scan_once(
         }
     };
 
+    // Read before the walk is processed so a conflict copy is recognised on the
+    // same scan it appears, and include this machine: OneDrive names the losing
+    // side of a conflict after whichever machine wrote it, which is often us.
+    let mut machines: Vec<String> = store
+        .list_machines()
+        .into_iter()
+        .map(|presence| presence.machine_name)
+        .collect();
+    machines.push(identity.name.clone());
+
     let mut scanner = Scanner {
         config,
         identity,
         host,
+        hydration,
+        machines,
         clock: clock.as_ref(),
         store,
         stability,
         backlog,
         record_backlog: !*backlog_recorded,
         owned,
+        awaiting_hydration,
         status: &mut status,
         visited: HashSet::new(),
         live: HashSet::new(),
@@ -250,12 +287,15 @@ struct Scanner<'a> {
     config: &'a IntakeConfig,
     identity: &'a MachineIdentity,
     host: &'a dyn IntakeHost,
+    hydration: &'a dyn Hydration,
+    machines: Vec<String>,
     clock: &'a dyn Clock,
     store: &'a ClaimStore,
     stability: &'a mut StabilityTracker,
     backlog: &'a mut HashSet<String>,
     record_backlog: bool,
     owned: &'a mut HashMap<String, PathBuf>,
+    awaiting_hydration: &'a mut HashSet<String>,
     status: &'a mut IntakeStatus,
     visited: HashSet<String>,
     live: HashSet<PathBuf>,
@@ -264,6 +304,13 @@ struct Scanner<'a> {
 impl Scanner<'_> {
     fn process_file(&mut self, facts: &FileFacts) {
         self.live.insert(facts.path.clone());
+        // A conflict copy is the sync client's bookkeeping, not a new document.
+        // Naming it would file a second copy of something already filed, so it
+        // is counted and left where it is for a person to resolve.
+        if is_conflict_copy(&facts.path, &self.machines) {
+            self.status.sync_conflicts += 1;
+            return;
+        }
         if self.record_backlog {
             self.backlog.insert(facts.relative_path.clone());
         }
@@ -388,7 +435,7 @@ impl Scanner<'_> {
                 outcome,
                 result_filename,
             } => self.finish_owned(key, outcome, result_filename.as_deref()),
-            ItemState::Failed => self.finish_owned(key, DoneOutcome::Failed, None),
+            ItemState::Failed => self.finish_failed(key, path),
             ItemState::Unknown => {
                 if file_present {
                     let _ = self.store.release(key);
@@ -398,6 +445,39 @@ impl Scanner<'_> {
                 self.owned.remove(key);
             }
         }
+    }
+
+    /// A document that failed while its bytes were still in the cloud has not
+    /// been judged - nothing ever read it. Tombstoning it there would strand a
+    /// perfectly good document behind a laptop that happened to be offline, and
+    /// the tombstone outlives the trip. So the claim is held, not closed, and
+    /// the verdict waits for the content.
+    ///
+    /// Once the bytes arrive the claim is released rather than retried in
+    /// place: the next scan re-acquires it and the document goes through the
+    /// pipeline again, now with something to read. A second failure with the
+    /// content local is a real failure and tombstones normally, so this can
+    /// forgive a document exactly once per trip through the cloud.
+    fn finish_failed(&mut self, key: &str, path: &Path) {
+        if self.hydration.is_dehydrated(path) {
+            // Counted only once the lease is actually held: a document we just
+            // abandoned is not one we are waiting on.
+            if self.store.renew(key).is_err() {
+                self.owned.remove(key);
+                self.awaiting_hydration.remove(key);
+                self.host.abandon(path);
+                return;
+            }
+            self.awaiting_hydration.insert(key.to_owned());
+            self.status.awaiting_hydration += 1;
+            return;
+        }
+        if self.awaiting_hydration.remove(key) {
+            let _ = self.store.release(key);
+            self.owned.remove(key);
+            return;
+        }
+        self.finish_owned(key, DoneOutcome::Failed, None);
     }
 
     fn finish_owned(&mut self, key: &str, outcome: DoneOutcome, result_filename: Option<&str>) {
@@ -429,5 +509,12 @@ impl Scanner<'_> {
             }
             self.manage_owned(&key, &path, path.exists());
         }
+        // A claim we no longer hold - deleted, taken over, abandoned - is not
+        // one we are waiting on the cloud for. Without this the set grows for
+        // the life of the process and a later file landing on the same key
+        // would inherit a stale forgiveness.
+        let owned = &*self.owned;
+        self.awaiting_hydration
+            .retain(|key| owned.contains_key(key));
     }
 }

@@ -201,6 +201,8 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
         <p role="status" aria-label="Intake status" aria-live="polite">{intake
           ? `${intake.watching ? 'Watching' : 'Not watching'} · ${activeMachines} ${activeMachines === 1 ? 'machine' : 'machines'} active · ${intake.heldForOthers} held for others · Last scan: ${formatScanTime(intake.lastScanAt)}`
           : 'Checking intake status…'}</p>
+        {intake && intake.syncConflicts > 0 && <p className="update-note" role="status">{intake.syncConflicts === 1 ? '1 file is' : `${intake.syncConflicts} files are`} a sync conflict copy left behind by OneDrive or SharePoint. Intern leaves {intake.syncConflicts === 1 ? 'it' : 'them'} alone — resolve the conflict in the folder and the surviving document is picked up on the next scan.</p>}
+        {intake && intake.awaitingHydration > 0 && <p className="update-note" role="status">{intake.awaitingHydration === 1 ? '1 document is' : `${intake.awaitingHydration} documents are`} waiting for OneDrive to download {intake.awaitingHydration === 1 ? 'its' : 'their'} contents. Intern is holding {intake.awaitingHydration === 1 ? 'it' : 'them'} rather than failing {intake.awaitingHydration === 1 ? 'it' : 'them'}; connect this machine and the next scan picks {intake.awaitingHydration === 1 ? 'it' : 'them'} up.</p>}
         {(intakeError || intake?.error) && <p className="form-error" role="alert">{intakeError || intake?.error}</p>}
         <button type="button" disabled={scanning} onClick={() => void runScanNow()}>{scanning ? 'Scanning…' : 'Scan now'}</button>
       </div>}

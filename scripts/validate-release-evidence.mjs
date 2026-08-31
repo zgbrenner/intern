@@ -40,8 +40,8 @@ if (manifest.distribution) {
   exactKeys(manifest.distribution, ['latest_json', 'runtime_assets', 'third_party_notices', 'checksums', 'sboms'], 'release distribution evidence');
   for (const key of ['latest_json', 'runtime_assets', 'third_party_notices', 'checksums']) await verifyEntry(manifest.distribution[key], key);
   requireValue(Array.isArray(manifest.distribution.sboms) && manifest.distribution.sboms.length > 0, 'release SBOMs are missing');
-  const workflowMatch = /^Release v(0\.1\.0-alpha\.3)$/.exec(manifest.subject.workflow);
-  requireValue(workflowMatch, 'release evidence workflow must be exactly Release v0.1.0-alpha.3');
+  const workflowMatch = /^Release v(0\.1\.0-alpha\.4)$/.exec(manifest.subject.workflow);
+  requireValue(workflowMatch, 'release evidence workflow must be exactly Release v0.1.0-alpha.4');
   const releaseVersion = workflowMatch[1];
   const applicationLeaf = `Intern-v${releaseVersion}.spdx.json`;
   const runtimePrefix = `Intern-v${releaseVersion}-runtime-`;

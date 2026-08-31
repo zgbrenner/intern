@@ -32,6 +32,15 @@ a placeholder cannot hydrate, the document fails to extract and goes to review
 instead of being guessed at — keep intake files available, or the machine
 online, and it never comes up.
 
+A failure while the content is still in the cloud is not a verdict on the
+document, because nothing ever read it. Intern holds the claim open in that
+case rather than closing it, and Settings counts the documents waiting on
+their contents. When the bytes arrive the claim is released, the next scan
+re-acquires it, and the document goes through the pipeline with something to
+read. A second failure with the content local is a real failure and is
+recorded as one. A laptop that spends a trip offline therefore returns to a
+folder it can still work on, instead of one full of tombstones.
+
 ## Watching a folder
 
 Enable **Watch a folder** in Settings and pick the intake folder. The watcher
@@ -41,6 +50,19 @@ scan is invisible next to a model that takes seconds per document. A
 file is picked up once its size and modification time have held still for a
 full scan interval, so a document still being copied or synced in is never
 read half-written.
+
+Conflict copies are left alone. When two machines edit the same document
+before sync catches up, the sync client keeps both and renames the losing side
+after the machine that wrote it — `report-DESKTOP-A1B2C3.pdf` — or spells it
+out as `report (Jane's conflicted copy 2026-08-31).pdf`. Neither is a new
+document, and filing one would put a second copy of something already filed
+into the destination. The spelled-out form is unambiguous; the machine-suffix
+form is not, because `Invoice-ACME.pdf` is an ordinary filename, so that
+suffix is believed only when it names a machine this folder has actually seen
+in its presence records. Skipping a document someone meant to file is the
+worse of the two mistakes, so the guess is never made on shape alone. Settings
+counts what was skipped; resolve the conflict in the folder and the survivor
+is picked up on the next scan.
 
 A watched intake requires a destination folder **outside** the intake folder.
 Renaming in place inside a watched folder would make every result reappear as
@@ -111,10 +133,17 @@ you are sharing already reveals it; Intern adds nothing beyond that.
 - **Document fails analysis**: after the local retry it is marked done-failed
   in the shared folder so machines do not ping-pong a poisoned document.
   Retry it manually from the machine that holds it.
+- **Sync client holds the file open**: OneDrive locks a file while it uploads
+  it, and Windows refuses the open with a sharing violation. Intern waits the
+  lock out — five attempts over about three seconds — rather than reporting an
+  intact document as changed. A file still held after that is reported as
+  locked, naming what actually happened, and can be retried.
 - **Claim lost to a sync conflict**: the loser cancels its local queue item;
   if it had already renamed first, the winner finds the file gone and routes
   to review.
-- **Offline placeholder**: extraction fails, document goes to review with the
-  reason shown, claim is marked done-failed.
+- **Offline placeholder**: extraction fails and the document goes to review
+  with the reason shown, but the claim is held rather than tombstoned; it is
+  released for a fresh attempt once the content arrives.
+- **Sync conflict copy appears**: skipped and counted, never filed.
 - **Settings misconfiguration**: refused at save time with a specific error,
   not discovered at run time.
