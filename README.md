@@ -255,3 +255,19 @@ as a trap, and on the review rate. Publishing is a deliberate
 `workflow_dispatch` against a chosen main commit, never a side effect of
 merging; the release job still refuses any commit but the one it was dispatched
 for.
+
+## License
+
+Intern is © 2026 Vistage Worldwide, Inc., and is **source-available** under the
+[Elastic License 2.0](LICENSE) — not an OSI-approved open-source license.
+
+Read, audit, build, run, modify, and redistribute it freely. Intern makes
+strong claims about what it does and does not do with your documents; the
+source is published so those claims can be checked rather than taken on faith.
+What the license reserves to Vistage Worldwide, Inc. is providing Intern to
+third parties as a hosted or managed service, and circumventing its license or
+functionality restrictions.
+
+Third-party components keep their own licenses: see
+[`THIRD_PARTY_NOTICES.md`](src-tauri/resources/THIRD_PARTY_NOTICES.md) and the
+`licenses/` directory in the installed application.

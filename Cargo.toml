@@ -14,4 +14,4 @@ members = [
 version = "0.1.0-alpha.5"
 edition = "2024"
 rust-version = "1.88"
-license = "MIT"
+license = "LicenseRef-Elastic-2.0"
