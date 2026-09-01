@@ -1,6 +1,6 @@
 # Intern third-party notices
 
-Intern 0.1.0-alpha.5 is distributed under the MIT License. This notice covers
+Intern 0.1.0-alpha.6 is distributed under the MIT License. This notice covers
 the third-party software shipped in, linked into, or downloaded by the Windows
 package. `runtime-assets.json` is the authoritative, SHA-256-addressed inventory
 of native files bundled by the release build. `Cargo.lock` and

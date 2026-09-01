@@ -15,7 +15,7 @@ fn hello_reports_exact_protocol_version() {
 
     assert_eq!(
         response,
-        r#"{"protocol_version":1,"request_id":"r1","event":{"type":"hello","worker_version":"0.1.0-alpha.5"}}"#
+        r#"{"protocol_version":1,"request_id":"r1","event":{"type":"hello","worker_version":"0.1.0-alpha.6"}}"#
     );
 }
 
@@ -41,7 +41,7 @@ fn malformed_json_is_an_error_event_and_the_next_request_is_processed() {
     assert_eq!(error["request_id"], "");
     assert_eq!(
         lines[1],
-        r#"{"protocol_version":1,"request_id":"r2","event":{"type":"hello","worker_version":"0.1.0-alpha.5"}}"#
+        r#"{"protocol_version":1,"request_id":"r2","event":{"type":"hello","worker_version":"0.1.0-alpha.6"}}"#
     );
     assert!(
         std::str::from_utf8(&diagnostics)

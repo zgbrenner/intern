@@ -14,7 +14,7 @@ async function evidenceFixture() {
   await mkdir(join(root, 'docs/qa/logs'), { recursive: true });
   await mkdir(join(root, 'release'), { recursive: true });
   const commit = 'a'.repeat(40);
-  const workflow = 'Release v0.1.0-alpha.5';
+  const workflow = 'Release v0.1.0-alpha.6';
   const runId = '123456';
   const screenshot = 'rendered screenshot';
   const files = {
@@ -28,8 +28,8 @@ async function evidenceFixture() {
     runtime: 'release/runtime-assets.json',
     notices: 'release/THIRD_PARTY_NOTICES.md',
     checksum: 'release/SHA256SUMS.txt',
-    applicationSbom: 'release/Intern-v0.1.0-alpha.5.spdx.json',
-    runtimeSbom: 'release/Intern-v0.1.0-alpha.5-runtime-tesseract.spdx.json',
+    applicationSbom: 'release/Intern-v0.1.0-alpha.6.spdx.json',
+    runtimeSbom: 'release/Intern-v0.1.0-alpha.6-runtime-tesseract.spdx.json',
     cargoLog: 'release/cargo-test.log',
     modelLog: 'release/model-evaluation.log',
     installerLog: 'release/installer-smoke.log',
@@ -73,12 +73,12 @@ async function evidenceFixture() {
     },
   }));
   await writeFile(join(root, files.installer), 'installer bytes');
-  await writeFile(join(root, files.latest), JSON.stringify({ version: '0.1.0-alpha.5' }));
-  await writeFile(join(root, files.runtime), JSON.stringify({ schema_version: 1, packages: [{ name: 'Intern', version: '0.1.0-alpha.5' }] }));
-  await writeFile(join(root, files.notices), 'Intern 0.1.0-alpha.5 notices');
+  await writeFile(join(root, files.latest), JSON.stringify({ version: '0.1.0-alpha.6' }));
+  await writeFile(join(root, files.runtime), JSON.stringify({ schema_version: 1, packages: [{ name: 'Intern', version: '0.1.0-alpha.6' }] }));
+  await writeFile(join(root, files.notices), 'Intern 0.1.0-alpha.6 notices');
   await writeFile(join(root, files.applicationSbom), JSON.stringify({
-    spdxVersion: 'SPDX-2.2', SPDXID: 'SPDXRef-DOCUMENT', name: 'Intern 0.1.0-alpha.5',
-    documentNamespace: 'https://example.test/intern-alpha.5', packages: [{ SPDXID: 'SPDXRef-Package', name: 'Intern', versionInfo: '0.1.0-alpha.5' }],
+    spdxVersion: 'SPDX-2.2', SPDXID: 'SPDXRef-DOCUMENT', name: 'Intern 0.1.0-alpha.6',
+    documentNamespace: 'https://example.test/intern-alpha.6', packages: [{ SPDXID: 'SPDXRef-Package', name: 'Intern', versionInfo: '0.1.0-alpha.6' }],
   }));
   // Runtime SBOMs intentionally carry their component's pinned version, not the
   // application release version. Filename classification makes this distinction
@@ -174,7 +174,7 @@ it('requires the current prerelease workflow contract and rejects regex-like run
   const manifestPath = await createManifest(fixture);
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 
-  for (const workflow of ['Release build v0.1.0-alpha.5', 'Release v0.1.0', 'Release v0.1.0-alpha.4']) {
+  for (const workflow of ['Release build v0.1.0-alpha.6', 'Release v0.1.0', 'Release v0.1.0-alpha.5']) {
     manifest.subject.workflow = workflow;
     await writeFile(manifestPath, JSON.stringify(manifest));
     await expect(exec(process.execPath, [
@@ -185,7 +185,7 @@ it('requires the current prerelease workflow contract and rejects regex-like run
 
   manifest.subject.workflow = fixture.workflow;
   const runtime = manifest.distribution.sboms.find((sbom: { path: string }) => sbom.path === fixture.files.runtimeSbom);
-  const nearMiss = 'release/Intern-v0x1y0-alpha.5-runtime-tesseract.spdx.json';
+  const nearMiss = 'release/Intern-v0x1y0-alpha.6-runtime-tesseract.spdx.json';
   await writeFile(join(fixture.root, nearMiss), await readFile(join(fixture.root, fixture.files.runtimeSbom)));
   runtime.path = nearMiss;
   await writeFile(manifestPath, JSON.stringify(manifest));

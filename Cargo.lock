@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "intern-app"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "intern-core",
  "intern-engine",
@@ -2303,7 +2303,7 @@ dependencies = [
 
 [[package]]
 name = "intern-core"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "rusqlite",
  "serde",
@@ -2314,7 +2314,7 @@ dependencies = [
 
 [[package]]
 name = "intern-engine"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "base64 0.22.1",
  "fs4",
@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "intern-intake"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "intern-queue"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "intern-core",
  "intern-engine",
@@ -2355,7 +2355,7 @@ dependencies = [
 
 [[package]]
 name = "intern-release-verifier"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "base64 0.22.1",
  "minisign-verify",
@@ -2366,7 +2366,7 @@ dependencies = [
 
 [[package]]
 name = "intern-worker"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anydoc",
  "base64 0.22.1",
