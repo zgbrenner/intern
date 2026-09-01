@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { GUIDE_URL } from './bridge';
 import {
   TauriBridge,
   createTauriSelectionBoundary,
@@ -215,6 +216,21 @@ describe('TauriBridge', () => {
 
     const canceled = createTauriSelectionBoundary(fakeTransport({ 'plugin:dialog|save': null }).transport);
     expect(await canceled.pickHistoryExportPath?.()).toBeUndefined();
+  });
+
+  // Inside the Tauri webview a link has nowhere to open: target="_blank" is
+  // either swallowed or replaces the app's own window. The guide has to be
+  // handed to the shell, and it goes through the opener plugin's narrow
+  // command with the one URL the capability scope admits.
+  it('opens the published guide in the system browser rather than the webview', async () => {
+    const fake = fakeTransport();
+
+    await new TauriBridge(fake.transport).openGuide();
+
+    expect(fake.calls).toEqual([
+      { command: 'plugin:opener|open_url', args: { url: GUIDE_URL } },
+    ]);
+    expect(GUIDE_URL).toBe('https://zgbrenner.github.io/intern/guide.html');
   });
 
   it('reports an absent cloud classification as null, never undefined', async () => {

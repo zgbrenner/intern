@@ -36,6 +36,16 @@ export interface SelectionBoundary {
   pickHistoryExportPath?(): Promise<string | undefined>;
 }
 
+/**
+ * The published user guide. It lives here, on the bridge, rather than in a
+ * component: the desktop build hands this exact string to the operating
+ * system's browser, and the Tauri capability in
+ * `src-tauri/capabilities/default.json` is scoped to this origin alone. One
+ * constant keeps the two in step, and keeps every caller from being able to
+ * ask the shell to open something else.
+ */
+export const GUIDE_URL = 'https://zgbrenner.github.io/intern/guide.html';
+
 export interface DesktopBridge {
   listItems(): Promise<QueueItem[]>;
   addFiles(files: FileSelection[]): Promise<void>;
@@ -92,6 +102,15 @@ export interface DesktopBridge {
    * network request is made and nothing about the folder leaves the machine.
    */
   classifyFolder(path: string): Promise<CloudLocation | null>;
+  /**
+   * Open the published guide (`GUIDE_URL`) in the user's own browser.
+   *
+   * Deliberately takes no URL. Inside Tauri a bare `<a target="_blank">` has
+   * nowhere to go, so this has to reach the shell - and a method that accepted
+   * any address would hand the webview a general-purpose "open anything"
+   * capability for the sake of one help link.
+   */
+  openGuide(): Promise<void>;
 }
 
 /**

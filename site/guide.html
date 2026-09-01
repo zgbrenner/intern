@@ -6,608 +6,1219 @@
 <title>Intern — guide</title>
 <meta name="description" content="How to install and use Intern: first run, OneDrive and SharePoint, watched folders, teams, and troubleshooting.">
 <style>
+  /* ------------------------------------------------------------------ *
+   * Same token system and type thesis as the download page: sans for
+   * what we say, mono for what the machine says.
+   * ------------------------------------------------------------------ */
   :root {
     color-scheme: light dark;
+
     --navy: #1B2F5B;
     --blue: #2456D6;
     --tint: #E3ECFB;
     --deep: #101F3C;
-    --bg: #F7F9FC;
-    --fg: #1C2536;
-    --muted: #4A5568;
-    --rule: #DDE4EF;
+
+    --bg: #FAFBFD;
+    --surface: #FFFFFF;
+    --sunk: #F1F4FA;
+    --fg: #14203A;
+    --head: #1B2F5B;
+    --muted: #4A5773;
+    --rule: #DCE3EF;
+    --rule-strong: #C3CFE2;
     --link: #2456D6;
-    --hero-bg: var(--navy);
-    --hero-fg: #FFFFFF;
-    --hero-muted: #C3D2EE;
-    --hero-rule: #33477E;
-    --panel: var(--tint);
-    --chip-bg: var(--tint);
-    --chip-fg: #1B2F5B;
+
+    --accent: #8A5A12;
+    --accent-soft: #F6EEDC;
+    --accent-rule: #DCC189;
+
+    --focus: #2456D6;
     --code-bg: #FFFFFF;
-    --warn-bg: #FCF7E8;
-    --warn-rule: #E0CF9E;
-    --card-bg: #FFFFFF;
+
+    --fig-bg: #FFFFFF;
+    --fig-rule: #C3CFE2;
+    --fig-strong: #1B2F5B;
+    --fig-ink: #14203A;
+    --fig-muted: #4A5773;
+    --fig-arrow: #4A5773;
+    --fig-solid-bg: #1B2F5B;
+    --fig-solid-fg: #FFFFFF;
+    --seg-date: #2456D6;
+
+    --nav-h: 3.5rem;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
   }
+
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0D1424;
-      --fg: #E5EAF5;
-      --muted: #A7B4CE;
-      --rule: #26324E;
-      --link: #8FB2F5;
-      --hero-bg: var(--deep);
-      --hero-fg: #F2F5FC;
-      --hero-muted: #AFBEDD;
-      --hero-rule: #24365E;
-      --panel: #18294F;
-      --chip-bg: #22345E;
-      --chip-fg: #CFDDF8;
-      --code-bg: var(--deep);
-      --warn-bg: #262013;
-      --warn-rule: #4A3E22;
-      --card-bg: #131E36;
+      --bg: #0B1120;
+      --surface: #121A2E;
+      --sunk: #0F1728;
+      --fg: #E7ECF7;
+      --head: #E7ECF7;
+      --muted: #9BA9C6;
+      --rule: #25314D;
+      --rule-strong: #33405F;
+      --link: #93B4F8;
+
+      --accent: #E0B26A;
+      --accent-soft: #241D0F;
+      --accent-rule: #4E3E1E;
+
+      --focus: #93B4F8;
+      --code-bg: #0F1728;
+
+      --fig-bg: #121A2E;
+      --fig-rule: #33405F;
+      --fig-strong: #93B4F8;
+      --fig-ink: #E7ECF7;
+      --fig-muted: #9BA9C6;
+      --fig-arrow: #9BA9C6;
+      --fig-solid-bg: #93B4F8;
+      --fig-solid-fg: #0B1120;
+      --seg-date: #93B4F8;
     }
   }
+
+  /* ------------------------------------------------------------------ *
+   * Base
+   * ------------------------------------------------------------------ */
   * { box-sizing: border-box; }
+
+  html {
+    scroll-padding-top: calc(var(--nav-h) + 1.5rem);
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     margin: 0;
     background: var(--bg);
     color: var(--fg);
-    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 42rem; margin: 0 auto; padding: 0 1.25rem; }
-  code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
-  a { color: var(--link); }
 
-  /* Hero */
-  header {
-    background: var(--hero-bg);
-    color: var(--hero-fg);
-    padding: 3rem 0 2.5rem;
+  h1, h2, h3 { color: var(--head); font-weight: 640; }
+  h1 { font-size: clamp(1.95rem, 1.3rem + 2.9vw, 3.35rem); line-height: 1.05; letter-spacing: -0.035em; margin: 0; text-wrap: balance; }
+  h2 { font-size: clamp(1.32rem, 1.1rem + 0.95vw, 1.72rem); line-height: 1.18; letter-spacing: -0.025em; margin: 0; text-wrap: balance; }
+  h3 { font-size: 1rem; line-height: 1.4; letter-spacing: -0.01em; margin: 0; }
+  p { margin: 0; }
+  ul, ol { margin: 0; padding: 0; }
+
+  a { color: var(--link); text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+  a:hover { text-decoration-thickness: 2px; }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 3px;
+    border-radius: 3px;
   }
-  h1 { font-size: 2.25rem; letter-spacing: -0.02em; margin: 0; line-height: 1.15; }
-  .pitch { font-size: 1.15rem; margin: 1rem 0 1.25rem; color: var(--hero-fg); }
-  .back {
-    display: inline-block;
-    color: var(--hero-muted);
+
+  code, kbd, samp, pre { font-family: var(--mono); }
+  code { font-size: 0.88em; }
+
+  .shell {
+    width: 100%;
+    max-width: 66rem;
+    margin-inline: auto;
+    padding-inline: clamp(1.15rem, 4vw, 2.75rem);
+  }
+
+  .skip {
+    position: fixed;
+    left: 0.75rem;
+    top: -4rem;
+    z-index: 50;
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--rule-strong);
+    border-radius: 6px;
+    padding: 0.55rem 0.9rem;
     font-size: 0.9rem;
+    text-decoration: none;
+    transition: top 120ms ease;
   }
-  .back:hover { color: var(--hero-fg); }
+  .skip:focus { top: 0.6rem; }
 
-  /* Table of contents */
+  .ico {
+    width: 1.05em;
+    height: 1.05em;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: -0.16em;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Nav — identical to the download page.
+   * ------------------------------------------------------------------ */
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(180%) blur(10px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .nav-in {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-height: var(--nav-h);
+  }
+  .brand {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex: none;
+    text-decoration: none;
+    color: var(--head);
+  }
+  .brand-mark { font-size: 1.02rem; font-weight: 680; letter-spacing: -0.02em; }
+  .brand-tag {
+    font-family: var(--mono);
+    font-size: 0.63rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    list-style: none;
+    margin-left: auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a {
+    display: block;
+    white-space: nowrap;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.885rem;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 120ms ease, background-color 120ms ease;
+  }
+  .nav-links a:hover { color: var(--fg); background: var(--sunk); }
+  .nav-links a[aria-current="page"] {
+    color: var(--head);
+    font-weight: 620;
+    box-shadow: inset 0 -2px 0 var(--blue);
+    border-radius: 6px 6px 0 0;
+  }
+  .nav-links .ext { width: 0.72em; height: 0.72em; opacity: 0.75; margin-left: 0.15em; }
+
+  /* Below ~32rem the four links scroll. Tighten the row first, so the
+     current-page marker stays on screen rather than off the right edge. */
+  @media (max-width: 32rem) {
+    .nav-in { gap: 0.5rem; }
+    .nav-links { gap: 0; }
+    .nav-links a { padding: 0.3rem 0.4rem; font-size: 0.84rem; }
+    .brand { gap: 0.35rem; }
+    .brand-tag { font-size: 0.58rem; letter-spacing: 0.07em; }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Guide masthead
+   * ------------------------------------------------------------------ */
+  .masthead { padding-block: clamp(2.5rem, 5vw, 4rem) clamp(2rem, 4vw, 3rem); }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+    margin-bottom: 0.85rem;
+  }
+  .eyebrow::before { content: ""; width: 1.6rem; height: 1px; background: var(--rule-strong); }
+  .masthead h1 { max-width: 11em; }
+  .masthead .deck {
+    margin-top: 1.1rem;
+    max-width: 34rem;
+    font-size: 1.1rem;
+    line-height: 1.55;
+    color: var(--muted);
+    text-wrap: pretty;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Layout: sticky contents beside the article
+   * ------------------------------------------------------------------ */
+  .guide-grid { display: grid; gap: 2.5rem; padding-bottom: 4rem; }
+  /* Grid items must be allowed to shrink below their min-content, or a long
+     unbreakable line (the attestation command) widens the whole column. */
+  .guide-grid > * { min-width: 0; }
+  @media (min-width: 62rem) {
+    .guide-grid { grid-template-columns: 15.5rem minmax(0, 1fr); gap: 4rem; align-items: start; }
+  }
+
   .toc {
-    background: var(--card-bg);
     border: 1px solid var(--rule);
-    border-radius: 10px;
-    padding: 1.15rem 1.25rem;
-    margin: 1.75rem 0 0;
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 1.1rem 1.15rem;
   }
-  .toc h2 { margin: 0 0 0.6rem; font-size: 1rem; }
-  .toc ol { margin: 0; padding-left: 1.35rem; }
-  .toc li { margin: 0.25rem 0; }
-  .toc a { text-decoration: none; }
-  .toc a:hover { text-decoration: underline; }
+  .toc h2 {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    font-weight: 400;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+    margin-bottom: 0.7rem;
+  }
+  .toc ol { list-style: none; display: grid; gap: 0.1rem; }
+  .toc a {
+    display: flex;
+    gap: 0.65rem;
+    align-items: baseline;
+    padding: 0.3rem 0.5rem 0.3rem 0.6rem;
+    border-left: 2px solid transparent;
+    border-radius: 0 5px 5px 0;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .toc a:hover { color: var(--fg); background: var(--sunk); }
+  .toc .n { font-family: var(--mono); font-size: 0.72rem; opacity: 0.8; }
+  @media (min-width: 30rem) and (max-width: 61.999rem) {
+    .toc ol { grid-template-columns: 1fr 1fr; column-gap: 1rem; }
+  }
+  @media (min-width: 62rem) {
+    .toc {
+      position: sticky;
+      top: calc(var(--nav-h) + 1.5rem);
+      max-height: calc(100vh - var(--nav-h) - 3rem);
+      overflow-y: auto;
+    }
+  }
 
-  /* Body sections */
-  main .wrap { padding-top: 0.5rem; padding-bottom: 1rem; }
-  section { border-top: 1px solid var(--rule); margin-top: 2.5rem; padding-top: 1.75rem; }
-  section:target { scroll-margin-top: 1rem; }
-  h2 { font-size: 1.25rem; letter-spacing: -0.01em; color: var(--navy); margin: 0 0 1rem; }
-  @media (prefers-color-scheme: dark) { h2 { color: var(--fg); } }
-  .steps { list-style: none; margin: 0 0 1rem; padding: 0; counter-reset: step; }
-  .steps li { position: relative; padding-left: 3rem; margin: 0 0 1.35rem; counter-increment: step; }
-  .steps li:last-child { margin-bottom: 0; }
+  /* CSS-only position tracking: the targeted section lights its own entry. */
+  body:has(#before:target) .toc a[href="#before"],
+  body:has(#install:target) .toc a[href="#install"],
+  body:has(#first-launch:target) .toc a[href="#first-launch"],
+  body:has(#first-document:target) .toc a[href="#first-document"],
+  body:has(#everyday:target) .toc a[href="#everyday"],
+  body:has(#onedrive:target) .toc a[href="#onedrive"],
+  body:has(#watch:target) .toc a[href="#watch"],
+  body:has(#team:target) .toc a[href="#team"],
+  body:has(#troubleshooting:target) .toc a[href="#troubleshooting"],
+  body:has(#updates:target) .toc a[href="#updates"] {
+    color: var(--head);
+    font-weight: 620;
+    border-left-color: var(--blue);
+    background: var(--sunk);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Article
+   * ------------------------------------------------------------------ */
+  .guide-body > section { padding-block: clamp(2.25rem, 4vw, 3.25rem); border-top: 1px solid var(--rule); }
+  .guide-body > section:first-child { border-top: none; padding-top: 0; }
+
+  .sec-head { display: flex; align-items: baseline; gap: 0.85rem; margin-bottom: 1rem; }
+  .sec-num {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    border: 1px solid var(--rule-strong);
+    border-radius: 99px;
+    padding: 0.05rem 0.5rem;
+    line-height: 1.5;
+  }
+  section:target .sec-num { color: var(--blue); border-color: var(--blue); }
+
+  .lead { font-size: 1.08rem; line-height: 1.5; max-width: 38rem; text-wrap: pretty; }
+  .guide-body p { max-width: 38rem; text-wrap: pretty; }
+  .guide-body p + p { margin-top: 0.85rem; }
+  .prose { color: var(--muted); margin-top: 0.9rem; }
+  .note { color: var(--muted); font-size: 0.9rem; margin-top: 0.9rem; }
+  h3 + p, h3 + ul { margin-top: 0.4rem; }
+
+  .bullets { list-style: none; margin-top: 1rem; max-width: 38rem; }
+  .bullets li { position: relative; padding-left: 1.4rem; margin-top: 0.55rem; color: var(--muted); }
+  .bullets li::before {
+    content: "";
+    position: absolute;
+    left: 0.15rem;
+    top: 0.72em;
+    width: 0.4rem;
+    height: 1px;
+    background: var(--rule-strong);
+  }
+  .bullets strong { color: var(--fg); font-weight: 620; }
+
+  /* Numbered steps */
+  .steps { list-style: none; counter-reset: step; margin-top: 1.35rem; max-width: 38rem; }
+  .steps li { position: relative; padding-left: 2.9rem; counter-increment: step; }
+  .steps li + li { margin-top: 1.2rem; }
   .steps li::before {
-    content: counter(step);
+    content: counter(step, decimal-leading-zero);
     position: absolute;
     left: 0;
     top: 0.1rem;
     width: 2rem;
     height: 2rem;
+    border: 1px solid var(--rule-strong);
     border-radius: 50%;
-    background: var(--chip-bg);
-    color: var(--chip-fg);
-    font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    background: var(--surface);
   }
-  .steps strong { display: block; margin-bottom: 0.15rem; }
-  p { margin: 0 0 1rem; }
-  p:last-child { margin-bottom: 0; }
-  ul { margin: 0 0 1rem; padding-left: 1.35rem; }
-  ul li { margin: 0 0 0.6rem; }
-  .aside { color: var(--muted); font-size: 0.9rem; }
-  .warning {
-    background: var(--warn-bg);
-    border: 1px solid var(--warn-rule);
-    border-radius: 8px;
-    padding: 1rem 1.15rem;
-    margin: 0 0 1rem;
+  .steps b { display: block; color: var(--head); font-weight: 620; }
+  .steps p { color: var(--muted); font-size: 0.96rem; margin-top: 0.1rem; }
+
+  /* Key/value rows */
+  .kv { margin-top: 1.35rem; border-top: 1px solid var(--rule); max-width: 38rem; }
+  .kv div { padding: 0.8rem 0; border-bottom: 1px solid var(--rule); }
+  .kv dt { font-weight: 620; color: var(--head); font-size: 0.95rem; }
+  .kv dd { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.94rem; }
+  .kv dd p + p { margin-top: 0.5rem; }
+  @media (min-width: 40rem) {
+    .kv div { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 1.25rem; align-items: baseline; }
+    .kv dd { margin-top: 0; }
   }
+
+  /* Format chips */
+  .formats { list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 1.1rem; max-width: 38rem; }
+  .formats li {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.04em;
+    color: var(--fg);
+    border: 1px solid var(--rule-strong);
+    border-radius: 5px;
+    padding: 0.2rem 0.5rem;
+    background: var(--surface);
+  }
+
+  /* Callouts */
   .callout {
-    background: var(--panel);
+    display: flex;
+    gap: 0.85rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
     border-radius: 10px;
     padding: 1rem 1.15rem;
-    margin: 0 0 1rem;
+    margin-top: 1.35rem;
+    max-width: 38rem;
   }
+  .callout .ico { margin-top: 0.28em; color: var(--muted); }
+  .callout b { display: block; color: var(--head); }
+  .callout p { font-size: 0.94rem; line-height: 1.55; }
+  .callout p + p { margin-top: 0.5rem; }
+
+  .warn {
+    display: flex;
+    gap: 0.9rem;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-rule);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin-top: 1.35rem;
+    max-width: 38rem;
+  }
+  .warn .ico { margin-top: 0.25em; color: var(--accent); stroke-width: 1.8; }
+  .warn b { display: block; color: var(--head); }
+  .warn p { font-size: 0.95rem; line-height: 1.55; }
+
   pre {
     background: var(--code-bg);
     border: 1px solid var(--rule);
-    border-radius: 6px;
-    padding: 0.75rem 0.9rem;
-    overflow-x: auto;
-    font-size: 0.85rem;
-    margin: 0 0 1rem;
-  }
-
-  /* Q&A accordions */
-  details {
-    background: var(--card-bg);
-    border: 1px solid var(--rule);
     border-radius: 8px;
-    margin: 0 0 0.75rem;
+    padding: 0.85rem 1rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin: 1.1rem 0 0;
+    max-width: 38rem;
   }
+  pre code { color: var(--fg); font-size: 1em; }
+
+  /* Figures */
+  figure { margin: 1.75rem 0 0; }
+  figure svg { display: block; width: 100%; height: auto; }
+  .fig-status { max-width: 22rem; }
+  .fig-topo { max-width: 25rem; }
+  figcaption { margin-top: 0.9rem; font-size: 0.88rem; color: var(--muted); max-width: 34rem; text-wrap: pretty; }
+
+  .f-card { fill: var(--fig-bg); stroke: var(--fig-rule); stroke-width: 1; }
+  .f-card-blue { fill: var(--fig-bg); stroke: var(--seg-date); stroke-width: 1.4; }
+  .f-card-warn { fill: var(--accent-soft); stroke: var(--accent-rule); stroke-width: 1.4; }
+  .f-card-strong { fill: var(--fig-bg); stroke: var(--fig-strong); stroke-width: 1.5; }
+  .f-solid { fill: var(--fig-solid-bg); stroke: none; }
+  .f-line { fill: none; stroke: var(--fig-rule); stroke-width: 1.4; stroke-linecap: round; }
+  .f-conn { fill: none; stroke: var(--fig-arrow); stroke-width: 1.4; stroke-linecap: round; }
+  .f-arrow { fill: none; stroke: var(--fig-arrow); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .f-head { fill: var(--fig-arrow); stroke: none; }
+  .f-dash { fill: none; stroke: var(--fig-muted); stroke-width: 1.2; stroke-dasharray: 5 5; opacity: 0.75; }
+  .f-forbid { fill: none; stroke: var(--fig-muted); stroke-width: 1.2; stroke-dasharray: 4 5; opacity: 0.6; }
+  .f-x { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; }
+  .f-knock { fill: var(--bg); stroke: none; }
+  .f-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; fill: var(--fig-muted); }
+  .f-micro { font-family: var(--mono); font-size: 9px; letter-spacing: 0.04em; fill: var(--fig-muted); }
+  .f-box-t { font-family: var(--mono); font-size: 12px; fill: var(--fig-ink); }
+  .f-box-t-inv { font-family: var(--mono); font-size: 12px; fill: var(--fig-solid-fg); }
+  .t-warn { fill: var(--accent); }
+
+  /* Symptom list */
+  .symptoms { margin-top: 1.1rem; max-width: 40rem; }
+  .sym-group { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.14em; color: var(--muted); font-weight: 400; margin: 2rem 0 0.8rem; }
+  .sym-group:first-of-type { margin-top: 1.35rem; }
+  details {
+    border-bottom: 1px solid var(--rule);
+  }
+  details:first-of-type { border-top: 1px solid var(--rule); }
   details summary {
     cursor: pointer;
-    font-weight: 600;
-    padding: 0.85rem 1rem;
-    list-style-position: inside;
-    border-radius: 8px;
+    list-style: none;
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.85rem 0.25rem;
+    font-size: 0.98rem;
+    font-weight: 560;
+    color: var(--head);
   }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before {
+    content: "";
+    flex: none;
+    width: 0.55rem;
+    height: 0.55rem;
+    margin-top: 0.35em;
+    border-right: 1.5px solid var(--muted);
+    border-bottom: 1.5px solid var(--muted);
+    transform: rotate(-45deg);
+    transition: transform 140ms ease;
+  }
+  details[open] summary::before { transform: rotate(45deg); }
   details summary:hover { color: var(--link); }
-  details summary:focus-visible {
-    outline: 2px solid var(--link);
-    outline-offset: 2px;
-  }
-  details[open] summary { border-bottom: 1px solid var(--rule); border-radius: 8px 8px 0 0; }
-  details .answer { padding: 0.85rem 1rem; }
-  details .answer p:last-child { margin-bottom: 0; }
+  details .answer { padding: 0 0.25rem 1.05rem 1.55rem; }
+  details .answer p { font-size: 0.95rem; color: var(--muted); }
+  details .answer .bullets { margin-top: 0.6rem; }
+  details .answer .bullets li { margin-top: 0.35rem; font-size: 0.95rem; }
 
-  footer { border-top: 1px solid var(--rule); margin-top: 2.5rem; padding: 1.5rem 0 3rem; color: var(--muted); font-size: 0.9rem; }
+  /* ------------------------------------------------------------------ *
+   * Footer
+   * ------------------------------------------------------------------ */
+  .site-foot { border-top: 1px solid var(--rule); background: var(--sunk); }
+  .foot-in {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.75rem 2.5rem;
+    justify-content: space-between;
+    padding-block: 2.25rem 2.75rem;
+  }
+  .foot-mark { font-weight: 680; letter-spacing: -0.02em; color: var(--head); }
+  .foot-line { color: var(--muted); font-size: 0.9rem; margin-top: 0.35rem; }
+  .foot-copy { color: var(--muted); font-size: 0.82rem; margin-top: 0.15rem; }
+  .foot-nav ul { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+  .foot-nav a { font-size: 0.9rem; color: var(--muted); text-decoration: none; }
+  .foot-nav a:hover { color: var(--link); text-decoration: underline; }
+
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 </style>
 </head>
 <body>
-<header>
-  <div class="wrap">
-    <h1>How to use Intern</h1>
-    <p class="pitch">Everything you will actually run into, from the SmartScreen warning to a shared team folder — in plain language.</p>
-    <a class="back" href="./">&larr; Back to the download page</a>
-  </div>
-</header>
 
-<main>
-  <div class="wrap">
-    <nav class="toc" aria-label="Table of contents">
-      <h2>On this page</h2>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 3.2V21"/><path d="M6 4.4h11.5l-2.6 4 2.6 4H6z"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3v9.5"/><path d="M8.4 9.2L12 12.8l3.6-3.6"/><path d="M4 14.5V19a2 2 0 002 2h12a2 2 0 002-2v-4.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.8"/><path d="M10.2 8.6l5.4 3.4-5.4 3.4z"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6 3h7.5L18 7.5V20a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M13.4 3.2v4.4h4.4"/><path d="M8 12.5h7M8 16h5"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4.6 10.4A7.4 7.4 0 0119 8.6"/><path d="M19.4 13.6A7.4 7.4 0 015 15.4"/><path d="M19.4 4.6v4.2h-4.2"/><path d="M4.6 19.4v-4.2h4.2"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7.2 18.4a4.2 4.2 0 01-.2-8.4 5.6 5.6 0 0110.7-1.2 3.9 3.9 0 01-.5 9.6z"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.6 12S6.2 6.2 12 6.2 21.4 12 21.4 12 17.8 17.8 12 17.8 2.6 12 2.6 12z"/><circle cx="12" cy="12" r="2.6"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8.4" r="3.4"/><path d="M3.4 19.6a5.6 5.6 0 0111.2 0"/><path d="M16.2 5.4a3.4 3.4 0 010 6.6"/><path d="M17.4 14.6a5.6 5.6 0 013.2 5"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.8"/><path d="M9.6 9.6a2.5 2.5 0 114.3 2c-.9.8-1.9 1.2-1.9 2.6"/><path d="M12 17.4h.01"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.4 12a7.4 7.4 0 11-2.3-5.3"/><path d="M19.6 4.4v4.2h-4.2"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4.2l8.4 14.9H3.6z"/><path d="M12 10v3.6"/><path d="M12 16.6h.01"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.2l7 2.9v5.6c0 4.1-2.9 7.2-7 9-4.1-1.8-7-4.9-7-9V6.1z"/><path d="M9.2 12l2 2 3.6-4"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-8.5 8.5"/><path d="M18 14.5V18a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2h3.5"/></symbol>
+</svg>
+
+<nav class="nav" aria-label="Primary">
+  <div class="shell nav-in">
+    <a class="brand" href="./">
+      <span class="brand-mark">Intern</span>
+      <span class="brand-tag">for Vistage</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="./">Download</a></li>
+      <li><a href="./#how">How it works</a></li>
+      <li><a href="guide.html" aria-current="page">Guide</a></li>
+      <li><a href="https://github.com/zgbrenner/intern" rel="noopener noreferrer">GitHub<svg class="ico ext" aria-hidden="true"><use href="#i-ext"/></svg></a></li>
+    </ul>
+  </div>
+</nav>
+
+<main id="main">
+
+  <div class="shell masthead">
+    <p class="eyebrow">GUIDE</p>
+    <h1>How to use Intern</h1>
+    <p class="deck">
+      Everything you will actually run into, in the order you will run into it —
+      from the SmartScreen warning to a shared team folder.
+    </p>
+  </div>
+
+  <div class="shell guide-grid">
+
+    <nav class="toc" aria-label="On this page">
+      <h2>ON THIS PAGE</h2>
       <ol>
-        <li><a href="#what-is-intern">What is Intern?</a></li>
-        <li><a href="#account">Do I need an account or sign-in?</a></li>
-        <li><a href="#installing">Installing it — what you'll experience</a></li>
-        <li><a href="#first-launch">First launch — the model download</a></li>
-        <li><a href="#day-to-day">Using it day to day</a></li>
-        <li><a href="#onedrive">Hooking up OneDrive and SharePoint</a></li>
-        <li><a href="#watching">Watching a folder</a></li>
-        <li><a href="#team">Working as a team</a></li>
-        <li><a href="#troubleshooting">Troubleshooting</a></li>
-        <li><a href="#updates">Updates</a></li>
+        <li><a href="#before"><span class="n">01</span>Before you start</a></li>
+        <li><a href="#install"><span class="n">02</span>Install it</a></li>
+        <li><a href="#first-launch"><span class="n">03</span>First launch</a></li>
+        <li><a href="#first-document"><span class="n">04</span>Your first document</a></li>
+        <li><a href="#everyday"><span class="n">05</span>Everyday use</a></li>
+        <li><a href="#onedrive"><span class="n">06</span>OneDrive &amp; SharePoint</a></li>
+        <li><a href="#watch"><span class="n">07</span>Watch a folder</a></li>
+        <li><a href="#team"><span class="n">08</span>Working as a team</a></li>
+        <li><a href="#troubleshooting"><span class="n">09</span>Troubleshooting</a></li>
+        <li><a href="#updates"><span class="n">10</span>Updates</a></li>
       </ol>
     </nav>
 
-    <section id="what-is-intern">
-      <h2>1. What is Intern?</h2>
-      <p>
-        Intern reads a document and tells you what to call it. For each
-        document it proposes a filename that starts with the date, writes a
-        one-sentence description of what the document concerns, shows the
-        verbatim excerpts from the document that support every fact it used,
-        and attaches a confidence.
-      </p>
-      <p>
-        Anything it cannot back up with evidence from the document itself goes
-        to a review list instead of being guessed at. And everything — reading,
-        OCR, the AI model — runs on your machine. Your documents never leave it.
-      </p>
-    </section>
+    <div class="guide-body">
 
-    <section id="account">
-      <h2>2. Do I need an account or sign-in?</h2>
-      <div class="callout">
-        <p>
-          <strong>No.</strong> There is no account, no sign-in, and no cloud
-          service. Intern never asks for a password — not even for OneDrive or
-          SharePoint, which it reaches through folders already on your disk
-          (see <a href="#onedrive">section 6</a>).
+      <!-- ========================== 01 BEFORE ========================= -->
+      <section id="before">
+        <div class="sec-head">
+          <p class="sec-num">01</p>
+          <h2>Before you start</h2>
+        </div>
+        <p class="lead">Intern reads a document and tells you what to call it.</p>
+        <p class="prose">
+          For each document it proposes a filename that starts with the date,
+          describes what the document concerns, and names the parties involved.
         </p>
-        <p>
-          It makes exactly two kinds of network requests, and both happen only
-          when you press a button: the one-time download of the AI model file,
-          and <strong>Check for updates</strong> in Settings. Neither carries
-          anything about your documents.
+
+        <dl class="kv">
+          <div>
+            <dt>It shows its work</dt>
+            <dd>Every fact in a proposed name comes with the verbatim excerpt from the document that supports it, plus a confidence.</dd>
+          </div>
+          <div>
+            <dt>It doesn't guess</dt>
+            <dd>Anything it cannot back up with the document's own text goes to a review list instead.</dd>
+          </div>
+          <div>
+            <dt>It stays on your machine</dt>
+            <dd>Reading, OCR, and the AI model all run locally. Your documents never leave the computer.</dd>
+          </div>
+        </dl>
+
+        <div class="callout">
+          <svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg>
+          <div>
+            <b>No account, no sign-in, no cloud service.</b>
+            <p>Intern never asks for a password — not even for OneDrive or
+            SharePoint, which it reaches through folders already on your disk
+            (see <a href="#onedrive">section 06</a>).</p>
+            <p>It makes two kinds of network request, both only when you press a
+            button: the one-time model download, and <strong>Check for
+            updates</strong>. Neither carries anything about your documents.</p>
+          </div>
+        </div>
+
+        <h3 class="sym-group">WHAT YOU NEED</h3>
+        <ul class="bullets">
+          <li><strong>Windows 10 or 11</strong>, 64-bit (x86-64).</li>
+          <li><strong>About 1.5 GB of free disk space</strong> for the app and the AI model file.</li>
+          <li><strong>No administrator rights.</strong> Intern installs per user.</li>
+        </ul>
+      </section>
+
+      <!-- ========================== 02 INSTALL ======================== -->
+      <section id="install">
+        <div class="sec-head">
+          <p class="sec-num">02</p>
+          <h2>Install it</h2>
+        </div>
+        <p class="lead">Three steps, and one warning screen that is expected.</p>
+
+        <ol class="steps">
+          <li>
+            <b>Download the installer.</b>
+            <p>Get <code>Intern_&lt;version&gt;_x64-setup.exe</code> from the <a href="./">download page</a>.</p>
+          </li>
+          <li>
+            <b>Click through the SmartScreen warning.</b>
+            <p>Windows shows “Windows protected your PC” and the words “unrecognized app”. Choose <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+          </li>
+          <li>
+            <b>Let it install.</b>
+            <p>It installs for your user only — no administrator prompt, no IT ticket.</p>
+          </li>
+        </ol>
+
+        <div class="warn">
+          <svg class="ico" aria-hidden="true"><use href="#i-warn"/></svg>
+          <div>
+            <b>Why that warning appears</b>
+            <p>The installer is not Authenticode signed, because this project has
+            no code-signing certificate. Don't take an unrecognized-app warning
+            lightly in general — verify the download rather than trust it.</p>
+          </div>
+        </div>
+
+        <p class="prose">
+          Every published installer carries an attestation proving which
+          repository, workflow, and commit produced those exact bytes. Check it
+          with the GitHub CLI:
         </p>
-      </div>
-    </section>
-
-    <section id="installing">
-      <h2>3. Installing it — what you'll experience, step by step</h2>
-      <ol class="steps">
-        <li>
-          <strong>Download the installer.</strong>
-          Get <code>Intern_&lt;version&gt;_x64-setup.exe</code> from the
-          <a href="./">download page</a>. It runs on Windows 10 or 11, x86-64.
-        </li>
-        <li>
-          <strong>Windows SmartScreen will warn you.</strong>
-          You will see "Windows protected your PC" and "unrecognized app".
-          This is expected: the installer is not Authenticode signed, because
-          the project has no code-signing certificate. Click
-          <strong>More info</strong>, then <strong>Run anyway</strong>.
-        </li>
-        <li>
-          <strong>It installs per user.</strong>
-          No administrator rights, no admin prompt.
-        </li>
-      </ol>
-      <div class="warning">
-        <p>
-          Don't take an unrecognized-app warning lightly in general. The right
-          response is to verify the download rather than trust it. Every
-          published installer carries an attestation proving which repository,
-          workflow, and commit produced those exact bytes — check it with the
-          GitHub CLI:
+        <pre><code>gh attestation verify Intern_&lt;version&gt;_x64-setup.exe --repo zgbrenner/intern</code></pre>
+        <p class="note">
+          <code>SHA256SUMS.txt</code>, published beside the installer, catches a
+          corrupted download — but it sits on the same page as the installer, so
+          it proves nothing about origin. The attestation is the part that does.
         </p>
-      </div>
-      <pre><code>gh attestation verify Intern_&lt;version&gt;_x64-setup.exe --repo zgbrenner/intern</code></pre>
-      <p class="aside">
-        <code>SHA256SUMS.txt</code>, published beside the installer, catches a
-        corrupted download — but it proves nothing about where the file came
-        from. The attestation is the part that establishes origin.
-      </p>
-    </section>
+      </section>
 
-    <section id="first-launch">
-      <h2>4. First launch — the model download</h2>
-      <p>
-        The installer deliberately leaves out one thing: the AI model file,
-        1.19&nbsp;GiB. The first time you open Intern, a setup screen asks to
-        download it.
-      </p>
-      <ul>
-        <li>
-          The download is <strong>resumable</strong> — if the connection drops,
-          reopen Intern and it continues where it stopped.
-        </li>
-        <li>
-          The file only becomes active after its exact length and SHA-256 match
-          the manifest built into the installer, so a broken or tampered
-          download cannot be used.
-        </li>
-        <li>
-          Already have the file from another machine?
-          <strong>Choose existing model files</strong> points Intern at it and
-          skips the download. This is also how you install on a machine with no
-          internet at all.
-        </li>
-      </ul>
-      <p>
-        Nothing else needs installing. PDF reading, OCR, and inference all ship
-        inside the app.
-      </p>
-    </section>
+      <!-- ======================= 03 FIRST LAUNCH ====================== -->
+      <section id="first-launch">
+        <div class="sec-head">
+          <p class="sec-num">03</p>
+          <h2>First launch</h2>
+        </div>
+        <p class="lead">The installer deliberately leaves out one thing: the AI model file, 1.19&nbsp;GiB.</p>
+        <p class="prose">The first time you open Intern, a setup screen asks to download it.</p>
 
-    <section id="day-to-day">
-      <h2>5. Using it day to day</h2>
-      <p>
-        Drag files or folders onto the window, or use <strong>Add
-        files</strong> / <strong>Add folder</strong>. Supported formats: PDF,
-        Word (.docx), Excel (.xlsx), email (.eml), plain text, Markdown, and
-        scanned images (PNG, JPEG, TIFF).
-      </p>
-      <p>
-        Each document moves through statuses: <strong>Waiting</strong> →
-        <strong>Processing</strong> → then one of two outcomes:
-      </p>
-      <ul>
-        <li>
-          <strong>Ready</strong> — a name is proposed, with the supporting
-          evidence attached and a confidence shown.
-        </li>
-        <li>
-          <strong>Needs review</strong> — something could not be verified
-          against the document's own text. The reason is spelled out in plain
-          language in the inspector.
-        </li>
-      </ul>
-      <p>
-        <strong>Nothing on disk is renamed until you approve it.</strong>
-        Approve one document at a time, or use <strong>Apply all
-        ready</strong>. Every rename can be undone from Completed.
-      </p>
-      <p>
-        A document whose content Intern has already filed is flagged as a
-        <strong>duplicate</strong> of the filed name instead of being renamed
-        again.
-      </p>
-      <p>
-        Settings has a destination folder: leave it empty and files are renamed
-        in place; set it and renamed files are moved there.
-      </p>
-      <p class="aside">
-        Intern runs a roughly 2-billion-parameter model on your CPU, so expect
-        tens of seconds per document, processed one at a time. Leave it working
-        through a stack — that pace is the price of nothing leaving your
-        machine.
-      </p>
-    </section>
+        <dl class="kv">
+          <div>
+            <dt>It resumes</dt>
+            <dd>If the connection drops, reopen Intern and the download continues where it stopped.</dd>
+          </div>
+          <div>
+            <dt>It is verified</dt>
+            <dd>The file becomes active only once its exact length and SHA-256 match the manifest built into the installer, so a broken or tampered download cannot be used.</dd>
+          </div>
+          <div>
+            <dt>You can bring your own</dt>
+            <dd><strong>Choose existing model files</strong> points Intern at a copy from another machine and skips the download. This is also how you install on a machine with no internet at all.</dd>
+          </div>
+        </dl>
 
-    <section id="onedrive">
-      <h2>6. Hooking up OneDrive and SharePoint</h2>
-      <p>
-        The key idea: <strong>Intern connects through the folders the
-        Microsoft sync client already keeps on your disk.</strong> It never
-        talks to Microsoft's servers — there is no Graph API client, no OAuth
-        token, no upload code — so it never asks you to sign in to Microsoft.
-        The only thing moving files to the cloud is the OneDrive app you
-        already run.
-      </p>
-      <ol class="steps">
-        <li>
-          <strong>Make the library a folder on your disk.</strong>
-          Your personal OneDrive already is one. For SharePoint, open the
-          document library in the browser and click <strong>Sync</strong>
-          (or <strong>Add shortcut to OneDrive</strong>) — Microsoft's own way
-          of putting it on your disk.
-        </li>
-        <li>
-          <strong>Point Intern at it.</strong>
-          In Intern's Settings, pick that folder (or any folder inside it) as
-          the intake folder and/or the destination. Intern detects sync roots
-          and labels the pick — "Synced with OneDrive – …", "Synced with
-          SharePoint – …" — so you can see what you chose.
-        </li>
-        <li>
-          <strong>That's it.</strong>
-          Files that appear in the folder get processed; renamed files sync
-          back to the cloud through the sync client.
-        </li>
-      </ol>
-      <details>
-        <summary>What about online-only files (the cloud icon in Explorer)?</summary>
-        <div class="answer">
-          <p>
-            Files On-Demand is handled. The read Intern performs is exactly
-            what makes OneDrive download the content. If the machine is
-            offline, the document waits and is picked up once the content
-            arrives, rather than being failed.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>What are these "conflicted copy" files, and will Intern rename them?</summary>
-        <div class="answer">
-          <p>
-            Files like <code>report (Jane's conflicted copy …)</code>, or a
-            name suffixed with a teammate's machine, are OneDrive's conflict
-            bookkeeping — not new documents. Intern counts them in Settings and
-            leaves them alone. Resolve the conflict in the folder, and the
-            surviving file is picked up.
-          </p>
-        </div>
-      </details>
-    </section>
+        <p class="note">Nothing else needs installing. PDF reading, OCR, and inference all ship inside the app.</p>
+      </section>
 
-    <section id="watching">
-      <h2>7. Watching a folder (automatic intake)</h2>
-      <p>
-        In Settings, enable <strong>Watch a folder</strong> and pick the intake
-        folder. Two requirements are enforced when you save:
-      </p>
-      <ul>
-        <li>Watching requires a destination folder.</li>
-        <li>
-          The destination must be <strong>outside</strong> the intake folder —
-          renaming in place inside a watched folder would make every result
-          reappear as new work, so Intern refuses that configuration up front.
-        </li>
-      </ul>
-      <p>
-        The watcher scans on a short interval, about every 20 seconds, and only
-        picks a file up once its size and modified time have held still for a
-        full interval — so a half-copied file is never read.
-        <strong>Scan now</strong> forces an immediate pass.
-      </p>
-    </section>
+      <!-- ====================== 04 FIRST DOCUMENT ===================== -->
+      <section id="first-document">
+        <div class="sec-head">
+          <p class="sec-num">04</p>
+          <h2>Your first document</h2>
+        </div>
+        <p class="lead">Start with one file you already know, so you can judge the result.</p>
 
-    <section id="team">
-      <h2>8. Working as a team — several computers, one folder</h2>
-      <p>
-        Multiple machines can watch the <strong>same</strong> synced intake
-        folder. They coordinate through a <code>.intern</code> folder inside it
-        — small files the sync client replicates like anything else. Don't
-        delete <code>.intern</code> casually; it is how machines avoid
-        processing the same document twice.
-      </p>
-      <ul>
-        <li>
-          Each document is claimed by exactly one machine — first claim wins,
-          with a time-limited lease. If a machine crashes, its work is taken
-          over automatically after its lease lapses (about 15 minutes).
-        </li>
-        <li>
-          By default, each machine only processes documents dropped on that
-          machine. Turning on <strong>"Also process documents uploaded by
-          others"</strong> makes the folder a shared work queue — with a
-          two-minute courtesy delay, so the uploader's own machine gets first
-          claim on its own work.
-        </li>
-        <li>
-          Name your machine in Settings (<strong>This machine's
-          name</strong>) so teammates can see who is working on what.
-        </li>
-      </ul>
-      <p class="aside">
-        What the shared <code>.intern</code> folder exposes to everyone who can
-        see the folder: filenames, file sizes, machine names, and usernames —
-        never document content, text, or AI output.
-      </p>
-    </section>
+        <ol class="steps">
+          <li>
+            <b>Drag one PDF onto the window.</b>
+            <p>Or use <strong>Add files</strong>. One document is enough to see the whole flow.</p>
+          </li>
+          <li>
+            <b>Watch it change status.</b>
+            <p>It goes from <strong>Waiting</strong> to <strong>Processing</strong>, then lands on <strong>Ready</strong> or <strong>Needs review</strong>.</p>
+          </li>
+          <li>
+            <b>Open it and read the evidence.</b>
+            <p>The inspector shows each fact in the proposed name — the date, the type, the parties — beside the exact words from the document that support it.</p>
+          </li>
+          <li>
+            <b>Approve it.</b>
+            <p>Only now is anything renamed on disk. Changed your mind? Undo it from <strong>Completed</strong>.</p>
+          </li>
+        </ol>
 
-    <section id="troubleshooting">
-      <h2>9. Troubleshooting</h2>
-      <details>
-        <summary>Windows says "Windows protected your PC"</summary>
-        <div class="answer">
-          <p>
-            Expected — the installer is not Authenticode signed. Click
-            <strong>More info</strong>, then <strong>Run anyway</strong>. If in
-            doubt, verify the download first with the attestation command in
-            <a href="#installing">section 3</a>.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>The model download stopped partway</summary>
-        <div class="answer">
-          <p>
-            Reopen Intern — the download resumes where it stopped. The file is
-            verified against its exact length and SHA-256 before it is ever
-            used, so a broken download can't be used by accident.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>A document says "Another program is still holding this file open"</summary>
-        <div class="answer">
-          <p>
-            Usually the sync client, mid-upload. Intern already waited a few
-            seconds for the lock to clear before reporting this. Retry once the
-            sync settles.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>A document went to review — is that an error?</summary>
-        <div class="answer">
-          <p>
-            No. It means one of the facts in the proposed name could not be
-            matched word-for-word in the document — the review reason says
-            which one: the date, the document type, a party, or the
-            description. Fix the name yourself in the inspector and approve it,
-            or choose <strong>Keep original</strong>.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>A file in my watched folder isn't being picked up</summary>
-        <div class="answer">
-          <p>Work through the usual causes:</p>
-          <ul>
-            <li>Is it a supported format? Is it zero bytes?</li>
-            <li>
-              Is it still copying or syncing in? A file is only picked up once
-              its size and modified time have held still for a full scan
-              interval.
-            </li>
-            <li>
-              Is it a dot-file, or an Office lock file starting with
-              <code>~$</code>? Those are ignored on purpose.
-            </li>
-            <li>
-              Did another machine claim it? Settings shows the counts.
-            </li>
-          </ul>
-          <p>Then try <strong>Scan now</strong>.</p>
-        </div>
-      </details>
-      <details>
-        <summary>The watched folder settings won't save</summary>
-        <div class="answer">
-          <p>
-            The destination folder must exist and must be outside the intake
-            folder. Intern refuses the loop at save time and tells you which
-            rule was hit, rather than discovering the problem while running.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>A cloud file failed while I was offline</summary>
-        <div class="answer">
-          <p>
-            It is held, not abandoned. Reconnect, and it is retried
-            automatically on a later scan once the content arrives.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>A document failed twice and stopped</summary>
-        <div class="answer">
-          <p>
-            It is in Failed, with the reason shown. Retry it manually from
-            there.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>Everything is slow</summary>
-        <div class="answer">
-          <p>
-            Local CPU inference is the price of nothing leaving your machine.
-            Tens of seconds per document is normal, and the app processes one
-            document at a time on purpose.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>Check for updates fails</summary>
-        <div class="answer">
-          <p>
-            It is the only network call Intern makes besides the model
-            download, so check your connectivity. An update that is not signed
-            by this project's key is refused outright — that is deliberate.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>Where does Intern keep its own data?</summary>
-        <div class="answer">
-          <p>
-            In per-user app data. Your documents stay where they are.
-            Uninstalling removes the app but leaves both your documents and
-            Intern's data alone.
-          </p>
-        </div>
-      </details>
-      <details>
-        <summary>Can I use it fully offline?</summary>
-        <div class="answer">
-          <p>
-            Yes — after install and the model download, or by using
-            <strong>Choose existing model files</strong> with a copy of the
-            model from another machine. OneDrive folders keep working locally
-            and sync whenever the sync client next connects.
-          </p>
-        </div>
-      </details>
-    </section>
+        <figure>
+          <svg class="fig-status" viewBox="0 0 400 348" role="img" aria-labelledby="st-t st-d">
+            <title id="st-t">The status a document moves through</title>
+            <desc id="st-d">A document goes from Waiting to Processing, then to either Ready or Needs review, and only becomes Approved — and renamed on disk — when you approve it.</desc>
 
-    <section id="updates">
-      <h2>10. Updates</h2>
-      <p>
-        <strong>Settings → Check for updates.</strong> Only when you ask —
-        there is no background polling and no timer. An update installs only if
-        it is signed by this project's key; anything else is refused.
-      </p>
-    </section>
+            <rect class="f-card" x="120.5" y="8.5" width="159" height="39" rx="8"/>
+            <text class="f-box-t" x="200" y="33" text-anchor="middle">Waiting</text>
+            <path class="f-arrow" d="M200 48v12"/>
+            <path class="f-head" d="M200 66l-4.6-8h9.2z"/>
+
+            <rect class="f-card-blue" x="120.7" y="68.7" width="158.6" height="38.6" rx="8"/>
+            <text class="f-box-t" x="200" y="93" text-anchor="middle">Processing</text>
+
+            <path class="f-arrow" d="M200 108v14M100 122v18M300 122v18"/>
+            <path class="f-conn" d="M100 122h200"/>
+            <path class="f-head" d="M100 146l-4.6-8h9.2z"/>
+            <path class="f-head" d="M300 146l-4.6-8h9.2z"/>
+
+            <rect class="f-card-blue" x="20.7" y="148.7" width="158.6" height="38.6" rx="8"/>
+            <text class="f-box-t" x="100" y="173" text-anchor="middle">Ready</text>
+
+            <rect class="f-card-warn" x="220.7" y="148.7" width="158.6" height="38.6" rx="8"/>
+            <text class="f-box-t t-warn" x="300" y="173" text-anchor="middle">Needs review</text>
+
+            <path class="f-conn" d="M100 188v36M300 188v36M100 224h200"/>
+            <path class="f-arrow" d="M200 224v20"/>
+            <path class="f-head" d="M200 250l-4.6-8h9.2z"/>
+
+            <rect class="f-solid" x="120" y="250" width="160" height="44" rx="8"/>
+            <text class="f-box-t-inv" x="200" y="277" text-anchor="middle">Approved</text>
+
+            <path class="f-arrow" d="M200 294v12"/>
+            <path class="f-head" d="M200 312l-4.6-8h9.2z"/>
+            <text class="f-label" x="200" y="332" text-anchor="middle">RENAMED ON DISK</text>
+          </svg>
+          <figcaption>
+            A document in <strong>Needs review</strong> is not an error — it is
+            waiting for you. Fix the name yourself and approve it, or choose
+            <strong>Keep original</strong>. Nothing on disk changes until
+            Approved.
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ========================= 05 EVERYDAY ======================== -->
+      <section id="everyday">
+        <div class="sec-head">
+          <p class="sec-num">05</p>
+          <h2>Everyday use</h2>
+        </div>
+        <p class="lead">Drag files or folders onto the window, or use <strong>Add files</strong> and <strong>Add folder</strong>.</p>
+
+        <h3 class="sym-group">FORMATS IT READS</h3>
+        <ul class="formats">
+          <li>PDF</li>
+          <li>Word .docx</li>
+          <li>Excel .xlsx</li>
+          <li>Email .eml</li>
+          <li>Plain text</li>
+          <li>Markdown</li>
+          <li>PNG</li>
+          <li>JPEG</li>
+          <li>TIFF</li>
+        </ul>
+
+        <dl class="kv">
+          <div>
+            <dt>Approving in bulk</dt>
+            <dd>Approve one document at a time, or use <strong>Apply all ready</strong>. Every rename can be undone from Completed.</dd>
+          </div>
+          <div>
+            <dt>Duplicates</dt>
+            <dd>A document whose content Intern has already filed is flagged as a duplicate of the filed name, rather than renamed again.</dd>
+          </div>
+          <div>
+            <dt>Where files land</dt>
+            <dd>Settings has a destination folder. Leave it empty and files are renamed in place; set it and renamed files are moved there.</dd>
+          </div>
+        </dl>
+
+        <div class="callout">
+          <svg class="ico" aria-hidden="true"><use href="#i-repeat"/></svg>
+          <div>
+            <b>Expect tens of seconds per document.</b>
+            <p>Intern runs a roughly 2-billion-parameter model on your CPU, one
+            document at a time. Leave it working through a stack — that pace is
+            the price of nothing leaving your machine.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= 06 ONEDRIVE ======================== -->
+      <section id="onedrive">
+        <div class="sec-head">
+          <p class="sec-num">06</p>
+          <h2>OneDrive &amp; SharePoint</h2>
+        </div>
+        <p class="lead">Intern connects through the folders the Microsoft sync client already keeps on your disk.</p>
+        <p class="prose">
+          It never talks to Microsoft's servers — no Graph API client, no OAuth
+          token, no upload code — so it never asks you to sign in.
+        </p>
+
+        <figure>
+          <svg class="fig-topo" viewBox="0 0 420 398" role="img" aria-labelledby="tp-t tp-d">
+            <title id="tp-t">How Intern reaches a SharePoint library</title>
+            <desc id="tp-d">A SharePoint library syncs to the OneDrive sync client on your machine, which keeps a folder on disk. Intern reads and renames files in that folder only. Intern never connects to Microsoft's servers itself.</desc>
+
+            <rect class="f-dash" x="60.5" y="8.5" width="349" height="75" rx="12"/>
+            <rect class="f-knock" x="72" y="1" width="118" height="14"/>
+            <text class="f-label" x="78" y="13">MICROSOFT 365</text>
+            <rect class="f-card" x="90.5" y="28.5" width="289" height="41" rx="8"/>
+            <text class="f-box-t" x="235" y="54" text-anchor="middle">SharePoint library</text>
+
+            <path class="f-arrow" d="M235 88v44"/>
+            <path class="f-head" d="M235 136l-4.6-8h9.2z"/>
+            <path class="f-head" d="M235 84l-4.6 8h9.2z"/>
+            <text class="f-micro" x="248" y="104">syncs</text>
+
+            <rect class="f-dash" x="60.5" y="116.5" width="349" height="245" rx="12"/>
+            <rect class="f-knock" x="72" y="109" width="112" height="14"/>
+            <text class="f-label" x="78" y="121">YOUR MACHINE</text>
+
+            <rect class="f-card" x="90.5" y="136.5" width="289" height="41" rx="8"/>
+            <text class="f-box-t" x="235" y="162" text-anchor="middle">OneDrive sync client</text>
+            <path class="f-arrow" d="M235 177v18"/>
+            <path class="f-head" d="M235 199l-4.6-8h9.2z"/>
+            <text class="f-micro" x="248" y="192">keeps</text>
+
+            <rect class="f-card" x="90.5" y="199.5" width="289" height="41" rx="8"/>
+            <text class="f-box-t" x="235" y="225" text-anchor="middle">A folder on your disk</text>
+            <path class="f-arrow" d="M235 258v-18"/>
+            <path class="f-head" d="M235 240l-4.6 8h9.2z"/>
+            <text class="f-micro" x="248" y="255">reads, renames</text>
+
+            <rect class="f-card-strong" x="90.75" y="262.75" width="288.5" height="41.5" rx="8"/>
+            <text class="f-box-t" x="235" y="289" text-anchor="middle">Intern</text>
+
+            <text class="f-micro" x="235" y="338" text-anchor="middle">the folder is the only thing Intern touches</text>
+
+            <path class="f-forbid" d="M90 283H32V46h28"/>
+            <circle class="f-knock" cx="32" cy="180" r="13"/>
+            <path class="f-x" d="M26 174l12 12M38 174l-12 12"/>
+
+            <path class="f-forbid" d="M40 378h32"/>
+            <path class="f-x" d="M50 372l12 12M62 372l-12 12"/>
+            <text class="f-micro" x="82" y="382">Intern never connects to Microsoft&#39;s servers</text>
+          </svg>
+          <figcaption>
+            The crossed-out line is the connection Intern does not make. The only
+            thing moving files to the cloud is the OneDrive app you already run.
+          </figcaption>
+        </figure>
+
+        <ol class="steps">
+          <li>
+            <b>Make the library a folder on your disk.</b>
+            <p>Your personal OneDrive already is one. For SharePoint, open the library in the browser and click <strong>Sync</strong> — or <strong>Add shortcut to OneDrive</strong>.</p>
+          </li>
+          <li>
+            <b>Point Intern at it.</b>
+            <p>In Settings, pick that folder (or any folder inside it) as the intake folder, the destination, or both.</p>
+          </li>
+          <li>
+            <b>That's it.</b>
+            <p>Files that appear in the folder get processed; renamed files sync back to the cloud through the sync client.</p>
+          </li>
+        </ol>
+
+        <p class="note">
+          Intern detects sync roots and labels your pick — “Synced with
+          OneDrive – …”, “Synced with SharePoint – …” — so you can see what you
+          chose.
+        </p>
+
+        <h3 class="sym-group">TWO THINGS PEOPLE ASK</h3>
+        <div class="symptoms">
+          <details>
+            <summary>Some files show a cloud icon in Explorer instead of a green tick</summary>
+            <div class="answer">
+              <p>
+                That is Files On-Demand, and it is handled. The read Intern
+                performs is exactly what makes OneDrive fetch the content. If the
+                machine is offline, the document waits and is picked up once the
+                content arrives, rather than being failed.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>I have files named “conflicted copy” — will Intern rename those too?</summary>
+            <div class="answer">
+              <p>
+                No. Files like <code>report (Jane's conflicted copy …)</code>, or
+                a name suffixed with a teammate's machine, are OneDrive's conflict
+                bookkeeping — not new documents.
+              </p>
+              <p>
+                Intern counts them in Settings and leaves them alone. Resolve the
+                conflict in the folder and the surviving file is picked up.
+              </p>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ========================== 07 WATCH ========================== -->
+      <section id="watch">
+        <div class="sec-head">
+          <p class="sec-num">07</p>
+          <h2>Watch a folder</h2>
+        </div>
+        <p class="lead">In Settings, enable <strong>Watch a folder</strong> and pick the intake folder.</p>
+        <p class="prose">Two rules are enforced when you save, rather than discovered while running:</p>
+
+        <ul class="bullets">
+          <li><strong>Watching requires a destination folder.</strong></li>
+          <li><strong>The destination must be outside the intake folder.</strong> Renaming in place inside a watched folder would make every result reappear as new work, so Intern refuses that configuration up front.</li>
+        </ul>
+
+        <dl class="kv">
+          <div>
+            <dt>Scan interval</dt>
+            <dd>About every 20 seconds. <strong>Scan now</strong> forces an immediate pass.</dd>
+          </div>
+          <div>
+            <dt>Half-copied files</dt>
+            <dd>A file is only picked up once its size and modified time have held still for a full interval, so a file still being copied is never read.</dd>
+          </div>
+        </dl>
+      </section>
+
+      <!-- ========================== 08 TEAM =========================== -->
+      <section id="team">
+        <div class="sec-head">
+          <p class="sec-num">08</p>
+          <h2>Working as a team</h2>
+        </div>
+        <p class="lead">Several computers can watch the same synced intake folder.</p>
+        <p class="prose">
+          They coordinate through a <code>.intern</code> folder inside it — small
+          files the sync client replicates like anything else. Don't delete
+          <code>.intern</code> casually; it is how machines avoid processing the
+          same document twice.
+        </p>
+
+        <dl class="kv">
+          <div>
+            <dt>One claim per document</dt>
+            <dd>First claim wins, with a time-limited lease. If a machine crashes, its work is taken over automatically once the lease lapses — about 15 minutes.</dd>
+          </div>
+          <div>
+            <dt>Shared work queue</dt>
+            <dd>
+              <p>By default each machine only processes documents dropped on it.</p>
+              <p>Turn on <strong>Also process documents uploaded by others</strong> to share the queue — with a two-minute courtesy delay, so the uploader's own machine gets first claim.</p>
+            </dd>
+          </div>
+          <div>
+            <dt>Who is doing what</dt>
+            <dd>Name your machine in Settings under <strong>This machine's name</strong>, so teammates can tell the machines apart.</dd>
+          </div>
+        </dl>
+
+        <div class="callout">
+          <svg class="ico" aria-hidden="true"><use href="#i-users"/></svg>
+          <div>
+            <b>What the shared folder exposes</b>
+            <p>To everyone who can see the folder: filenames, file sizes, machine
+            names, and usernames. Never document content, text, or AI output.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================== 09 TROUBLESHOOTING ==================== -->
+      <section id="troubleshooting">
+        <div class="sec-head">
+          <p class="sec-num">09</p>
+          <h2>Troubleshooting</h2>
+        </div>
+        <p class="lead">Find the sentence that sounds like your problem.</p>
+
+        <h3 class="sym-group">INSTALLING AND UPDATING</h3>
+        <div class="symptoms">
+          <details>
+            <summary>Windows says “Windows protected your PC” and won't run the installer</summary>
+            <div class="answer">
+              <p>
+                Expected — the installer is not Authenticode signed. Click
+                <strong>More info</strong>, then <strong>Run anyway</strong>. If
+                in doubt, verify the download first with the attestation command
+                in <a href="#install">section 02</a>.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>The model download stopped partway through</summary>
+            <div class="answer">
+              <p>
+                Reopen Intern — the download resumes where it stopped. The file is
+                verified against its exact length and SHA-256 before it is ever
+                used, so a broken download cannot be used by accident.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>Check for updates fails</summary>
+            <div class="answer">
+              <p>
+                It is the only network call Intern makes besides the model
+                download, so check your connectivity. An update that is not signed
+                by this project's key is refused outright — that is deliberate.
+              </p>
+            </div>
+          </details>
+        </div>
+
+        <h3 class="sym-group">DOCUMENTS</h3>
+        <div class="symptoms">
+          <details>
+            <summary>A document went to “Needs review” — did something break?</summary>
+            <div class="answer">
+              <p>
+                No. It means one of the facts in the proposed name could not be
+                matched word-for-word in the document.
+              </p>
+              <p>
+                The review reason names which one: the date, the document type, a
+                party, or the description.
+              </p>
+              <p>
+                Fix the name yourself in the inspector and approve it, or choose
+                <strong>Keep original</strong>.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>It says “Another program is still holding this file open”</summary>
+            <div class="answer">
+              <p>
+                Usually the sync client, mid-upload. Intern already waited a few
+                seconds for the lock to clear before reporting this. Retry once
+                the sync settles.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>A document failed twice and stopped trying</summary>
+            <div class="answer">
+              <p>It is in Failed, with the reason shown. Retry it manually from there.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Everything is slow</summary>
+            <div class="answer">
+              <p>
+                Local CPU inference is the price of nothing leaving your machine.
+                Tens of seconds per document is normal, and the app processes one
+                document at a time on purpose.
+              </p>
+            </div>
+          </details>
+        </div>
+
+        <h3 class="sym-group">FOLDERS AND SYNC</h3>
+        <div class="symptoms">
+          <details>
+            <summary>A file in my watched folder is being ignored</summary>
+            <div class="answer">
+              <p>Work through the usual causes:</p>
+              <ul class="bullets">
+                <li>Is it a supported format? Is it zero bytes?</li>
+                <li>Is it still copying or syncing in? A file is only picked up once its size and modified time have held still for a full scan interval.</li>
+                <li>Is it a dot-file, or an Office lock file starting with <code>~$</code>? Those are ignored on purpose.</li>
+                <li>Did another machine claim it? Settings shows the counts.</li>
+              </ul>
+              <p>Then try <strong>Scan now</strong>.</p>
+            </div>
+          </details>
+          <details>
+            <summary>The watched folder settings won't save</summary>
+            <div class="answer">
+              <p>
+                The destination folder must exist and must be outside the intake
+                folder. Intern refuses the loop at save time and tells you which
+                rule was hit.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>A cloud file failed while I was offline</summary>
+            <div class="answer">
+              <p>
+                It is held, not abandoned. Reconnect, and it is retried
+                automatically on a later scan once the content arrives.
+              </p>
+            </div>
+          </details>
+        </div>
+
+        <h3 class="sym-group">GOOD TO KNOW</h3>
+        <div class="symptoms">
+          <details>
+            <summary>Where does Intern keep its own data?</summary>
+            <div class="answer">
+              <p>
+                In per-user app data. Your documents stay where they are.
+                Uninstalling removes the app but leaves both your documents and
+                Intern's data alone.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>Can I use it with no internet at all?</summary>
+            <div class="answer">
+              <p>
+                Yes — after install and the model download, or by using
+                <strong>Choose existing model files</strong> with a copy of the
+                model from another machine. OneDrive folders keep working locally
+                and sync whenever the sync client next connects.
+              </p>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ========================= 10 UPDATES ========================= -->
+      <section id="updates">
+        <div class="sec-head">
+          <p class="sec-num">10</p>
+          <h2>Updates</h2>
+        </div>
+        <p class="lead"><strong>Settings → Check for updates.</strong> Only when you ask.</p>
+        <p class="prose">
+          There is no background polling and no timer. An update installs only if
+          it is signed by this project's key; anything else is refused.
+        </p>
+        <p class="note"><a href="./">Back to the download page</a></p>
+      </section>
+
+    </div>
   </div>
 </main>
 
-<footer>
-  <div class="wrap">
-    <a href="./">Download page</a>
-    · <a href="https://github.com/zgbrenner/intern">Source and releases on GitHub</a>
-    · Built for Vistage Worldwide
+<footer class="site-foot">
+  <div class="shell foot-in">
+    <div>
+      <p class="foot-mark">Intern</p>
+      <p class="foot-line">Intern is a Vistage Worldwide tool.</p>
+      <p class="foot-copy">© 2026 Vistage Worldwide, Inc. All rights reserved.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer">
+      <ul>
+        <li><a href="./">Download</a></li>
+        <li><a href="guide.html">Guide</a></li>
+        <li><a href="https://github.com/zgbrenner/intern" rel="noopener noreferrer">GitHub</a></li>
+      </ul>
+    </nav>
   </div>
 </footer>
 </body>

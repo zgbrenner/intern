@@ -1,3 +1,4 @@
+import { GUIDE_URL } from './bridge';
 import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult, UpdateStatus } from './bridge';
 import type { AppSettings, CloudLocation, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
 
@@ -193,6 +194,9 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     },
     scanIntakeNow: async () => { /* Nothing is watching in the browser; the desktop backend wakes its scan loop. */ },
     classifyFolder: (path) => classifyPath(path),
+    // Already in a browser, so the guide opens the way any other link would.
+    // noopener keeps the new tab from reaching back into this document.
+    openGuide: async () => { window.open(GUIDE_URL, '_blank', 'noopener,noreferrer'); },
   };
 }
 
