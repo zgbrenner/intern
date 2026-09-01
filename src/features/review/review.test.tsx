@@ -227,6 +227,31 @@ describe('review actions', () => {
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
   });
 
+  // Both affordances go through the bridge rather than a link, because inside
+  // Tauri a <a target="_blank"> has nowhere to open.
+  it('opens the published guide from the chrome and from Settings', async () => {
+    const openGuide = vi.fn(async () => undefined);
+    render(<App bridge={{ ...createInMemoryBridge(), openGuide }} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Help & support' }));
+    await waitFor(() => expect(openGuide).toHaveBeenCalledTimes(1));
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open the guide' }));
+
+    await waitFor(() => expect(openGuide).toHaveBeenCalledTimes(2));
+  });
+
+  it('names the guide address when the browser hand-off is refused', async () => {
+    const openGuide = vi.fn(async () => { throw new Error('opener denied'); });
+    render(<App bridge={{ ...createInMemoryBridge(), openGuide }} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Help & support' }));
+
+    expect(await screen.findByRole('status', { name: 'Action error' }))
+      .toHaveTextContent('https://zgbrenner.github.io/intern/guide.html');
+  });
+
   it('moves Keep original to Completed and lets the user undo it', async () => {
     const bridge = createInMemoryBridge();
     render(<App bridge={bridge} />);

@@ -1,6 +1,7 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import type { AppSettings, CloudLocation, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
+import { GUIDE_URL } from './bridge';
 import type {
   DesktopBridge,
   ExistingModelFiles,
@@ -158,6 +159,18 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
     // The DTO is camelCase end to end; only guard against an absent value so
     // callers can rely on `null` rather than `undefined`.
     return await this.transport.invoke<CloudLocation | null | undefined>('folder_classify', { path }) ?? null;
+  }
+
+  /**
+   * Hands the guide's address to the operating system's browser through the
+   * opener plugin, the same way every other plugin command is reached here -
+   * `transport.invoke`, no npm plugin package, so the browser build never
+   * imports desktop-only code. The URL is the constant from the bridge
+   * contract, which is also what the capability scope names, so this cannot
+   * open anything else.
+   */
+  async openGuide(): Promise<void> {
+    await this.transport.invoke('plugin:opener|open_url', { url: GUIDE_URL });
   }
 
   // The updater plugin is loaded lazily so that importing this module never

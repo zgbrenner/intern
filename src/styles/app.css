@@ -1,16 +1,312 @@
+/*
+  Layout, then chrome, then the three surfaces a person actually works in:
+  the queue table, the review inspector, and the dialogs. The header height
+  (72px), sidebar width (230px, 64px collapsed) and inspector width (370px)
+  are pinned by tests/e2e/qa.spec.ts and are not free to move.
+*/
+
+/* ---------- shell ---------- */
 .app-shell { min-height: 100vh; display: grid; grid-template: 72px 1fr / 230px minmax(0, 1fr); background: var(--surface); }
-button, input, textarea { font: inherit; } button { color: inherit; cursor: pointer; } button:focus-visible, input:focus-visible, textarea:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.app-header { grid-column: 1 / -1; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 32px; }
-.product { display: flex; align-items: center; gap: 42px; } .product strong { font-size: 34px; letter-spacing: -.7px; color: var(--brand-navy); } .brand-tag { font-size: 13px; font-weight: 400; font-variant-caps: small-caps; letter-spacing: .06em; color: var(--text-muted); margin-left: 10px; } .private { font-size: 16px; display: flex; gap: 14px; align-items: center; } .private i { width: 10px; height: 10px; background: #23985a; border-radius: 50%; }
-.header-actions { display: flex; gap: 14px; align-items: center; }.header-actions button, .inspector-actions button { border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; }.icon-button { padding: 0 !important; min-width: 36px; }
-.sidebar { display: flex; flex-direction: column; justify-content: space-between; border-right: 1px solid var(--border); padding: 18px 0 20px; }.sidebar button { border: 0; border-left: 4px solid transparent; background: transparent; width: 100%; min-height: 46px; padding: 0 20px; display: flex; gap: 14px; align-items: center; text-align: left; font-size: 13px; }.sidebar button.active { background: var(--brand-tint); border-left-color: var(--accent); }.sidebar button b { margin-left: auto; font-weight: 400; }.sidebar .settings-nav { min-height: 36px; }
-.workspace { min-width: 0; display: flex; overflow: hidden; }.queue-panel { min-width: 0; flex: 1; padding: 20px 10px 0; display: flex; flex-direction: column; }.drop-zone { flex: 0 0 100px; border: 1px dashed #a9afb8; border-radius: var(--radius-sm); margin: 0 10px 14px; display: flex; align-items: center; gap: 28px; padding: 20px 24px; font-size: 14px; }.drop-zone > svg { width: 32px; height: 32px; }.drop-copy { display: grid; gap: 5px; }.drop-guidance, .drop-copy small { color: var(--text-muted); font-size: 12px; }.queue-actions { display: flex; justify-content: flex-end; min-height: 36px; margin: -4px 10px 10px; }.queue-actions button { border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; min-height: 34px; padding: 0 12px; font-size: 13px; }.queue-actions .primary { background: var(--primary); color: white; border-color: var(--primary); }.queue-actions span { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 6px; border-radius: 10px; background: rgba(255,255,255,.2); }.table-wrap { overflow-x: auto; }.table-wrap table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 14px; }.table-wrap th { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; }.table-wrap th:nth-child(1) { width: 34%; }.table-wrap th:nth-child(2) { width: 22%; }.table-wrap th:nth-child(3) { width: 34%; }.table-wrap th:nth-child(4) { width: 10%; }.table-wrap td { padding: 7px 16px; height: 46px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow-wrap: anywhere; }.row-select { border: 0; background: transparent; color: inherit; padding: 0; width: 100%; display: inline-flex; align-items: center; gap: 12px; text-align: left; font: inherit; }.file-kind { flex: 0 0 22px; display: inline-grid; place-items: center; color: var(--text-muted); }.file-kind--pdf { color: #a33b32; }.file-kind--document { color: #315caa; }.file-kind--spreadsheet { color: #24734d; }.file-kind--text { color: #667085; }.file-kind--image { color: #7653a8; }.table-wrap tbody tr:hover, .table-wrap tr.selected { background: var(--surface-selected); }.table-wrap tr.selected td { border-top: 1px solid var(--selected-border); border-bottom: 1px solid var(--selected-border); }.status { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }.status.ready, .status.completed, .confidence.ready, .confidence.completed { color: var(--ready); }.status.review, .confidence.review { color: var(--review); }.status.waiting { color: var(--waiting); }.status.processing { color: var(--processing); }.status.processing svg { animation: spin 1s linear infinite; }.item-count { color: var(--text-muted); padding: 14px 10px; font-size: 12px; margin-top: auto; }
-.inspector { flex: 0 0 370px; border-left: 1px solid var(--border); box-shadow: var(--shadow-inspector); padding: 26px 24px; overflow-y: auto; font-size: 14px; }.inspector-title { display: flex; justify-content: space-between; align-items: center; }.inspector h2 { font-size: 20px; margin: 0; }.selected-file { margin: 10px 0 18px; font-size: 12px; color: var(--text-muted); }.inspector label, .settings-dialog label { display: block; font-weight: 600; margin: 18px 0; }.inspector input, .inspector textarea, .settings-dialog input:not([type=checkbox]) { width: 100%; display: block; border: 1px solid #aeb5c0; border-radius: var(--radius-sm); padding: 8px; margin-top: 6px; font-weight: 400; background: white; font-size: 14px; }.inspector input:disabled, .inspector textarea:disabled { color: var(--text-muted); background: var(--surface-subtle); }.inspector textarea { min-height: 96px; resize: vertical; }.inspector h3 { font-size: 14px; margin: 22px 0 12px; }.inspector dl { display: grid; grid-template-columns: 92px 1fr; gap: 12px 24px; margin: 0; }.inspector dt { font-weight: 400; }.inspector dd { margin: 0; }.inspector section p { margin: 0; line-height: 1.45; }.inspector-actions { display: grid; gap: 10px; margin-top: 30px; }.inspector-actions .primary, .settings-dialog .primary, .setup-screen .primary { background: var(--primary); color: white; border-color: var(--primary); }.more-actions { justify-self: end; }.review-menu { display: grid; gap: 8px; }.review-menu button { border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }.form-error { color: #b42318; font-size: 12px; margin: -12px 0 0; }.settled-description { color: var(--text-muted); }.copy-description { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; min-height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }.row-description { display: block; margin-top: 3px; color: var(--text-muted); font-size: 12px; line-height: 1.35; }.updates { border-top: 1px solid var(--border); margin-top: 22px; padding-top: 4px; }.updates h3 { font-size: 14px; margin: 14px 0 8px; }.update-note { color: var(--text-muted); font-size: 12px; line-height: 1.4; margin: 0 0 10px; }.updates p { margin: 0 0 10px; }.update-actions { display: flex; gap: 10px; flex-wrap: wrap; }.update-actions button { border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; min-height: 34px; padding: 0 12px; font-size: 13px; }
-.dialog-backdrop { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(23, 26, 31, .18); }.settings-dialog { width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; background: white; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 24px; box-shadow: 0 18px 50px rgba(23,26,31,.18); }.check-label { display: flex !important; align-items: center; gap: 9px; font-weight: 400 !important; }.check-label input:disabled + *, .check-label:has(input:disabled) { color: var(--text-muted); }.check-hint { color: var(--text-muted); font-size: 12px; line-height: 1.4; margin: -12px 0 18px 22px; }.settings-dialog .primary { border: 0; border-radius: var(--radius-sm); min-height: 42px; padding: 0 16px; }
-.folder-row { display: flex; align-items: flex-end; gap: 10px; margin: 18px 0; }.folder-row label { flex: 1; min-width: 0; margin: 0; }.folder-row button { flex: none; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; min-height: 38px; padding: 0 12px; font-size: 13px; white-space: nowrap; }.cloud-badge { color: var(--text-muted); font-size: 12px; line-height: 1.4; margin: -12px 0 18px; }.intake { border-top: 1px solid var(--border); margin-top: 22px; padding-top: 4px; }.intake h3 { font-size: 14px; margin: 14px 0 8px; }.intake-status { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-subtle); padding: 10px 12px; margin: 18px 0; font-size: 13px; }.intake-status p { margin: 0 0 8px; line-height: 1.45; }.intake-status .form-error { margin: 0 0 8px; }.intake-status button { border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; min-height: 30px; padding: 0 10px; font-size: 12px; }.settings-dialog .save-error { margin: 4px 0 12px; }
-.queue-actions { gap: 10px; }.history-dialog { width: min(680px, calc(100vw - 32px)); }.history-dialog .update-note { margin-top: 10px; }.history-empty { color: var(--text-muted); margin: 18px 0; }.history-table-wrap { overflow: auto; max-height: min(420px, 55vh); border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 14px 0; }.history-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13px; }.history-table-wrap th { position: sticky; top: 0; background: var(--surface-subtle); text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; }.history-table-wrap td { padding: 7px 12px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }.history-table-wrap tbody tr:last-child td { border-bottom: 0; }.history-dialog [role='status'] { margin: 0 0 10px; font-size: 13px; }.history-dialog .form-error { margin: 0 0 10px; }.history-actions { display: flex; justify-content: flex-end; gap: 10px; }.history-actions button { border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; min-height: 36px; padding: 0 14px; font-size: 13px; }.history-actions .primary { border: 0; }
-.operation-feedback { position: fixed; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); margin: 0; padding: 10px 14px; border: 1px solid #e6a9a2; border-radius: var(--radius-sm); color: #8f231a; background: #fff5f3; box-shadow: 0 8px 24px rgba(23,26,31,.12); font-size: 13px; }
-.setup-screen { min-height: 100vh; display: grid; place-items: center; text-align: center; }.setup-screen section { width: min(500px, calc(100vw - 32px)); }.setup-screen h1 { margin: 20px 0 8px; }.setup-screen p { color: var(--text-muted); line-height: 1.5; }.setup-screen progress { width: 100%; accent-color: var(--accent); }.setup-screen button { min-height: 36px; padding: 0 14px; border: 1px solid var(--border); background: white; border-radius: var(--radius-sm); font-size: 13px; }.setup-screen button:disabled { opacity: .65; cursor: wait; }.setup-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 20px; }.setup-screen .setup-error { padding: 10px 12px; border: 1px solid #e6a9a2; border-radius: var(--radius-sm); color: #8f231a; background: #fff5f3; }.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
-@keyframes spin { to { transform: rotate(360deg); } } @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
-@media (max-width: 1100px) { .app-shell { grid-template-columns: 64px minmax(0, 1fr); }.sidebar button { justify-content: center; padding: 0; border-left-width: 3px; }.sidebar button span, .sidebar button b { display: none; }.inspector { position: fixed; z-index: 3; right: 0; top: 72px; bottom: 0; width: 370px; background: white; box-shadow: -16px 0 40px rgba(23,26,31,.16); }.product { gap: 20px; }.product strong { font-size: 28px; }.private { font-size: 14px; }.header-actions button { font-size: 13px; min-height: 36px; padding: 0 10px; } }
-@media (max-width: 800px) { .app-header { padding: 0 12px; }.private, .brand-tag { display: none; }.header-actions { gap: 6px; }.header-actions button:not(.icon-button) span { display: none; }.drop-zone { font-size: 14px; gap: 12px; }.queue-panel { padding-top: 12px; }.table-wrap th, .table-wrap td { padding-left: 8px; padding-right: 8px; }.table-wrap th { font-size: 13px; }.table-wrap td { height: 46px; font-size: 14px; }.table-wrap th:nth-child(2) { width: 28%; }.table-wrap th:nth-child(3) { width: 34%; }.inspector { width: min(370px, calc(100vw - 64px)); }.product strong { font-size: 24px; } }
+.workspace { min-width: 0; display: flex; overflow: hidden; }
+.queue-panel { min-width: 0; flex: 1; padding: 18px 10px 0; display: flex; flex-direction: column; }
+
+/* ---------- controls ---------- */
+button, input, textarea { font: inherit; }
+button { color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/*
+  One button appearance across the app. Every one of these used to be declared
+  separately and none of them had a hover or pressed state, so a control gave
+  no sign it was a control until it was clicked.
+*/
+.header-actions button,
+.inspector-actions button,
+.queue-actions button,
+.review-menu button,
+.update-actions button,
+.history-actions button,
+.folder-row button,
+.intake-status button,
+.copy-description,
+.setup-screen button {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text);
+  min-height: 38px; padding: 0 13px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 13px; font-weight: 500; transition: background-color .12s ease, border-color .12s ease;
+}
+.header-actions button:hover:not(:disabled),
+.inspector-actions button:hover:not(:disabled),
+.queue-actions button:hover:not(:disabled),
+.review-menu button:hover:not(:disabled),
+.update-actions button:hover:not(:disabled),
+.history-actions button:hover:not(:disabled),
+.folder-row button:hover:not(:disabled),
+.intake-status button:hover:not(:disabled),
+.copy-description:hover:not(:disabled),
+.setup-screen button:hover:not(:disabled) { background: var(--surface-subtle); border-color: var(--text-muted); }
+.header-actions button:disabled,
+.inspector-actions button:disabled,
+.queue-actions button:disabled,
+.update-actions button:disabled,
+.history-actions button:disabled,
+.intake-status button:disabled { opacity: .5; cursor: default; }
+.icon-button { padding: 0 !important; min-width: 38px; }
+/* Close is a dismissal, not an action to be weighed: quiet until reached for.
+   These were unstyled UA buttons, so a browser-default bevelled box sat beside
+   every panel and dialog title. */
+.inspector-title .icon-button, .dialog-head .icon-button { border: 0; background: transparent; border-radius: var(--radius-sm); min-height: 38px; display: inline-grid; place-items: center; color: var(--text-muted); transition: background-color .12s ease, color .12s ease; }
+.inspector-title .icon-button:hover, .dialog-head .icon-button:hover { background: var(--surface-subtle); color: var(--text); }
+
+.queue-actions .primary,
+.inspector-actions .primary,
+.settings-dialog .primary,
+.setup-screen .primary,
+.history-actions .primary { background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600; }
+.queue-actions .primary:hover:not(:disabled),
+.inspector-actions .primary:hover:not(:disabled),
+.settings-dialog .primary:hover:not(:disabled),
+.setup-screen .primary:hover:not(:disabled),
+.history-actions .primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+
+/* Small-caps field labels. The wordmark's "for Vistage" tag already uses this
+   treatment, so reusing it for column headings, evidence fields, and form
+   eyebrows says "this names something" in one consistent voice. */
+.field-label, .table-wrap th { font-size: 12px; font-weight: 600; text-transform: lowercase; font-variant-caps: small-caps; letter-spacing: .07em; color: var(--text-muted); }
+.field-label { margin: 0; }
+.section-lead { margin: 0 0 14px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+
+/* ---------- header ---------- */
+.app-header { grid-column: 1 / -1; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 24px 0 28px; background: var(--surface); }
+.product { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.product strong { font-family: var(--font-display); font-size: 34px; font-weight: 700; letter-spacing: -.85px; line-height: 1; color: var(--brand-navy); white-space: nowrap; }
+.brand-tag { font-size: 13px; font-weight: 400; font-variant-caps: small-caps; letter-spacing: .06em; color: var(--text-muted); margin-left: 10px; }
+/* The privacy posture is a standing fact about the app, not a second
+   headline. Set as a badge it stays legible without competing with the mark. */
+.private { display: inline-flex; align-items: center; gap: 9px; padding: 5px 13px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-subtle); font-size: 13px; color: var(--text); white-space: nowrap; }
+.private i { width: 8px; height: 8px; border-radius: 50%; background: var(--ready); box-shadow: 0 0 0 3px rgba(20, 128, 74, .14); }
+.header-actions { display: flex; gap: 10px; align-items: center; }
+
+/* ---------- sidebar ---------- */
+.sidebar { display: flex; flex-direction: column; justify-content: space-between; gap: 16px; border-right: 1px solid var(--border); padding: 14px 0 16px; background: var(--surface); }
+.sidebar .nav-item { border: 0; border-left: 3px solid transparent; background: transparent; width: 100%; min-height: 44px; padding: 0 18px; display: flex; gap: 13px; align-items: center; text-align: left; font-size: 13px; font-weight: 500; color: var(--text); transition: background-color .12s ease; }
+.sidebar .nav-item:hover { background: var(--surface-subtle); }
+.sidebar .nav-item.active { background: var(--brand-tint); border-left-color: var(--accent); color: var(--brand-navy); font-weight: 600; }
+.sidebar .nav-item b { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.sidebar .nav-item.active b { color: var(--brand-navy); }
+.sidebar-footer { display: flex; align-items: center; gap: 4px; padding: 0 15px; }
+.footer-nav { border: 0; background: transparent; border-radius: var(--radius-sm); min-width: 40px; min-height: 40px; display: inline-grid; place-items: center; color: var(--text-muted); transition: background-color .12s ease, color .12s ease; }
+.footer-nav:hover { background: var(--surface-subtle); color: var(--text); }
+
+/* ---------- drop target ---------- */
+.drop-zone--bar { flex: 0 0 auto; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); background: var(--surface-subtle); margin: 0 10px 16px; display: flex; align-items: center; gap: 18px; padding: 15px 20px; font-size: 14px; }
+.drop-zone--bar > svg { flex: none; width: 28px; height: 28px; color: var(--accent); }
+.drop-zone--bar .drop-copy { display: grid; gap: 4px; }
+.drop-zone--bar small { color: var(--text-muted); font-size: 12px; }
+/* The first screen a new user meets. An empty table with four column headings
+   said only that the app had loaded; this says what to do with it. */
+.drop-zone--hero { flex: 1; min-height: 300px; border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-subtle); margin: 0 10px 16px; display: grid; align-content: start; justify-items: center; padding: min(18vh, 150px) 24px 48px; text-align: center; }
+.drop-zone--hero .drop-copy { display: grid; justify-items: center; gap: 12px; max-width: 470px; }
+.drop-mark { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 50%; background: var(--brand-tint); color: var(--brand-navy); }
+.drop-mark svg { width: 26px; height: 26px; }
+.drop-zone--hero h2 { margin: 2px 0 0; font-family: var(--font-display); font-size: 22px; font-weight: 600; letter-spacing: -.3px; color: var(--text); }
+.drop-zone--hero p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-soft); }
+.drop-zone--hero .drop-alternative { font-size: 13px; color: var(--text-muted); }
+.drop-zone--hero small { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+
+/* A view that filters to nothing, while the queue itself still has work. */
+.view-empty { flex: 1; display: grid; align-content: start; justify-items: center; gap: 10px; padding: min(16vh, 130px) 24px 48px; text-align: center; }
+.view-empty-mark { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: var(--surface-subtle); color: var(--text-muted); }
+.view-empty p { margin: 0; max-width: 400px; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.view-empty .view-empty-title { font-size: 16px; font-weight: 600; color: var(--text); }
+
+/* ---------- queue ---------- */
+.queue-actions { display: flex; justify-content: flex-end; gap: 10px; min-height: 38px; margin: 0 10px 12px; }
+.queue-actions button { min-height: 36px; }
+.queue-actions span { display: inline-grid; place-items: center; min-width: 22px; height: 20px; margin-left: 4px; padding: 0 6px; border-radius: 10px; font-size: 12px; font-variant-numeric: tabular-nums; background: var(--brand-tint); color: var(--brand-navy); }
+.queue-actions .primary span { background: rgba(255, 255, 255, .22); color: #fff; }
+
+.table-wrap { overflow-x: auto; }
+.table-wrap table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 14px; }
+.table-wrap th { text-align: left; padding: 6px 16px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.table-wrap th:nth-child(1) { width: 29%; }
+.table-wrap th:nth-child(2) { width: 20%; }
+.table-wrap th:nth-child(3) { width: 37%; }
+.table-wrap th:nth-child(4) { width: 14%; }
+.table-wrap td { padding: 8px 16px; height: 48px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow-wrap: anywhere; }
+.row-select { border: 0; background: transparent; color: inherit; padding: 4px 0; margin: -4px 0; width: 100%; display: inline-flex; align-items: center; gap: 12px; text-align: left; font: inherit; }
+.file-kind { flex: 0 0 22px; display: inline-grid; place-items: center; color: var(--text-muted); }
+.file-kind--pdf { color: #a33b32; }
+.file-kind--document { color: #315caa; }
+.file-kind--spreadsheet { color: #24734d; }
+.file-kind--text { color: #667085; }
+.file-kind--image { color: #7653a8; }
+/* Hover and selection used to be the same tint, so the row under the pointer
+   claimed to be the row the inspector was describing. */
+.table-wrap tbody tr:hover { background: var(--surface-subtle); }
+.table-wrap tr.selected { background: var(--surface-selected); }
+.table-wrap tr.selected td { border-top: 1px solid var(--selected-border); border-bottom: 1px solid var(--selected-border); }
+.table-wrap tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.row-description { display: block; margin-top: 3px; color: var(--text-muted); font-size: 12px; line-height: 1.35; }
+
+.status { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-weight: 500; }
+.status.ready, .status.completed, .confidence.ready, .confidence.completed { color: var(--ready); }
+.status.review, .confidence.review { color: var(--review); }
+.status.waiting { color: var(--waiting); }
+.status.processing { color: var(--processing); }
+/* Failed carried an icon and no colour at all, in the one state that most
+   needs to be spotted from across the table. */
+.status.failed { color: var(--failed); }
+.status.processing svg { animation: spin 1s linear infinite; }
+
+.confidence-meter { display: inline-grid; gap: 5px; justify-items: start; }
+.confidence-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.meter { display: block; width: 46px; height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; }
+.meter-fill { display: block; height: 100%; border-radius: inherit; background: currentColor; }
+.confidence-meter--panel { display: flex; flex: 1; align-items: center; gap: 10px; }
+.confidence-meter--panel .meter { order: 1; flex: 1; width: auto; height: 5px; border-radius: 3px; }
+.confidence-meter--panel .confidence-value { order: 2; font-size: 15px; }
+
+.item-count { color: var(--text-muted); padding: 14px 10px; font-size: 12px; font-variant-numeric: tabular-nums; margin-top: auto; }
+
+/* ---------- review inspector ---------- */
+.inspector { flex: 0 0 370px; border-left: 1px solid var(--border); box-shadow: var(--shadow-inspector); padding: 22px 24px 0; overflow-y: auto; font-size: 14px; background: var(--surface); }
+.inspector-title, .dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.inspector h2, .dialog-head h2 { margin: 0; font-family: var(--font-display); font-size: 20px; font-weight: 600; letter-spacing: -.2px; }
+.inspector h3 { font-family: var(--font-display); font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+.source-file { display: grid; gap: 6px; margin: 16px 0 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.selected-file { margin: 0; display: flex; align-items: flex-start; gap: 8px; font-size: 14px; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
+.selected-file .file-kind { flex: 0 0 22px; }
+
+.inspector label { display: block; font-size: 13px; font-weight: 600; margin: 0 0 14px; }
+.inspector input, .inspector textarea, .settings-dialog input:not([type=checkbox]) { width: 100%; display: block; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 9px 10px; margin-top: 6px; font-weight: 400; background: var(--surface); font-size: 14px; }
+.inspector input:disabled, .inspector textarea:disabled { color: var(--text-muted); background: var(--surface-subtle); }
+.inspector textarea { min-height: 92px; resize: vertical; line-height: 1.45; }
+/* The proposed name is a string that will exist on disk exactly as typed, so
+   it is set in the system's monospace face: a doubled space or a "1" standing
+   in for an "l" is visible in the field where it can still be corrected. */
+.inspector .filename-input { font-family: var(--font-mono); font-size: 13px; line-height: 1.5; }
+.proposal .form-error { margin: -8px 0 12px; }
+.confidence-readout { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+
+/* Evidence, as evidence: what the document says, attributed to the part of
+   the proposed name it supports. It read as a metadata table before, which
+   is the one thing it is not. */
+.evidence { margin: 22px 0 0; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-subtle); }
+.evidence h3 { margin-bottom: 4px; }
+.evidence-list { display: grid; gap: 14px; margin: 0; }
+.evidence-item { display: grid; gap: 5px; }
+.evidence-item dd { margin: 0; display: grid; gap: 6px; }
+.evidence-item q { display: block; quotes: "\201C" "\201D"; padding: 1px 0 1px 12px; border-left: 2px solid var(--selected-border); font-size: 14px; line-height: 1.45; color: var(--text-soft); overflow-wrap: anywhere; }
+
+.note { margin: 18px 0 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.note--review { border-left: 3px solid var(--review); }
+.note--failed { border-left: 3px solid var(--failed); }
+.note h3 { margin-bottom: 6px; }
+.note p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-soft); }
+.inspector section p { margin: 0; line-height: 1.5; }
+.settled-description { color: var(--text-soft); }
+.copy-description { margin-top: 12px; min-height: 34px; }
+
+/* Pinned to the bottom of the panel: the evidence above it can be long, and
+   the decision must never require scrolling to reach. */
+.inspector-actions { position: sticky; bottom: 0; z-index: 1; display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 26px -24px 0; padding: 14px 24px 20px; background: var(--surface); border-top: 1px solid var(--border); }
+.inspector-actions:empty { display: none; }
+.inspector-actions > * { grid-column: 1 / -1; }
+.inspector-actions .secondary-action { grid-column: 1; }
+.inspector-actions .more-actions { grid-column: 2; }
+.review-menu { display: grid; gap: 8px; }
+.review-menu button { min-height: 36px; justify-content: flex-start; }
+
+.form-error { color: var(--failed); font-size: 12.5px; line-height: 1.45; margin: 0 0 10px; }
+
+/* ---------- dialogs ---------- */
+.dialog-backdrop { position: fixed; inset: 0; z-index: 4; display: grid; place-items: center; padding: 16px; background: rgba(23, 26, 31, .22); }
+.settings-dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 22px 24px; box-shadow: var(--shadow-dialog); }
+/* Settings had grown into one undifferentiated column of controls. Grouped
+   sections scroll; the title and Save stay put. */
+.settings-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; padding: 0; }
+.settings-panel .dialog-head { padding: 20px 24px 15px; border-bottom: 1px solid var(--border); }
+.settings-panel .dialog-body { overflow-y: auto; padding: 0 24px; }
+.settings-panel .dialog-actions { display: grid; gap: 8px; padding: 14px 24px 18px; border-top: 1px solid var(--border); background: var(--surface-subtle); }
+.settings-group { padding: 18px 0; border-bottom: 1px solid var(--border); }
+.settings-group:last-child { border-bottom: 0; padding-bottom: 6px; }
+.settings-group h3 { margin: 0 0 5px; font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text); }
+.settings-group > p[role='status'] { margin: 0 0 10px; font-size: 13px; line-height: 1.45; }
+.settings-dialog label { display: block; font-size: 13px; font-weight: 600; margin: 0 0 14px; }
+.settings-dialog .check-label { display: flex; align-items: center; gap: 10px; min-height: 26px; margin: 8px 0; font-size: 14px; font-weight: 400; }
+.check-label input[type=checkbox] { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.check-label:has(input:disabled) { color: var(--text-muted); }
+.check-hint { color: var(--text-muted); font-size: 12px; line-height: 1.45; margin: -2px 0 12px; }
+.check-label + .check-hint { margin-left: 26px; }
+.settings-dialog .primary { border: 0; min-height: 42px; padding: 0 16px; }
+.settings-dialog .save-error { margin: 0 0 4px; }
+.link-out svg { width: 16px; height: 16px; }
+
+.folder-row { display: flex; align-items: flex-end; gap: 10px; margin: 0 0 12px; }
+.folder-row label { flex: 1; min-width: 0; margin: 0; }
+.folder-row button { flex: none; white-space: nowrap; }
+.cloud-badge { color: var(--text-muted); font-size: 12px; line-height: 1.45; margin: -6px 0 12px; }
+.intake-status { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-subtle); padding: 12px; margin: 14px 0 4px; font-size: 13px; }
+.intake-status p { margin: 0 0 8px; line-height: 1.45; }
+
+.intake-status .form-error { margin: 0 0 8px; }
+.intake-status button { min-height: 32px; padding: 0 10px; font-size: 12px; }
+.update-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.update-note { color: var(--text-muted); font-size: 12px; line-height: 1.5; margin: 0 0 10px; }
+
+.history-dialog { width: min(680px, calc(100vw - 32px)); }
+.history-dialog .dialog-head { margin-bottom: 10px; }
+.history-empty { color: var(--text-muted); margin: 18px 0; }
+.history-table-wrap { overflow: auto; max-height: min(420px, 55vh); border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 14px 0; }
+.history-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.history-table-wrap th { position: sticky; top: 0; background: var(--surface-subtle); text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; text-transform: lowercase; font-variant-caps: small-caps; letter-spacing: .07em; color: var(--text-muted); }
+.history-table-wrap td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
+.history-table-wrap tbody tr:last-child td { border-bottom: 0; }
+.history-dialog [role='status'] { margin: 0 0 10px; font-size: 13px; }
+.history-dialog .form-error { margin: 0 0 10px; }
+.history-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* ---------- feedback and setup ---------- */
+.operation-feedback { position: fixed; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); margin: 0; padding: 11px 15px; border: 1px solid #e6a9a2; border-radius: var(--radius-sm); color: #8f231a; background: #fff5f3; box-shadow: 0 8px 24px rgba(23, 26, 31, .12); font-size: 13px; line-height: 1.45; }
+.setup-screen { min-height: 100vh; display: grid; place-items: center; text-align: center; padding: 24px; }
+.setup-screen section { width: min(500px, calc(100vw - 32px)); }
+.setup-screen > section > svg { color: var(--brand-navy); }
+.setup-screen h1 { font-family: var(--font-display); font-size: 28px; font-weight: 700; letter-spacing: -.5px; margin: 18px 0 10px; }
+.setup-screen p { color: var(--text-soft); line-height: 1.55; }
+.setup-screen progress { width: 100%; accent-color: var(--accent); }
+.setup-screen button:disabled { opacity: .65; cursor: wait; }
+.setup-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 22px; }
+.setup-screen .setup-error { padding: 11px 13px; border: 1px solid #e6a9a2; border-radius: var(--radius-sm); color: #8f231a; background: #fff5f3; }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* ---------- narrow ---------- */
+@media (max-width: 1100px) {
+  .app-shell { grid-template-columns: 64px minmax(0, 1fr); }
+  .sidebar .nav-item { justify-content: center; padding: 0; }
+  .sidebar .nav-item span, .sidebar .nav-item b { display: none; }
+  .sidebar-footer { flex-direction: column; padding: 0; }
+  .inspector { position: fixed; z-index: 3; right: 0; top: 72px; bottom: 0; width: 370px; background: var(--surface); box-shadow: -16px 0 40px rgba(23, 26, 31, .16); }
+  .product { gap: 16px; }
+  .product strong { font-size: 28px; }
+  .private { font-size: 12px; padding: 4px 10px; }
+  .header-actions button { padding: 0 10px; }
+}
+
+@media (max-width: 800px) {
+  .app-header { padding: 0 12px; }
+  .private, .brand-tag { display: none; }
+  .header-actions { gap: 6px; }
+  .header-actions button:not(.icon-button) span { display: none; }
+  .drop-zone--bar { gap: 12px; padding: 12px 14px; }
+  .queue-panel { padding-top: 12px; }
+  .table-wrap th, .table-wrap td { padding-left: 8px; padding-right: 8px; }
+  .table-wrap th:nth-child(1) { width: 30%; }
+  .table-wrap th:nth-child(2) { width: 24%; }
+  .table-wrap th:nth-child(3) { width: 32%; }
+  .table-wrap th:nth-child(4) { width: 14%; }
+  .inspector { width: min(370px, calc(100vw - 64px)); }
+  .product strong { font-size: 24px; }
+}

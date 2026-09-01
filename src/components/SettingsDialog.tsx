@@ -1,6 +1,7 @@
-import { X } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings, CloudLocation, IntakeStatus } from '../types';
+import { GUIDE_URL } from '../lib/bridge';
 import type { DesktopBridge, IntakeEventSource, SelectionBoundary, UpdateStatus } from '../lib/bridge';
 import { Icon } from './Icon';
 
@@ -40,6 +41,16 @@ function saveFailure(error: unknown): string {
   if (typeof error === 'object' && error && 'message' in error && typeof error.message === 'string' && error.message.trim()) return error.message.trim();
   if (typeof error === 'string' && error.trim()) return error.trim();
   return 'Settings could not be saved.';
+}
+
+/**
+ * Opening the guide is a shell hand-off, so the only failures worth naming are
+ * "no browser answered" and a refused capability. Either way the address is
+ * shown, because a person can always type it themselves.
+ */
+function describeGuideError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.trim() ? `${message.trim()} You can reach it at ${GUIDE_URL}.` : `You can reach it at ${GUIDE_URL}.`;
 }
 
 function cloudBadgeText(cloud: CloudLocation): string {
@@ -94,6 +105,7 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
   const [intake, setIntake] = useState<IntakeStatus>();
   const [intakeError, setIntakeError] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [helpError, setHelpError] = useState('');
   const busy = checking || installing;
   const dialog = useRef<HTMLElement>(null);
   const destination = useRef<HTMLInputElement>(null);
@@ -135,6 +147,11 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
       setScanning(false);
     }
   };
+  const runGuide = async () => {
+    setHelpError('');
+    try { await bridge.openGuide(); }
+    catch (error) { setHelpError(`The guide could not be opened. ${describeGuideError(error)}`); }
+  };
   const runCheck = async () => {
     setChecking(true);
     setUpdateError('');
@@ -165,68 +182,98 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
   const activeMachines = intake?.machines.filter((machine) => machine.active).length ?? 0;
-  return <div className="dialog-backdrop" role="presentation"><section ref={dialog} className="settings-dialog" role="dialog" aria-modal="true" aria-label="Settings">
-    <div className="inspector-title"><h2>Settings</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Close settings"><Icon icon={X} /></button></div>
-    <div className="folder-row">
-      <label>Destination folder<input ref={destination} value={next.destination} onChange={(event) => setNext({ ...next, destination: event.target.value })} /></label>
-      {selection && <button type="button" aria-label="Browse for destination folder" onClick={() => void browse((path) => setNext((current) => ({ ...current, destination: path })))}>Browse…</button>}
+  /*
+    Grouped rather than stacked. This dialog had grown to a destination, four
+    checkboxes, a watched folder with its own machine name and status block,
+    and an updates section - all in one undifferentiated column, so a
+    first-timer met a wall of controls with no way to tell which ones belonged
+    together. The headings name the decision each group settles, and Save is
+    pinned to the footer so it stays reachable from any scroll position.
+  */
+  return <div className="dialog-backdrop" role="presentation"><section ref={dialog} className="settings-dialog settings-panel" role="dialog" aria-modal="true" aria-label="Settings">
+    <div className="dialog-head"><h2>Settings</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Close settings"><Icon icon={X} /></button></div>
+    <div className="dialog-body">
+      <section className="settings-group">
+        <h3>Filing</h3>
+        <p className="section-lead">Where renamed documents are put, and when Intern may file one without asking.</p>
+        <div className="folder-row">
+          <label>Destination folder<input ref={destination} value={next.destination} onChange={(event) => setNext({ ...next, destination: event.target.value })} /></label>
+          {selection && <button type="button" aria-label="Browse for destination folder" onClick={() => void browse((path) => setNext((current) => ({ ...current, destination: path })))}>Browse…</button>}
+        </div>
+        {destinationCloud && <p className="cloud-badge">{cloudBadgeText(destinationCloud)}</p>}
+        <label className="check-label"><input type="checkbox" checked={Boolean(next.automaticRename)} onChange={(event) => setNext({ ...next, automaticRename: event.target.checked })} />Automatically rename high-confidence files</label>
+        <p className="check-hint">Anything Intern is less sure about still waits for you in Needs Review.</p>
+      </section>
+      <section className="settings-group">
+        <h3>This computer</h3>
+        <p className="section-lead">How Intern behaves when the window is closed, and when you sign in.</p>
+        <label className="check-label"><input type="checkbox" checked={next.runInBackground} onChange={(event) => setNext({ ...next, runInBackground: event.target.checked })} />Run in background</label>
+        <p className="check-hint">Keep Intern in the system tray when the window is closed — watched folders keep working.</p>
+        <label className="check-label"><input type="checkbox" checked={next.startAtLogin} onChange={(event) => setNext({ ...next, startAtLogin: event.target.checked })} />Start Intern when you sign in</label>
+        {/* Without the tray a minimized start would leave no way back to the
+            window, so the checkbox is only offered while background mode is on. */}
+        <label className="check-label"><input type="checkbox" disabled={!next.runInBackground} checked={next.startMinimized} onChange={(event) => setNext({ ...next, startMinimized: event.target.checked })} />Start minimized</label>
+        {!next.runInBackground && <p className="check-hint">Available when “Run in background” is on, so the tray can bring the window back.</p>}
+      </section>
+      <section className="settings-group">
+        <h3>Shared intake</h3>
+        {/*
+          The watched folder may be a OneDrive/SharePoint synced folder shared by
+          several machines. Coordination happens through small files the sync
+          client replicates - Intern itself still makes no network requests and
+          no document content leaves this machine.
+        */}
+        <p className="section-lead">Intern can watch a folder — including a OneDrive or SharePoint folder shared with other machines — and process documents that appear in it. Watched intake needs a destination folder outside the intake folder.</p>
+        <label className="check-label"><input type="checkbox" checked={next.intakeEnabled} onChange={(event) => setNext({ ...next, intakeEnabled: event.target.checked })} />Watch a folder for new documents</label>
+        <div className="folder-row">
+          <label>Intake folder<input value={next.intakeFolder} onChange={(event) => setNext({ ...next, intakeFolder: event.target.value })} /></label>
+          {selection && <button type="button" aria-label="Browse for intake folder" onClick={() => void browse((path) => setNext((current) => ({ ...current, intakeFolder: path })))}>Browse…</button>}
+        </div>
+        {intakeCloud && <p className="cloud-badge">{cloudBadgeText(intakeCloud)}</p>}
+        <label className="check-label"><input type="checkbox" checked={next.processOthersUploads} onChange={(event) => setNext({ ...next, processOthersUploads: event.target.checked })} />Also process documents uploaded by others</label>
+        <label>This machine's name<input value={next.machineLabel} onChange={(event) => setNext({ ...next, machineLabel: event.target.value })} /></label>
+        {next.intakeEnabled && <div className="intake-status">
+          <p role="status" aria-label="Intake status" aria-live="polite">{intake
+            ? `${intake.watching ? 'Watching' : 'Not watching'} · ${activeMachines} ${activeMachines === 1 ? 'machine' : 'machines'} active · ${intake.heldForOthers} held for others · Last scan: ${formatScanTime(intake.lastScanAt)}`
+            : 'Checking intake status…'}</p>
+          {intake && intake.syncConflicts > 0 && <p className="check-hint" role="status">{intake.syncConflicts === 1 ? '1 file is' : `${intake.syncConflicts} files are`} a sync conflict copy left behind by OneDrive or SharePoint. Intern leaves {intake.syncConflicts === 1 ? 'it' : 'them'} alone — resolve the conflict in the folder and the surviving document is picked up on the next scan.</p>}
+          {intake && intake.awaitingHydration > 0 && <p className="check-hint" role="status">{intake.awaitingHydration === 1 ? '1 document is' : `${intake.awaitingHydration} documents are`} waiting for OneDrive to download {intake.awaitingHydration === 1 ? 'its' : 'their'} contents. Intern is holding {intake.awaitingHydration === 1 ? 'it' : 'them'} rather than failing {intake.awaitingHydration === 1 ? 'it' : 'them'}; connect this machine and the next scan picks {intake.awaitingHydration === 1 ? 'it' : 'them'} up.</p>}
+          {(intakeError || intake?.error) && <p className="form-error" role="alert">{intakeError || intake?.error}</p>}
+          <button type="button" disabled={scanning} onClick={() => void runScanNow()}>{scanning ? 'Scanning…' : 'Scan now'}</button>
+        </div>}
+      </section>
+      <section className="settings-group">
+        <h3>Updates</h3>
+        {/*
+          Deliberately a button and not a background check. Intern reads private
+          documents; software that contacts a server on its own schedule is
+          software you have to take on trust. Nothing is sent but a request for
+          the release manifest, and nothing is installed unless it is signed by
+          the key this build was compiled with.
+        */}
+        <p className="section-lead">Intern checks only when you ask. Updates must be signed by this project's key or they are refused.</p>
+        {status?.state === 'current' && <p role="status" aria-label="Update status" aria-live="polite">Intern {status.currentVersion} is the latest release.</p>}
+        {status?.state === 'unsupported' && <p role="status" aria-label="Update status" aria-live="polite">Updates are available in the installed desktop application.</p>}
+        {status?.state === 'available' && <p role="status" aria-label="Update status" aria-live="polite">Version {status.version} is available. You have {status.currentVersion}.</p>}
+        {updateError && <p className="form-error" role="alert">{updateError}</p>}
+        <div className="update-actions">
+          <button type="button" disabled={busy} onClick={() => void runCheck()}>{checking ? 'Checking…' : 'Check for updates'}</button>
+          {status?.state === 'available' && <button type="button" className="primary" disabled={busy} onClick={() => void runInstall()}>{installing ? 'Installing…' : `Install ${status.version} and restart`}</button>}
+        </div>
+      </section>
+      <section className="settings-group">
+        <h3>Help & support</h3>
+        <p className="section-lead">The guide walks through setup, what each status means, and what to do when a document fails.</p>
+        {helpError && <p className="form-error" role="alert">{helpError}</p>}
+        <div className="update-actions">
+          <button type="button" className="link-out" onClick={() => void runGuide()}>Open the guide<Icon icon={ExternalLink} /></button>
+        </div>
+        <p className="check-hint">Opens in your browser.</p>
+      </section>
     </div>
-    {destinationCloud && <p className="cloud-badge">{cloudBadgeText(destinationCloud)}</p>}
-    <label className="check-label"><input type="checkbox" checked={next.runInBackground} onChange={(event) => setNext({ ...next, runInBackground: event.target.checked })} />Run in background</label>
-    <p className="check-hint">Keep Intern in the system tray when the window is closed — watched folders keep working.</p>
-    <label className="check-label"><input type="checkbox" checked={next.startAtLogin} onChange={(event) => setNext({ ...next, startAtLogin: event.target.checked })} />Start Intern when you sign in</label>
-    {/* Without the tray a minimized start would leave no way back to the
-        window, so the checkbox is only offered while background mode is on. */}
-    <label className="check-label"><input type="checkbox" disabled={!next.runInBackground} checked={next.startMinimized} onChange={(event) => setNext({ ...next, startMinimized: event.target.checked })} />Start minimized</label>
-    {!next.runInBackground && <p className="check-hint">Available when “Run in background” is on, so the tray can bring the window back.</p>}
-    <label className="check-label"><input type="checkbox" checked={Boolean(next.automaticRename)} onChange={(event) => setNext({ ...next, automaticRename: event.target.checked })} />Automatically rename high-confidence files</label>
-    <section className="intake">
-      <h3>Shared intake</h3>
-      {/*
-        The watched folder may be a OneDrive/SharePoint synced folder shared by
-        several machines. Coordination happens through small files the sync
-        client replicates - Intern itself still makes no network requests and
-        no document content leaves this machine.
-      */}
-      <p className="update-note">Intern can watch a folder — including a OneDrive or SharePoint synced folder shared with other machines — and process documents that appear in it. Watched intake needs a destination folder outside the intake folder.</p>
-      <label className="check-label"><input type="checkbox" checked={next.intakeEnabled} onChange={(event) => setNext({ ...next, intakeEnabled: event.target.checked })} />Watch a folder for new documents</label>
-      <div className="folder-row">
-        <label>Intake folder<input value={next.intakeFolder} onChange={(event) => setNext({ ...next, intakeFolder: event.target.value })} /></label>
-        {selection && <button type="button" aria-label="Browse for intake folder" onClick={() => void browse((path) => setNext((current) => ({ ...current, intakeFolder: path })))}>Browse…</button>}
-      </div>
-      {intakeCloud && <p className="cloud-badge">{cloudBadgeText(intakeCloud)}</p>}
-      <label className="check-label"><input type="checkbox" checked={next.processOthersUploads} onChange={(event) => setNext({ ...next, processOthersUploads: event.target.checked })} />Also process documents uploaded by others</label>
-      <label>This machine's name<input value={next.machineLabel} onChange={(event) => setNext({ ...next, machineLabel: event.target.value })} /></label>
-      {next.intakeEnabled && <div className="intake-status">
-        <p role="status" aria-label="Intake status" aria-live="polite">{intake
-          ? `${intake.watching ? 'Watching' : 'Not watching'} · ${activeMachines} ${activeMachines === 1 ? 'machine' : 'machines'} active · ${intake.heldForOthers} held for others · Last scan: ${formatScanTime(intake.lastScanAt)}`
-          : 'Checking intake status…'}</p>
-        {intake && intake.syncConflicts > 0 && <p className="update-note" role="status">{intake.syncConflicts === 1 ? '1 file is' : `${intake.syncConflicts} files are`} a sync conflict copy left behind by OneDrive or SharePoint. Intern leaves {intake.syncConflicts === 1 ? 'it' : 'them'} alone — resolve the conflict in the folder and the surviving document is picked up on the next scan.</p>}
-        {intake && intake.awaitingHydration > 0 && <p className="update-note" role="status">{intake.awaitingHydration === 1 ? '1 document is' : `${intake.awaitingHydration} documents are`} waiting for OneDrive to download {intake.awaitingHydration === 1 ? 'its' : 'their'} contents. Intern is holding {intake.awaitingHydration === 1 ? 'it' : 'them'} rather than failing {intake.awaitingHydration === 1 ? 'it' : 'them'}; connect this machine and the next scan picks {intake.awaitingHydration === 1 ? 'it' : 'them'} up.</p>}
-        {(intakeError || intake?.error) && <p className="form-error" role="alert">{intakeError || intake?.error}</p>}
-        <button type="button" disabled={scanning} onClick={() => void runScanNow()}>{scanning ? 'Scanning…' : 'Scan now'}</button>
-      </div>}
-    </section>
-    {saveError && <p className="form-error save-error" role="alert">{saveError}</p>}
-    <button type="button" className="primary" disabled={saving} onClick={() => void runSave()}>{saving ? 'Saving…' : 'Save settings'}</button>
-    <section className="updates">
-      <h3>Updates</h3>
-      {/*
-        Deliberately a button and not a background check. Intern reads private
-        documents; software that contacts a server on its own schedule is
-        software you have to take on trust. Nothing is sent but a request for
-        the release manifest, and nothing is installed unless it is signed by
-        the key this build was compiled with.
-      */}
-      <p className="update-note">Intern checks only when you ask. Updates must be signed by this project's key or they are refused.</p>
-      {status?.state === 'current' && <p role="status" aria-label="Update status" aria-live="polite">Intern {status.currentVersion} is the latest release.</p>}
-      {status?.state === 'unsupported' && <p role="status" aria-label="Update status" aria-live="polite">Updates are available in the installed desktop application.</p>}
-      {status?.state === 'available' && <p role="status" aria-label="Update status" aria-live="polite">Version {status.version} is available. You have {status.currentVersion}.</p>}
-      {updateError && <p className="form-error" role="alert">{updateError}</p>}
-      <div className="update-actions">
-        <button type="button" disabled={busy} onClick={() => void runCheck()}>{checking ? 'Checking…' : 'Check for updates'}</button>
-        {status?.state === 'available' && <button type="button" className="primary" disabled={busy} onClick={() => void runInstall()}>{installing ? 'Installing…' : `Install ${status.version} and restart`}</button>}
-      </div>
-    </section>
+    <div className="dialog-actions">
+      {saveError && <p className="form-error save-error" role="alert">{saveError}</p>}
+      <button type="button" className="primary" disabled={saving} onClick={() => void runSave()}>{saving ? 'Saving…' : 'Save settings'}</button>
+    </div>
   </section></div>;
 }

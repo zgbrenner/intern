@@ -7,6 +7,8 @@ import { ReviewInspector } from './components/ReviewInspector';
 import { SettingsDialog } from './components/SettingsDialog';
 import { SetupScreen } from './components/SetupScreen';
 import { Sidebar } from './components/Sidebar';
+import { ViewEmpty } from './components/ViewEmpty';
+import { GUIDE_URL } from './lib/bridge';
 import type { DesktopBridge, SelectionBoundary, SelectionResult } from './lib/bridge';
 import { createInMemoryBridge } from './lib/inMemoryBridge';
 import type { SetupEventSource } from './lib/tauriBridge';
@@ -171,6 +173,15 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
       setActionPending(false);
     }
   };
+  // Help leaves the app on purpose. Inside Tauri the webview has nowhere to
+  // put a new tab, so the bridge hands the address to the system browser; if
+  // that hand-off is refused the address itself is shown, because a person can
+  // always type it.
+  const openGuide = async () => {
+    setActionError('');
+    try { await bridge.openGuide(); }
+    catch { setActionError(`The guide could not be opened. You can reach it at ${GUIDE_URL}.`); }
+  };
   const openSettings = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; settingsTrigger.current = trigger; setSettingsOpen(true); };
   const closeSettings = () => { setSettingsOpen(false); settingsTrigger.current?.focus(); };
   const openHistory = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; historyTrigger.current = trigger; setHistoryOpen(true); };
@@ -224,8 +235,14 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     <p className="sr-only" role="status" aria-label="Action status" aria-live="polite" aria-atomic="true">{actionMessage}</p>
     {actionError && <p className="operation-feedback" role="status" aria-label="Action error" aria-live="polite" aria-atomic="true">{actionError}</p>}
     <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} onAddFiles={() => { void selection?.pickFiles().then((files) => applySelection({ files })); }} onAddFolder={() => { void selection?.pickFolder().then((folder) => { if (folder) applySelection({ folder }); }); }} onTogglePause={() => void (async () => { if (await runQueueAction(paused ? bridge.resumeQueue : bridge.pauseQueue, `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
-    <Sidebar inert={drawerOpen} active={view} items={items} onChange={(next) => { focusRestoreVersion.current += 1; reviewTrigger.current = null; setView(next); setSelectedId(undefined); }} onSettings={openSettings} />
-    <div className="workspace"><section className="queue-panel" aria-label="Queue items" inert={drawerOpen || undefined}><DropZone onDrop={(payload) => { void selection?.resolveDrop(payload).then(applySelection); }} />
+    <Sidebar inert={drawerOpen} active={view} items={items} onChange={(next) => { focusRestoreVersion.current += 1; reviewTrigger.current = null; setView(next); setSelectedId(undefined); }} onSettings={openSettings} onHelp={() => void openGuide()} />
+    <div className="workspace"><section className="queue-panel" aria-label="Queue items" inert={drawerOpen || undefined}>
+      {/*
+        An empty queue is the first thing a new user sees, and it used to be
+        four column headings with nothing under them. The same drop target
+        grows into the whole panel and says what to do with it.
+      */}
+      <DropZone variant={items.length === 0 ? 'hero' : 'bar'} onDrop={(payload) => { void selection?.resolveDrop(payload).then(applySelection); }} />
       {/*
         The way out of a folder chosen by mistake. Pointing the queue at a large
         directory used to be unrecoverable from inside the app: pausing stops it
@@ -242,7 +259,8 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
         <button type="button" disabled={actionPending} onClick={(event) => openHistory(event.currentTarget)}>History</button>
         <button type="button" disabled={actionPending} onClick={() => void (async () => { if (await runQueueAction(() => bridge.clearHistory(), 'History cleared.')) queueMicrotask(() => document.querySelector<HTMLButtonElement>('.sidebar button[aria-label="Completed"]')?.focus()); })()}>Clear history</button>
       </div>}
-      <QueueTable items={filtered} selectedId={selectedId} onSelect={select} /><p className="item-count">{filtered.length} items</p></section>
+      {items.length > 0 && (filtered.length > 0 ? <QueueTable items={filtered} selectedId={selectedId} onSelect={select} /> : <ViewEmpty view={view} />)}
+      <p className="item-count">{filtered.length} {filtered.length === 1 ? 'item' : 'items'}</p></section>
       {selected && <ReviewInspector busy={actionPending} drawer={drawerOpen} item={selected} onClose={closeReview} onApprove={(filename, description) => void refreshAndClear(() => bridge.approve(selected.id, filename, description), 'Rename applied.')} onKeep={() => void refreshAndClear(() => bridge.keepOriginal(selected.id), 'Original filename kept.')} onCancel={() => void refreshAndClear(() => bridge.cancel(selected.id), 'Processing canceled.')} onRetry={() => void refreshAndClear(() => bridge.retry(selected.id), 'Item queued for retry.')} onRemove={() => void refreshAndClear(() => bridge.remove(selected.id), 'Item removed.')} onUndo={() => void refreshAndClear(() => bridge.undo(selected.id), 'Operation undone.')} />}
     </div>
     {historyOpen && <HistoryDialog bridge={bridge} selection={selection} onClose={closeHistory} />}

@@ -1,5 +1,20 @@
 :root {
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  /*
+    Segoe UI Variable ships two optical sizes on Windows 11 and Intern uses
+    both on purpose: Display for the wordmark and headings, where its tighter
+    fit and closed apertures read as a mark, and Text for everything at 14px
+    and below, where it is drawn to stay legible. No web font is loaded - a
+    tool that promises nothing leaves the device cannot fetch a typeface.
+  */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  /*
+    Filenames are strings that will exist on disk exactly as shown. A monospace
+    face is what makes a doubled space, a stray hyphen, or "l" against "1"
+    visible in the field a person is being asked to approve.
+  */
+  --font-mono: "Cascadia Mono", Consolas, "Segoe UI Mono", ui-monospace, monospace;
+  font-family: var(--font-ui);
   color: #171a1f;
   background: #ffffff;
   --brand-navy: #1b2f5b;
@@ -15,15 +30,25 @@
   --border: #d9dee8;
   --border-strong: #c4cad5;
   --text: #171a1f;
+  /* Quoted evidence and body prose: quieter than --text, but 7.5:1 on white
+     and on --surface-subtle, so it is never merely decorative grey. */
+  --text-soft: #4a5163;
   --text-muted: #667085;
   --accent: var(--brand-blue);
   --accent-hover: #1d49bd;
   --primary: var(--brand-navy);
+  --primary-hover: #142544;
   --ready: #14804a;
   --review: #a45f00;
   --waiting: #667085;
   --processing: #0b5cff;
+  /* Failed had no colour at all: an XCircle glyph in ordinary body text, the
+     one status a person most needs to spot. Same red as form errors. */
+  --failed: #b42318;
+  --track: #e4e9f1;
   --radius-sm: 6px;
   --radius-md: 9px;
+  --radius-lg: 12px;
   --shadow-inspector: -8px 0 24px rgba(23, 26, 31, 0.06);
+  --shadow-dialog: 0 18px 50px rgba(23, 26, 31, 0.18);
 }

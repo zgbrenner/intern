@@ -6,294 +6,1182 @@
 <title>Intern — download</title>
 <meta name="description" content="Intern reads a document and tells you what to call it. Everything happens on your machine.">
 <style>
+  /* ------------------------------------------------------------------ *
+   * Tokens. One accent (ochre) beside Vistage navy and interactive blue.
+   * Mono type is reserved for things the machine produces: filenames,
+   * statuses, commands, labels, numbers. Sans carries everything we say.
+   * ------------------------------------------------------------------ */
   :root {
     color-scheme: light dark;
+
     --navy: #1B2F5B;
     --blue: #2456D6;
     --tint: #E3ECFB;
     --deep: #101F3C;
-    --bg: #F7F9FC;
-    --fg: #1C2536;
-    --muted: #4A5568;
-    --rule: #DDE4EF;
+
+    --bg: #FAFBFD;
+    --surface: #FFFFFF;
+    --sunk: #F1F4FA;
+    --fg: #14203A;
+    --head: #1B2F5B;
+    --muted: #4A5773;
+    --rule: #DCE3EF;
+    --rule-strong: #C3CFE2;
     --link: #2456D6;
-    --hero-bg: var(--navy);
-    --hero-fg: #FFFFFF;
-    --hero-muted: #C3D2EE;
-    --hero-rule: #33477E;
-    --panel: var(--tint);
-    --panel-old: #46598A;
-    --panel-new: #1B2F5B;
-    --chip-bg: var(--tint);
-    --chip-fg: #1B2F5B;
-    --btn-bg: var(--blue);
+
+    --accent: #8A5A12;
+    --accent-soft: #F6EEDC;
+    --accent-rule: #DCC189;
+
+    --btn-bg: #2456D6;
     --btn-fg: #FFFFFF;
+    --btn-bg-hover: #1B45B0;
+    --focus: #2456D6;
     --code-bg: #FFFFFF;
-    --warn-bg: #FCF7E8;
-    --warn-rule: #E0CF9E;
+
+    --fig-bg: #FFFFFF;
+    --fig-rule: #C3CFE2;
+    --fig-strong: #1B2F5B;
+    --fig-ink: #14203A;
+    --fig-muted: #4A5773;
+    --fig-arrow: #4A5773;
+    --fig-solid-bg: #1B2F5B;
+    --fig-solid-fg: #FFFFFF;
+    --seg-date: #2456D6;
+    --seg-type: #1B2F5B;
+    --seg-party: #8A5A12;
+
+    --plate-bg: #101F3C;
+    --plate-fg: #FFFFFF;
+    --plate-muted: #B9C6E2;
+    --plate-rule: #2C4272;
+    --plate-surface: #17284A;
+
+    --nav-h: 3.5rem;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
   }
+
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0D1424;
-      --fg: #E5EAF5;
-      --muted: #A7B4CE;
-      --rule: #26324E;
-      --link: #8FB2F5;
-      --hero-bg: var(--deep);
-      --hero-fg: #F2F5FC;
-      --hero-muted: #AFBEDD;
-      --hero-rule: #24365E;
-      --panel: #18294F;
-      --panel-old: #9FB0D4;
-      --panel-new: #E8EFFC;
-      --chip-bg: #22345E;
-      --chip-fg: #CFDDF8;
-      --code-bg: var(--deep);
-      --warn-bg: #262013;
-      --warn-rule: #4A3E22;
+      --bg: #0B1120;
+      --surface: #121A2E;
+      --sunk: #0F1728;
+      --fg: #E7ECF7;
+      --head: #E7ECF7;
+      --muted: #9BA9C6;
+      --rule: #25314D;
+      --rule-strong: #33405F;
+      --link: #93B4F8;
+
+      --accent: #E0B26A;
+      --accent-soft: #241D0F;
+      --accent-rule: #4E3E1E;
+
+      --btn-bg: #3C6BE8;
+      --btn-bg-hover: #5480F0;
+      --focus: #93B4F8;
+      --code-bg: #0F1728;
+
+      --fig-bg: #121A2E;
+      --fig-rule: #33405F;
+      --fig-strong: #93B4F8;
+      --fig-ink: #E7ECF7;
+      --fig-muted: #9BA9C6;
+      --fig-arrow: #9BA9C6;
+      --fig-solid-bg: #93B4F8;
+      --fig-solid-fg: #0B1120;
+      --seg-date: #93B4F8;
+      --seg-type: #E7ECF7;
+      --seg-party: #E0B26A;
+
+      --plate-bg: #0F1B33;
+      --plate-fg: #F2F6FF;
+      --plate-muted: #B4C2E0;
+      --plate-rule: #2A3B60;
+      --plate-surface: #16233E;
     }
   }
+
+  /* ------------------------------------------------------------------ *
+   * Base
+   * ------------------------------------------------------------------ */
   * { box-sizing: border-box; }
+
+  html {
+    scroll-padding-top: calc(var(--nav-h) + 1.25rem);
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     margin: 0;
     background: var(--bg);
     color: var(--fg);
-    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 42rem; margin: 0 auto; padding: 0 1.25rem; }
-  code, .example { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
-  a { color: var(--link); }
 
-  /* Hero */
-  header {
-    background: var(--hero-bg);
-    color: var(--hero-fg);
-    padding: 3.5rem 0 3rem;
+  h1, h2, h3 { color: var(--head); font-weight: 640; }
+  h1 { font-size: clamp(2.05rem, 1.2rem + 3.9vw, 4.15rem); line-height: 1.03; letter-spacing: -0.035em; margin: 0; text-wrap: balance; }
+  h2 { font-size: clamp(1.42rem, 1.15rem + 1.1vw, 1.9rem); line-height: 1.15; letter-spacing: -0.025em; margin: 0; text-wrap: balance; }
+  h3 { font-size: 1.02rem; line-height: 1.35; letter-spacing: -0.01em; margin: 0; }
+  p { margin: 0; }
+  ul, ol { margin: 0; padding: 0; }
+
+  a { color: var(--link); text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+  a:hover { text-decoration-thickness: 2px; }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 3px;
+    border-radius: 3px;
   }
-  h1 { font-size: 2.75rem; letter-spacing: -0.02em; margin: 0; line-height: 1.1; }
-  .tag {
-    display: inline-block;
-    margin: 0.6rem 0 0;
-    padding: 0.15rem 0.65rem;
-    border: 1px solid var(--hero-rule);
-    border-radius: 99px;
-    font-size: 0.8rem;
-    letter-spacing: 0.04em;
-    color: var(--hero-muted);
+
+  code, kbd, samp, pre { font-family: var(--mono); }
+
+  .shell {
+    width: 100%;
+    max-width: 66rem;
+    margin-inline: auto;
+    padding-inline: clamp(1.15rem, 4vw, 2.75rem);
   }
-  .pitch { font-size: 1.25rem; margin: 1.25rem 0 1.5rem; color: var(--hero-fg); }
-  .example {
-    background: var(--panel);
-    border-radius: 10px;
-    padding: 1rem 1.15rem;
-    font-size: 0.82rem;
+  .measure { max-width: 40rem; }
+  .measure-narrow { max-width: 34rem; }
+
+  .skip {
+    position: fixed;
+    left: 0.75rem;
+    top: -4rem;
+    z-index: 50;
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--rule-strong);
+    border-radius: 6px;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.9rem;
+    text-decoration: none;
+    transition: top 120ms ease;
+  }
+  .skip:focus { top: 0.6rem; }
+
+  .ico {
+    width: 1.05em;
+    height: 1.05em;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: -0.16em;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Nav — slim, sticky, quiet. Scrolls its links under ~600px.
+   * ------------------------------------------------------------------ */
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(180%) blur(10px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .nav-in {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-height: var(--nav-h);
+  }
+  .brand {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex: none;
+    text-decoration: none;
+    color: var(--head);
+  }
+  .brand-mark {
+    font-size: 1.02rem;
+    font-weight: 680;
+    letter-spacing: -0.02em;
+  }
+  .brand-tag {
+    font-family: var(--mono);
+    font-size: 0.63rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    list-style: none;
+    margin-left: auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a {
+    display: block;
+    white-space: nowrap;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.885rem;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 120ms ease, background-color 120ms ease;
+  }
+  .nav-links a:hover { color: var(--fg); background: var(--sunk); }
+  .nav-links a[aria-current="page"] {
+    color: var(--head);
+    font-weight: 620;
+    box-shadow: inset 0 -2px 0 var(--blue);
+    border-radius: 6px 6px 0 0;
+  }
+  .nav-links .ext { width: 0.72em; height: 0.72em; opacity: 0.75; margin-left: 0.15em; }
+
+  /* Below ~32rem the four links scroll. Tighten the row first, so the
+     current-page marker stays on screen rather than off the right edge. */
+  @media (max-width: 32rem) {
+    .nav-in { gap: 0.5rem; }
+    .nav-links { gap: 0; }
+    .nav-links a { padding: 0.3rem 0.4rem; font-size: 0.84rem; }
+    .brand { gap: 0.35rem; }
+    .brand-tag { font-size: 0.58rem; letter-spacing: 0.07em; }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Sections
+   * ------------------------------------------------------------------ */
+  .section { padding-block: clamp(3.25rem, 6.5vw, 5.75rem); border-top: 1px solid var(--rule); }
+  .section:first-of-type { border-top: none; }
+
+  /* Heading rail on the left, content on the right. Grid items get min-width:0
+     so a long unbreakable line never widens the column. */
+  .sec-grid { display: grid; gap: 1.1rem; }
+  .sec-grid > * { min-width: 0; }
+  @media (min-width: 62rem) {
+    .sec-grid { grid-template-columns: 14rem minmax(0, 1fr); gap: 3.5rem; align-items: start; }
+  }
+  .sec-head .eyebrow { margin-bottom: 0.55rem; }
+  .sec-body > *:first-child { margin-top: 0; }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+    margin-bottom: 0.85rem;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 1.6rem;
+    height: 1px;
+    background: var(--rule-strong);
+  }
+  .lead {
+    font-size: 1.13rem;
     line-height: 1.5;
-    margin: 0 0 1.75rem;
+    color: var(--fg);
+    margin-top: 0.9rem;
+    max-width: 36rem;
+    text-wrap: pretty;
   }
-  .example .pair { margin: 0 0 0.85rem; overflow-wrap: anywhere; }
-  .example .pair:last-child { margin-bottom: 0; }
-  .example .old { display: block; color: var(--panel-old); }
-  .example .new { display: block; color: var(--panel-new); font-weight: 600; }
-  .example .new::before { content: "→ "; font-weight: 400; }
+  .body-text { color: var(--muted); margin-top: 0.9rem; max-width: 38rem; text-wrap: pretty; }
+  .body-text + .body-text { margin-top: 0.75rem; }
+  .note { color: var(--muted); font-size: 0.9rem; margin-top: 0.9rem; max-width: 38rem; }
+
+  /* ------------------------------------------------------------------ *
+   * Hero
+   * ------------------------------------------------------------------ */
+  .hero { padding-top: clamp(2.75rem, 5vw, 4.5rem); padding-bottom: clamp(2.5rem, 5vw, 4rem); }
+  .hero h1 { max-width: 12em; }
+  .hero-deck {
+    margin-top: 1.35rem;
+    max-width: 33rem;
+    font-size: 1.12rem;
+    line-height: 1.55;
+    color: var(--muted);
+    text-wrap: pretty;
+  }
+
+  .cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem 1.5rem;
+    margin-top: 2rem;
+  }
   .download {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
     background: var(--btn-bg);
     color: var(--btn-fg);
     text-decoration: none;
-    font-size: 1.05rem;
-    font-weight: 600;
-    padding: 0.85rem 1.75rem;
+    font-size: 1.02rem;
+    font-weight: 620;
+    letter-spacing: -0.01em;
+    padding: 0.85rem 1.6rem;
     border-radius: 8px;
+    transition: background-color 130ms ease;
   }
-  .download:hover { opacity: 0.9; }
-  .meta { color: var(--hero-muted); font-size: 0.9rem; margin: 0.85rem 0 0; }
-  .reqs { color: var(--hero-muted); font-size: 0.9rem; margin: 0.35rem 0 0; }
-  .guide-link { color: var(--hero-fg); font-weight: 600; text-underline-offset: 2px; }
+  .download:hover { background: var(--btn-bg-hover); }
+  .download .ico { width: 1.15em; height: 1.15em; stroke-width: 1.8; }
+  .cta-side { display: flex; flex-direction: column; gap: 0.2rem; }
+  .meta {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    letter-spacing: 0.01em;
+    color: var(--muted);
+  }
+  .cta-guide { font-size: 0.9rem; color: var(--muted); }
+  .cta-guide a { font-weight: 560; }
 
-  /* Body sections */
-  main .wrap { padding-top: 0.5rem; padding-bottom: 1rem; }
-  section { border-top: 1px solid var(--rule); margin-top: 2.5rem; padding-top: 1.75rem; }
-  section:first-child { border-top: none; margin-top: 1.5rem; }
-  h2 { font-size: 1.25rem; letter-spacing: -0.01em; color: var(--navy); margin: 0 0 1rem; }
-  @media (prefers-color-scheme: dark) { h2 { color: var(--fg); } }
-  .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
-  .steps li { position: relative; padding-left: 3rem; margin: 0 0 1.35rem; counter-increment: step; }
-  .steps li:last-child { margin-bottom: 0; }
-  .steps li::before {
-    content: counter(step);
-    position: absolute;
-    left: 0;
-    top: 0.1rem;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 50%;
-    background: var(--chip-bg);
-    color: var(--chip-fg);
-    font-weight: 700;
+  .specs {
+    display: grid;
+    gap: 1px;
+    margin-top: 2.25rem;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    list-style: none;
+    max-width: 52rem;
+  }
+  .specs li { padding: 0.85rem 0; }
+  .spec-k {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    margin-bottom: 0.15rem;
+  }
+  .spec-v { display: block; font-size: 0.93rem; line-height: 1.4; }
+  @media (min-width: 44rem) {
+    .specs { grid-template-columns: repeat(3, 1fr); gap: 0 2rem; }
+    .specs li + li { border-left: 1px solid var(--rule); padding-left: 2rem; margin-left: -1rem; }
+  }
+
+  /* ---- The signature: filename anatomy ---- */
+  .anatomy { margin-top: clamp(2.5rem, 5vw, 3.75rem); }
+  .anatomy svg { display: block; width: 100%; height: auto; }
+  .fig-wide { max-width: 61rem; }
+  .fig-narrow { max-width: 24rem; }
+  @media (min-width: 47rem) { .anatomy .fig-narrow { display: none; } }
+  @media (max-width: 46.999rem) { .anatomy .fig-wide { display: none; } }
+  .fig-cap {
+    margin-top: 1.1rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+    max-width: 34rem;
+    text-wrap: pretty;
+  }
+
+  /* Figure primitives, styled from CSS so both themes track the tokens. */
+  .f-card { fill: var(--fig-bg); stroke: var(--fig-rule); stroke-width: 1; }
+  .f-card-raw { fill: var(--sunk); stroke: var(--fig-rule); stroke-width: 1; stroke-dasharray: 4 4; }
+  .f-card-strong { fill: var(--fig-bg); stroke: var(--fig-strong); stroke-width: 1.5; }
+  .f-solid { fill: var(--fig-solid-bg); stroke: none; }
+  .f-line { fill: none; stroke: var(--fig-rule); stroke-width: 1.4; stroke-linecap: round; }
+  .f-arrow { fill: none; stroke: var(--fig-arrow); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .f-head { fill: var(--fig-arrow); stroke: none; }
+  .f-dash { fill: none; stroke: var(--fig-muted); stroke-width: 1.2; stroke-dasharray: 5 5; opacity: 0.75; }
+  .f-knock { fill: var(--fig-bg); stroke: none; }
+  .f-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; fill: var(--fig-muted); }
+  .f-micro { font-family: var(--mono); font-size: 9px; letter-spacing: 0.04em; fill: var(--fig-muted); }
+  .f-name { font-family: var(--mono); font-size: 15px; fill: var(--fig-ink); }
+  .f-name-sm { font-family: var(--mono); font-size: 14px; fill: var(--fig-ink); }
+  .f-box-t { font-family: var(--mono); font-size: 12px; fill: var(--fig-ink); }
+  .f-box-t-inv { font-family: var(--mono); font-size: 12px; fill: var(--fig-solid-fg); }
+  .f-raw { fill: var(--fig-muted); }
+  .t-date { fill: var(--seg-date); }
+  .t-type { fill: var(--seg-type); }
+  .t-party { fill: var(--seg-party); }
+  .u-date { fill: var(--seg-date); }
+  .u-type { fill: var(--seg-type); }
+  .u-party { fill: var(--seg-party); }
+  .tick { stroke-width: 1; fill: none; }
+  .tick-date { stroke: var(--seg-date); }
+  .tick-type { stroke: var(--seg-type); }
+  .tick-party { stroke: var(--seg-party); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+    .u-date, .u-type, .u-party {
+      transform-box: fill-box;
+      transform-origin: left center;
+      animation: seg-draw 520ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+    }
+    .u-type { animation-delay: 130ms; }
+    .u-party { animation-delay: 260ms; }
+    @keyframes seg-draw { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  }
+
+  /* ---- Before / after examples ---- */
+  .renames { list-style: none; margin-top: 2.25rem; max-width: 61rem; }
+  .renames-head {
+    display: none;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .renames li {
+    display: grid;
+    gap: 0.5rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: center;
+  }
+  .r-old, .r-new {
+    font-family: var(--mono);
+    font-size: 0.79rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+  .r-old { color: var(--muted); }
+  .r-new { color: var(--fg); }
+  .renames .ico { color: var(--fig-arrow); transform: rotate(90deg); }
+  @media (min-width: 47rem) {
+    .renames-head { display: grid; grid-template-columns: 1fr 2.5rem 1.35fr; gap: 1.5rem; }
+    .renames li { grid-template-columns: 1fr 2.5rem 1.35fr; gap: 1.5rem; }
+    .renames .ico { transform: none; justify-self: center; }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Pipeline (how it works)
+   * ------------------------------------------------------------------ */
+  .pipeline { list-style: none; display: grid; gap: 2.25rem; margin-top: 2.5rem; }
+  .step { position: relative; }
+  .step-node {
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 3.35rem;
+    height: 3.35rem;
+    border: 1px solid var(--rule-strong);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--head);
+    margin-bottom: 1.1rem;
   }
-  .steps strong { display: block; margin-bottom: 0.15rem; }
-  p { margin: 0 0 1rem; }
-  p:last-child { margin-bottom: 0; }
-  .aside { color: var(--muted); font-size: 0.9rem; }
-  .warning {
-    background: var(--warn-bg);
-    border: 1px solid var(--warn-rule);
-    border-radius: 8px;
+  .step-node .ico { width: 1.6rem; height: 1.6rem; stroke-width: 1.5; }
+  .step h3 { display: flex; align-items: baseline; gap: 0.6rem; }
+  .step .num {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  .step p { color: var(--muted); font-size: 0.96rem; margin-top: 0.5rem; }
+  .step-note { font-size: 0.88rem !important; margin-top: 0.45rem !important; }
+  .step-formats {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.65rem;
+  }
+  .step-formats li {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.1rem 0.35rem;
+  }
+  .step + .step::before {
+    content: "";
+    position: absolute;
+    background: var(--rule-strong);
+    left: 1.65rem;
+    top: -1.9rem;
+    width: 1px;
+    height: 1.6rem;
+  }
+  @media (min-width: 52rem) {
+    .pipeline { grid-template-columns: repeat(3, 1fr); gap: 2.75rem; }
+    .step + .step::before {
+      left: -2.75rem;
+      top: 1.65rem;
+      width: 2.75rem;
+      height: 1px;
+    }
+  }
+
+  .facts { list-style: none; margin-top: 2.5rem; border-top: 1px solid var(--rule); max-width: 52rem; }
+  .facts li { padding: 1.05rem 0; border-bottom: 1px solid var(--rule); }
+  .facts b { display: block; font-weight: 620; color: var(--head); }
+  .facts span { display: block; color: var(--muted); font-size: 0.95rem; margin-top: 0.15rem; }
+  @media (min-width: 44rem) {
+    .facts li { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 1.5rem; align-items: baseline; }
+    .facts span { margin-top: 0; }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Dark plate (privacy)
+   * ------------------------------------------------------------------ */
+  .plate {
+    --fg: var(--plate-fg);
+    --head: var(--plate-fg);
+    --muted: var(--plate-muted);
+    --rule: var(--plate-rule);
+    --rule-strong: var(--plate-rule);
+    --surface: var(--plate-surface);
+    --sunk: var(--plate-surface);
+    --link: #A9C4FA;
+    --focus: #A9C4FA;
+    --fig-bg: var(--plate-surface);
+    --fig-rule: #3B5285;
+    --fig-strong: #A9C4FA;
+    --fig-ink: var(--plate-fg);
+    --fig-muted: var(--plate-muted);
+    --fig-arrow: var(--plate-muted);
+    --fig-solid-bg: #A9C4FA;
+    --fig-solid-fg: #0B1120;
+    --accent: #E0B26A;
+    --accent-soft: #22314F;
+    --accent-rule: #4C5F8C;
+    background: var(--plate-bg);
+    color: var(--plate-fg);
+    border-bottom: 1px solid var(--rule);
+  }
+  .plate-cols { display: grid; gap: clamp(2rem, 4vw, 2.75rem); }
+  .plate-cols > * { min-width: 0; }
+  @media (min-width: 52rem) {
+    .plate-cols { grid-template-columns: minmax(0, 1fr) 17rem; align-items: start; }
+  }
+  .boundary { max-width: 20rem; }
+  .boundary svg { display: block; width: 100%; height: auto; }
+
+  .denials {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 1.1rem;
+  }
+  .denials li {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    color: var(--fg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.15rem 0.45rem;
+  }
+
+  .net { margin-top: 1.75rem; border-top: 1px solid var(--rule); max-width: 34rem; }
+  .net div { padding: 0.8rem 0; border-bottom: 1px solid var(--rule); }
+  .net dt { font-family: var(--mono); font-size: 0.83rem; color: var(--fg); }
+  .net dd { margin: 0.1rem 0 0; color: var(--muted); font-size: 0.92rem; }
+  @media (min-width: 34rem) {
+    .net div { display: grid; grid-template-columns: 12rem minmax(0, 1fr); gap: 1.25rem; align-items: baseline; }
+    .net dd { margin-top: 0; }
+  }
+
+  .callout {
+    display: flex;
+    gap: 0.85rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
     padding: 1rem 1.15rem;
-    margin: 0 0 1rem;
+    margin-top: 1.75rem;
+    max-width: 34rem;
   }
+  .callout .ico { margin-top: 0.28em; color: var(--muted); }
+  .callout p { font-size: 0.94rem; line-height: 1.55; }
+  .callout p + p { margin-top: 0.5rem; }
+
+  /* ------------------------------------------------------------------ *
+   * Provenance
+   * ------------------------------------------------------------------ */
+  .warn {
+    display: flex;
+    gap: 0.9rem;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-rule);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin-top: 1.75rem;
+    max-width: 40rem;
+  }
+  .warn .ico { margin-top: 0.25em; color: var(--accent); stroke-width: 1.8; }
+  .warn b { display: block; color: var(--head); }
+  .warn p { font-size: 0.95rem; line-height: 1.55; margin-top: 0.2rem; }
+
   pre {
     background: var(--code-bg);
     border: 1px solid var(--rule);
-    border-radius: 6px;
-    padding: 0.75rem 0.9rem;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
     overflow-x: auto;
-    font-size: 0.85rem;
-    margin: 0 0 1rem;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin: 1.5rem 0 0;
+    max-width: 40rem;
   }
-  footer { border-top: 1px solid var(--rule); margin-top: 2.5rem; padding: 1.5rem 0 3rem; color: var(--muted); font-size: 0.9rem; }
+  pre code { color: var(--fg); }
+
+  .cmp { width: 100%; max-width: 40rem; border-collapse: collapse; margin-top: 1.75rem; font-size: 0.93rem; }
+  .cmp caption {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    padding-bottom: 0.6rem;
+  }
+  .cmp th, .cmp td { text-align: left; padding: 0.7rem 0.75rem; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  .cmp thead th { border-bottom: 1px solid var(--rule-strong); color: var(--head); font-weight: 620; }
+  .cmp thead th:first-child { font-weight: 400; color: var(--muted); }
+  .cmp tbody th { font-weight: 400; color: var(--muted); padding-left: 0; }
+  .cmp td { text-align: center; width: 8.5rem; }
+  .cmp .yes { color: var(--blue); }
+  .cmp .no { color: var(--accent); }
+  .cmp .ico { width: 1.15rem; height: 1.15rem; stroke-width: 2; }
+  .cmp .cell { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; display: inline-flex; align-items: center; gap: 0.35rem; }
+  @media (prefers-color-scheme: dark) { .cmp .yes { color: #93B4F8; } }
+
+  /* ------------------------------------------------------------------ *
+   * Setup + updates
+   * ------------------------------------------------------------------ */
+  .stat {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-top: 1.75rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--rule);
+    max-width: 40rem;
+  }
+  .stat b {
+    font-size: clamp(1.9rem, 1.3rem + 2.2vw, 2.6rem);
+    font-weight: 620;
+    letter-spacing: -0.03em;
+    color: var(--head);
+    line-height: 1;
+  }
+  .stat span { font-size: 0.92rem; color: var(--muted); }
+
+  .end {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: clamp(2.5rem, 5vw, 3.5rem);
+    border-top: 1px solid var(--rule);
+  }
+  .end p { color: var(--muted); max-width: 32rem; font-size: 0.98rem; }
+  .end a { font-weight: 560; white-space: nowrap; }
+
+  /* ------------------------------------------------------------------ *
+   * Footer
+   * ------------------------------------------------------------------ */
+  .site-foot { border-top: 1px solid var(--rule); background: var(--sunk); }
+  .foot-in {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.75rem 2.5rem;
+    justify-content: space-between;
+    padding-block: 2.25rem 2.75rem;
+  }
+  .foot-mark { font-weight: 680; letter-spacing: -0.02em; color: var(--head); }
+  .foot-line { color: var(--muted); font-size: 0.9rem; margin-top: 0.35rem; }
+  .foot-copy { color: var(--muted); font-size: 0.82rem; margin-top: 0.15rem; }
+  .foot-nav ul { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+  .foot-nav a { font-size: 0.9rem; color: var(--muted); text-decoration: none; }
+  .foot-nav a:hover { color: var(--link); text-decoration: underline; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 </style>
 </head>
 <body>
-<header>
-  <div class="wrap">
-    <h1>Intern</h1>
-    <span class="tag">Built for Vistage</span>
-    <p class="pitch">Intern reads a document and tells you what to call it.</p>
 
-    <div class="example" aria-label="Example renames">
-      <div class="pair">
-        <span class="old">2026-04-09 - Statement of Work.pdf</span>
-        <span class="new">2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf</span>
-      </div>
-      <div class="pair">
-        <span class="old">2026-12-29 - notice.pdf</span>
-        <span class="new">2026-12-29 Notice of Termination - John Smith.pdf</span>
-      </div>
-      <div class="pair">
-        <span class="old">2025-02-14.pdf</span>
-        <span class="new">2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf</span>
-      </div>
-    </div>
+<a class="skip" href="#main">Skip to content</a>
 
-    <a class="download" id="download" href="https://github.com/zgbrenner/intern/releases/latest">
-      Download for Windows
+<svg aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-flow" viewBox="0 0 24 24"><circle cx="4.6" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19.4" cy="12" r="2.2"/><path d="M6.8 12h3M14.2 12h3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.2l7 2.9v5.6c0 4.1-2.9 7.2-7 9-4.1-1.8-7-4.9-7-9V6.1z"/><path d="M9.2 12l2 2 3.6-4"/></symbol>
+  <symbol id="i-seal" viewBox="0 0 24 24"><circle cx="12" cy="9.5" r="5.8"/><path d="M9.4 9.6l1.8 1.8 3.4-3.6"/><path d="M8.6 14.6V21l3.4-1.9 3.4 1.9v-6.4"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3v9.5"/><path d="M8.4 9.2L12 12.8l3.6-3.6"/><path d="M4 14.5V19a2 2 0 002 2h12a2 2 0 002-2v-4.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.4 12a7.4 7.4 0 11-2.3-5.3"/><path d="M19.6 4.4v4.2h-4.2"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4.2l8.4 14.9H3.6z"/><path d="M12 10v3.6"/><path d="M12 16.6h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.8 12.6l4.6 4.6L19.4 6.8"/></symbol>
+  <symbol id="i-cross" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15"/><path d="M13.6 6.6L19 12l-5.4 5.4"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-8.5 8.5"/><path d="M18 14.5V18a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2h3.5"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6 3h7.5L18 7.5V20a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M13.4 3.2v4.4h4.4"/><path d="M8 12.5h7M8 16h5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.6 12S6.2 6.2 12 6.2 21.4 12 21.4 12 17.8 17.8 12 17.8 2.6 12 2.6 12z"/><circle cx="12" cy="12" r="2.6"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7.2 18.4a4.2 4.2 0 01-.2-8.4 5.6 5.6 0 0110.7-1.2 3.9 3.9 0 01-.5 9.6z"/></symbol>
+</svg>
+
+<nav class="nav" aria-label="Primary">
+  <div class="shell nav-in">
+    <a class="brand" href="./">
+      <span class="brand-mark">Intern</span>
+      <span class="brand-tag">for Vistage</span>
     </a>
-    <p class="meta" id="meta">Fetching the latest release…</p>
-    <p class="reqs">Windows 10 or 11, x86-64. Installs per user — no administrator rights.</p>
-    <p class="reqs">New here? <a class="guide-link" href="guide.html">Read the guide</a> — installing, first
-    run, OneDrive and SharePoint, working as a team, and troubleshooting, all in plain language.</p>
+    <ul class="nav-links">
+      <li><a href="./" aria-current="page">Download</a></li>
+      <li><a href="./#how">How it works</a></li>
+      <li><a href="guide.html">Guide</a></li>
+      <li><a href="https://github.com/zgbrenner/intern" rel="noopener noreferrer">GitHub<svg class="ico ext" aria-hidden="true"><use href="#i-ext"/></svg></a></li>
+    </ul>
   </div>
-</header>
+</nav>
 
-<main>
-  <div class="wrap">
-    <section>
-      <h2>How it works</h2>
-      <ol class="steps">
+<main id="main">
+
+  <!-- ============================== HERO ============================== -->
+  <section class="section hero">
+    <div class="shell">
+      <p class="eyebrow">WINDOWS DESKTOP APP</p>
+      <h1>Intern reads a document and tells you what to call it.</h1>
+      <p class="hero-deck">
+        Drop in PDFs, Word files, spreadsheets, email and scans. Intern proposes
+        a filename, shows the passage that proves it, and renames nothing until
+        you approve.
+      </p>
+
+      <div class="cta-row">
+        <a class="download" id="download" href="https://github.com/zgbrenner/intern/releases/latest">
+          <svg class="ico" aria-hidden="true"><use href="#i-box"/></svg>
+          Download for Windows
+        </a>
+        <div class="cta-side">
+          <p class="meta" id="meta">Fetching the latest release…</p>
+          <p class="cta-guide">New here? <a href="guide.html">Read the guide</a></p>
+        </div>
+      </div>
+
+      <ul class="specs">
         <li>
-          <strong>Drop in documents.</strong>
-          PDFs, Word documents, Excel workbooks, emails, scanned images, plain
-          notes — drag them onto the window, or point Intern at a folder to watch.
+          <span class="spec-k">PLATFORM</span>
+          <span class="spec-v">Windows 10 or 11, x86-64</span>
         </li>
         <li>
-          <strong>Intern reads them on your machine.</strong>
-          It uses the document's real text first, and OCR only when a page has
-          none, then runs one AI model that lives entirely on your computer.
-          Every name it proposes comes with the exact passages from the document
-          that support it, and a confidence.
+          <span class="spec-k">INSTALL</span>
+          <span class="spec-v">Per user — no administrator rights</span>
         </li>
         <li>
-          <strong>You stay in charge.</strong>
-          Nothing on disk is renamed until you approve it. Anything Intern
-          cannot back up with evidence from the document goes to a review list
-          instead of being guessed at, and every rename can be undone.
+          <span class="spec-k">ACCOUNT</span>
+          <span class="spec-v">None. No sign-in, ever.</span>
+        </li>
+      </ul>
+
+      <!-- The signature figure: a filename, taken apart. -->
+      <figure class="anatomy">
+        <svg class="fig-wide" viewBox="0 0 880 148" role="img" aria-labelledby="anat-t anat-d">
+          <title id="anat-t">A messy filename becomes a descriptive one</title>
+          <desc id="anat-d">The file "2026-12-29 - notice.pdf" becomes "2026-12-29 Notice of Termination - John Smith.pdf", with the date, document type and party marked as separate parts of the name.</desc>
+
+          <text class="f-label" x="20" y="20">BEFORE</text>
+          <text class="f-label" x="380" y="20">AFTER</text>
+
+          <!-- raw file -->
+          <rect class="f-card-raw" x="20.5" y="32.5" width="299" height="103" rx="10"/>
+          <path class="f-line" d="M298 33v18h20"/>
+          <text class="f-name f-raw" x="46" y="76">2026-12-29 -</text>
+          <text class="f-name f-raw" x="46" y="98">notice.pdf</text>
+
+          <!-- transform -->
+          <path class="f-arrow" d="M334 84h30"/>
+          <path class="f-head" d="M370 84l-8-4.6v9.2z"/>
+
+          <!-- resolved file, taken apart -->
+          <rect class="f-card-strong" x="380.75" y="32.75" width="468.5" height="102.5" rx="10"/>
+          <path class="f-line" d="M828 33v18h20"/>
+
+          <text class="f-name t-date" x="404" y="64" textLength="86" lengthAdjust="spacingAndGlyphs">2026-12-29</text>
+          <text class="f-name t-type" x="498.6" y="64" textLength="180.6" lengthAdjust="spacingAndGlyphs">Notice of Termination</text>
+          <text class="f-name f-raw" x="687.8" y="64" textLength="8.6" lengthAdjust="spacingAndGlyphs">-</text>
+          <text class="f-name t-party" x="705" y="64" textLength="86" lengthAdjust="spacingAndGlyphs">John Smith</text>
+          <text class="f-name f-raw" x="791" y="64" textLength="34.4" lengthAdjust="spacingAndGlyphs">.pdf</text>
+
+          <rect class="u-date" x="404" y="72" width="86" height="2.5" rx="1.25"/>
+          <rect class="u-type" x="498.6" y="72" width="180.6" height="2.5" rx="1.25"/>
+          <rect class="u-party" x="705" y="72" width="86" height="2.5" rx="1.25"/>
+
+          <path class="tick tick-date" d="M447 80v16"/>
+          <path class="tick tick-type" d="M589 80v16"/>
+          <path class="tick tick-party" d="M748 80v16"/>
+
+          <text class="f-label" x="447" y="110" text-anchor="middle">DATE</text>
+          <text class="f-label" x="589" y="110" text-anchor="middle">DOCUMENT TYPE</text>
+          <text class="f-label" x="748" y="110" text-anchor="middle">PARTY</text>
+
+        </svg>
+
+        <svg class="fig-narrow" viewBox="0 0 360 372" role="img" aria-labelledby="anat-tn anat-dn">
+          <title id="anat-tn">A messy filename becomes a descriptive one</title>
+          <desc id="anat-dn">The file "2026-12-29 - notice.pdf" becomes "2026-12-29 Notice of Termination - John Smith.pdf", with the date, document type and party marked as separate parts of the name.</desc>
+
+          <text class="f-label" x="8" y="16">BEFORE</text>
+          <rect class="f-card-raw" x="8.5" y="28.5" width="343" height="83" rx="10"/>
+          <path class="f-line" d="M330 29v16h18"/>
+          <text class="f-name-sm f-raw" x="28" y="62">2026-12-29 -</text>
+          <text class="f-name-sm f-raw" x="28" y="86">notice.pdf</text>
+
+          <path class="f-arrow" d="M180 126v26"/>
+          <path class="f-head" d="M180 158l-4.6-8h9.2z"/>
+
+          <text class="f-label" x="8" y="176">AFTER</text>
+          <rect class="f-card-strong" x="8.75" y="188.75" width="342.5" height="174.5" rx="10"/>
+          <path class="f-line" d="M330 189v16h18"/>
+
+          <text class="f-name-sm t-date" x="28" y="220" textLength="80" lengthAdjust="spacingAndGlyphs">2026-12-29</text>
+          <text class="f-name-sm t-type" x="116" y="220" textLength="72" lengthAdjust="spacingAndGlyphs">Notice of</text>
+          <rect class="u-date" x="28" y="227" width="80" height="2.5" rx="1.25"/>
+          <rect class="u-type" x="116" y="227" width="72" height="2.5" rx="1.25"/>
+
+          <text class="f-name-sm t-type" x="28" y="262" textLength="88" lengthAdjust="spacingAndGlyphs">Termination</text>
+          <text class="f-name-sm f-raw" x="124" y="262" textLength="8" lengthAdjust="spacingAndGlyphs">-</text>
+          <text class="f-name-sm t-party" x="140" y="262" textLength="32" lengthAdjust="spacingAndGlyphs">John</text>
+          <rect class="u-type" x="28" y="269" width="88" height="2.5" rx="1.25"/>
+          <rect class="u-party" x="140" y="269" width="32" height="2.5" rx="1.25"/>
+
+          <text class="f-name-sm t-party" x="28" y="304" textLength="40" lengthAdjust="spacingAndGlyphs">Smith</text>
+          <text class="f-name-sm f-raw" x="68" y="304" textLength="32" lengthAdjust="spacingAndGlyphs">.pdf</text>
+          <rect class="u-party" x="28" y="311" width="40" height="2.5" rx="1.25"/>
+
+          <rect class="u-date" x="28" y="338" width="10" height="2.5" rx="1.25"/>
+          <text class="f-label" x="44" y="343">DATE</text>
+          <rect class="u-type" x="112" y="338" width="10" height="2.5" rx="1.25"/>
+          <text class="f-label" x="128" y="343">TYPE</text>
+          <rect class="u-party" x="196" y="338" width="10" height="2.5" rx="1.25"/>
+          <text class="f-label" x="212" y="343">PARTY</text>
+        </svg>
+
+        <figcaption class="fig-cap">
+          Every part of the proposed name is quoted from the document itself. If
+          a part cannot be quoted, the document goes to review instead.
+        </figcaption>
+      </figure>
+
+      <ul class="renames">
+        <li class="renames-head" aria-hidden="true">
+          <span>WHAT CAME IN</span><span></span><span>WHAT INTERN PROPOSED</span>
+        </li>
+        <li>
+          <span class="r-old">2026-04-09 - Statement of Work.pdf</span>
+          <svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg>
+          <span class="r-new">2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf</span>
+        </li>
+        <li>
+          <span class="r-old">2025-02-14.pdf</span>
+          <svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg>
+          <span class="r-new">2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================ HOW IT WORKS ======================== -->
+  <section class="section" id="how">
+    <div class="shell sec-grid">
+      <div class="sec-head">
+        <p class="eyebrow"><svg class="ico" aria-hidden="true"><use href="#i-flow"/></svg>PIPELINE</p>
+        <h2>How it works</h2>
+      </div>
+      <div class="sec-body">
+      <p class="lead">Three steps, and the last one is yours.</p>
+
+      <ol class="pipeline">
+        <li class="step">
+          <div class="step-node"><svg class="ico" aria-hidden="true"><use href="#i-doc"/></svg></div>
+          <h3><span class="num">01</span>Documents in</h3>
+          <p>Drag them onto the window, or point Intern at a folder to watch.</p>
+          <ul class="step-formats">
+            <li>PDF</li><li>WORD</li><li>EXCEL</li><li>EMAIL</li><li>TEXT</li><li>SCANS</li>
+          </ul>
+        </li>
+        <li class="step">
+          <div class="step-node"><svg class="ico" aria-hidden="true"><use href="#i-eye"/></svg></div>
+          <h3><span class="num">02</span>Read on your machine</h3>
+          <p>The document's own text first, and OCR only when a page has none.</p>
+          <p class="step-note">One AI model does the rest, on your computer.</p>
+        </li>
+        <li class="step">
+          <div class="step-node"><svg class="ico" aria-hidden="true"><use href="#i-check"/></svg></div>
+          <h3><span class="num">03</span>You approve</h3>
+          <p>Every proposal carries the passages that support it, and a confidence.</p>
+          <p class="step-note">Nothing on disk is renamed until you say so.</p>
         </li>
       </ol>
-    </section>
 
-    <section>
-      <h2>Private by design</h2>
-      <p>
-        Intern does its work on your computer, start to finish. Document text,
-        extracted pages, OCR output, and the prompts sent to the model never
-        leave the machine — no telemetry, no cloud fallback, no remote
-        processing.
-      </p>
-      <p>
-        It makes exactly two network requests, ever, and both happen only when
-        you press a button: the one-time download of the model file, and
-        <strong>Check for updates</strong> in Settings. Neither carries anything
-        about your documents.
-      </p>
-      <p>
-        Intern still works with OneDrive and SharePoint folders — through the
-        Microsoft sync client already on your machine, not a cloud API and not
-        an account. Intern reads and renames files in the synced folder on your
-        disk; the only thing moving them to the cloud is the sync client you
-        already run.
-      </p>
-    </section>
-
-    <section>
-      <h2>Before you run it</h2>
-      <div class="warning">
-        <p>
-          <strong>The installer is not Authenticode signed</strong>, because this
-          project has no code-signing certificate. Windows SmartScreen will call it
-          an unrecognized app; to continue, choose <strong>More info</strong> and
-          then <strong>Run anyway</strong>.
-        </p>
-        <p>
-          You should not take an unrecognized-app warning lightly — so verify the
-          download instead of trusting it. Every published installer carries a
-          keyless Sigstore build-provenance attestation naming the repository,
-          workflow, and commit that produced those exact bytes:
-        </p>
+      <ul class="facts">
+        <li>
+          <b>If it can't be proved, it isn't guessed</b>
+          <span>Anything Intern cannot back up with evidence from the document goes to a review list.</span>
+        </li>
+        <li>
+          <b>Every rename can be undone</b>
+          <span>Approve one document at a time, or apply all the ready ones at once.</span>
+        </li>
+        <li>
+          <b>Already filed? It says so</b>
+          <span>A document whose content Intern has filed before is flagged as a duplicate rather than renamed again.</span>
+        </li>
+      </ul>
       </div>
+    </div>
+  </section>
+
+  <!-- ============================== PRIVACY =========================== -->
+  <section class="section plate" id="privacy">
+    <div class="shell sec-grid">
+      <div class="sec-head">
+        <p class="eyebrow"><svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg>PRIVACY</p>
+        <h2>Private by design</h2>
+      </div>
+      <div class="sec-body plate-cols">
+      <div>
+        <p class="lead">Intern does its work on your computer, start to finish.</p>
+        <p class="body-text">
+          Document text, extracted pages, OCR output, and the prompts sent to the
+          model never leave the machine.
+        </p>
+        <ul class="denials">
+          <li>NO TELEMETRY</li>
+          <li>NO CLOUD FALLBACK</li>
+          <li>NO REMOTE PROCESSING</li>
+        </ul>
+
+        <dl class="net">
+          <div>
+            <dt>Model file</dt>
+            <dd>Downloaded once, when you ask for it.</dd>
+          </div>
+          <div>
+            <dt>Check for updates</dt>
+            <dd>Only when you press the button in Settings.</dd>
+          </div>
+        </dl>
+        <p class="note">Those are the only two network requests Intern makes, ever. Neither carries anything about your documents.</p>
+
+        <div class="callout">
+          <svg class="ico" aria-hidden="true"><use href="#i-cloud"/></svg>
+          <div>
+            <p><strong>OneDrive and SharePoint still work.</strong></p>
+            <p>Through the Microsoft sync client already on your machine — not a
+            cloud API, and not an account.</p>
+            <p><a href="guide.html#onedrive">How that works</a></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="boundary">
+        <svg viewBox="0 0 420 394" role="img" aria-labelledby="bnd-t bnd-d">
+          <title id="bnd-t">What crosses the boundary of your machine</title>
+          <desc id="bnd-d">Your documents, text extraction, OCR and the AI model all sit inside your machine. Only two arrows cross the boundary: the one-time model file download, and the update check you trigger yourself.</desc>
+
+          <rect class="f-card" x="140.5" y="8.5" width="139" height="29" rx="14.5"/>
+          <text class="f-label" x="210" y="27" text-anchor="middle">THE INTERNET</text>
+
+          <path class="f-arrow" d="M160 44v42"/>
+          <path class="f-head" d="M160 92l-4.6-8h9.2z"/>
+          <text class="f-label" x="150" y="62" text-anchor="end">MODEL FILE</text>
+          <text class="f-micro" x="150" y="76" text-anchor="end">once, when you ask</text>
+
+          <path class="f-arrow" d="M260 92v-42"/>
+          <path class="f-head" d="M260 44l-4.6 8h9.2z"/>
+          <text class="f-label" x="270" y="62">UPDATE CHECK</text>
+          <text class="f-micro" x="270" y="76">only when you press it</text>
+
+          <rect class="f-dash" x="10.5" y="96.5" width="399" height="285" rx="14"/>
+          <rect class="f-knock" x="26" y="88" width="100" height="15"/>
+          <text class="f-label" x="32" y="100">YOUR MACHINE</text>
+
+          <rect class="f-card" x="80.5" y="124.5" width="259" height="43" rx="8"/>
+          <text class="f-box-t" x="210" y="151" text-anchor="middle">Your documents</text>
+          <path class="f-arrow" d="M210 168v10"/>
+          <path class="f-head" d="M210 182l-4.6-8h9.2z"/>
+
+          <rect class="f-card" x="80.5" y="182.5" width="259" height="43" rx="8"/>
+          <text class="f-box-t" x="210" y="209" text-anchor="middle">Text, then OCR</text>
+          <path class="f-arrow" d="M210 226v10"/>
+          <path class="f-head" d="M210 240l-4.6-8h9.2z"/>
+
+          <rect class="f-card" x="80.5" y="240.5" width="259" height="43" rx="8"/>
+          <text class="f-box-t" x="210" y="267" text-anchor="middle">The AI model</text>
+          <path class="f-arrow" d="M210 284v10"/>
+          <path class="f-head" d="M210 298l-4.6-8h9.2z"/>
+
+          <rect class="f-solid" x="80" y="298" width="260" height="44" rx="8"/>
+          <text class="f-box-t-inv" x="210" y="325" text-anchor="middle">A proposed name</text>
+
+          <text class="f-micro" x="210" y="366" text-anchor="middle">nothing else crosses this line</text>
+        </svg>
+      </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= PROVENANCE ========================= -->
+  <section class="section" id="trust">
+    <div class="shell sec-grid">
+      <div class="sec-head">
+        <p class="eyebrow"><svg class="ico" aria-hidden="true"><use href="#i-seal"/></svg>PROVENANCE</p>
+        <h2>Before you run it</h2>
+      </div>
+      <div class="sec-body">
+      <p class="lead">Windows will call this an unrecognized app. Here is why, and what to do about it.</p>
+
+      <div class="warn">
+        <svg class="ico" aria-hidden="true"><use href="#i-warn"/></svg>
+        <div>
+          <b>The installer is not Authenticode signed.</b>
+          <p>This project has no code-signing certificate, so SmartScreen shows
+          “Windows protected your PC”. Choose <strong>More info</strong>, then
+          <strong>Run anyway</strong>.</p>
+        </div>
+      </div>
+
+      <p class="body-text">
+        You should not take an unrecognized-app warning lightly. Verify the
+        download instead of trusting it.
+      </p>
+      <p class="body-text">
+        Every published installer carries a keyless Sigstore build-provenance
+        attestation naming the repository, workflow, and commit that produced
+        those exact bytes.
+      </p>
+
       <pre><code id="verify">gh attestation verify Intern_x64-setup.exe --repo zgbrenner/intern</code></pre>
-      <p class="aside">
-        <code>SHA256SUMS.txt</code> is published beside the installer and catches a
-        corrupted download, but it proves nothing about origin — it sits on the
-        same page as the installer. The attestation is the part that establishes
-        where the file came from.
-      </p>
-    </section>
 
-    <section>
-      <h2>First run</h2>
-      <p>
-        The first time you open it, Intern asks to download the one thing the
-        installer deliberately leaves out: the AI model file, 1.19&nbsp;GiB. The
-        download is resumable, and the file becomes active only after its exact
-        length and SHA-256 match the manifest built into the installer. Already
-        have the file? <strong>Choose existing model files</strong> points
-        Intern at it. Nothing else needs installing — PDF text extraction, OCR,
-        and inference all ship inside the app.
+      <table class="cmp">
+        <caption>WHAT EACH ONE ACTUALLY PROVES</caption>
+        <thead>
+          <tr>
+            <th scope="col"></th>
+            <th scope="col">SHA256SUMS.txt</th>
+            <th scope="col">Attestation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Catches a corrupted download</th>
+            <td><span class="cell yes"><svg class="ico" aria-hidden="true"><use href="#i-check"/></svg>YES</span></td>
+            <td><span class="cell yes"><svg class="ico" aria-hidden="true"><use href="#i-check"/></svg>YES</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Proves where the file came from</th>
+            <td><span class="cell no"><svg class="ico" aria-hidden="true"><use href="#i-cross"/></svg>NO</span></td>
+            <td><span class="cell yes"><svg class="ico" aria-hidden="true"><use href="#i-check"/></svg>YES</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="note">
+        <code>SHA256SUMS.txt</code> sits on the same page as the installer, so it
+        proves nothing about origin. The attestation is the part that does.
       </p>
-    </section>
+      </div>
+    </div>
+  </section>
 
-    <section>
-      <h2>Updates</h2>
-      <p>
-        Intern checks for updates from <strong>Settings → Check for
-        updates</strong>, only when you ask. There is no background poll and no
-        timer. An update is installed only if it is signed by this project's
-        key; anything else is refused.
+  <!-- ============================== FIRST RUN ========================= -->
+  <section class="section" id="setup">
+    <div class="shell sec-grid">
+      <div class="sec-head">
+        <p class="eyebrow"><svg class="ico" aria-hidden="true"><use href="#i-box"/></svg>SETUP</p>
+        <h2>First run</h2>
+      </div>
+      <div class="sec-body">
+      <p class="lead">The installer deliberately leaves out one thing: the model.</p>
+
+      <div class="stat">
+        <b>1.19 GiB</b>
+        <span>the AI model file, downloaded once on first launch</span>
+      </div>
+
+      <ul class="facts">
+        <li>
+          <b>Resumable</b>
+          <span>If the connection drops, reopen Intern and it continues where it stopped.</span>
+        </li>
+        <li>
+          <b>Verified before use</b>
+          <span>The file becomes active only after its exact length and SHA-256 match the manifest built into the installer.</span>
+        </li>
+        <li>
+          <b>Already have it?</b>
+          <span><strong>Choose existing model files</strong> points Intern at a copy from another machine and skips the download.</span>
+        </li>
+      </ul>
+
+      <p class="note">Nothing else needs installing. PDF text extraction, OCR, and inference all ship inside the app.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================== UPDATES ========================== -->
+  <section class="section" id="updates">
+    <div class="shell sec-grid">
+      <div class="sec-head">
+        <p class="eyebrow"><svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg>UPDATES</p>
+        <h2>Updates, only when you ask</h2>
+      </div>
+      <div class="sec-body">
+      <p class="lead">Settings → Check for updates. There is no background poll and no timer.</p>
+      <p class="body-text">
+        An update is installed only if it is signed by this project's key.
+        Anything else is refused.
       </p>
-    </section>
+      </div>
+    </div>
+  </section>
+
+  <div class="shell">
+    <div class="end">
+      <p>
+        The guide covers everything you will actually run into: installing, first
+        run, OneDrive and SharePoint, watched folders, working as a team, and
+        troubleshooting.
+      </p>
+      <p><a href="guide.html">Open the guide <svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
+    </div>
   </div>
+
 </main>
 
-<footer>
-  <div class="wrap">
-    <a href="https://github.com/zgbrenner/intern">Source, documentation, and every past release on GitHub</a>
-    · <a href="guide.html">Guide &amp; troubleshooting</a>
-    · Built for Vistage Worldwide
+<footer class="site-foot">
+  <div class="shell foot-in">
+    <div>
+      <p class="foot-mark">Intern</p>
+      <p class="foot-line">Intern is a Vistage Worldwide tool.</p>
+      <p class="foot-copy">© 2026 Vistage Worldwide, Inc. All rights reserved.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer">
+      <ul>
+        <li><a href="./">Download</a></li>
+        <li><a href="guide.html">Guide</a></li>
+        <li><a href="https://github.com/zgbrenner/intern" rel="noopener noreferrer">GitHub</a></li>
+      </ul>
+    </nav>
   </div>
 </footer>
 

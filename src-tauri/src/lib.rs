@@ -9,6 +9,10 @@ pub mod tray;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Opens the published user guide in the system browser. A webview
+        // <a target="_blank"> has nowhere to go inside Tauri, and the scope in
+        // capabilities/default.json admits only the guide's own origin.
+        .plugin(tauri_plugin_opener::init())
         // Autostart entries launch Intern with "--minimized" so a sign-in
         // launch can go straight to the tray (when background mode allows it)
         // instead of opening a window nobody asked for. macOS keeps the

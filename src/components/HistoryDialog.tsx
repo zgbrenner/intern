@@ -92,7 +92,7 @@ export function HistoryDialog({ bridge, selection, onClose }: Props) {
   };
 
   return <div className="dialog-backdrop" role="presentation"><section ref={dialog} className="settings-dialog history-dialog" role="dialog" aria-modal="true" aria-label="Rename history">
-    <div className="inspector-title"><h2>Rename history</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Close history"><Icon icon={X} /></button></div>
+    <div className="dialog-head"><h2>Rename history</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Close history"><Icon icon={X} /></button></div>
     <p className="update-note">Every rename and undo Intern has applied, newest first.</p>
     {loadError && <p className="form-error" role="alert">{loadError}</p>}
     {entries && entries.length === 0 && !loadError && <p className="history-empty">No renames yet.</p>}
