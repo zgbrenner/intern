@@ -82,17 +82,25 @@ pub fn digest_contains_date(digest: &DocumentDigest, iso_date: &str) -> bool {
 /// True when the ISO date is written, in some ordinary human form, inside the
 /// given text.
 pub fn date_matches_evidence(iso_date: &str, excerpt: &str) -> bool {
+    !date_match_positions(iso_date, &normalize(excerpt)).is_empty()
+}
+
+/// Byte offsets in `normalized` (already `normalize`d text) where a spelling
+/// of `iso_date` begins. Every offset is a real statement of that date; a
+/// caller judging context - what wording introduces the date - needs all of
+/// them, because one date can be stated twice on a line in different roles.
+pub fn date_match_positions(iso_date: &str, normalized: &str) -> Vec<usize> {
     if iso_date.len() != 10 {
-        return false;
+        return Vec::new();
     }
     let year = &iso_date[0..4];
     let month = &iso_date[5..7];
     let day = &iso_date[8..10];
     let Ok(month_number) = month.parse::<usize>() else {
-        return false;
+        return Vec::new();
     };
     if !(1..=12).contains(&month_number) {
-        return false;
+        return Vec::new();
     }
     let month_name = [
         "january",
@@ -111,7 +119,6 @@ pub fn date_matches_evidence(iso_date: &str, excerpt: &str) -> bool {
     let month_unpadded = month.trim_start_matches('0');
     let day_unpadded = day.trim_start_matches('0');
     let ordinal = ordinal_suffix(day_unpadded);
-    let normalized = normalize(excerpt);
 
     let mut candidates = vec![
         iso_date.to_owned(),
@@ -150,9 +157,20 @@ pub fn date_matches_evidence(iso_date: &str, excerpt: &str) -> bool {
             ));
         }
     }
-    candidates
-        .iter()
-        .any(|candidate| normalized.contains(&normalize(candidate)))
+    let mut positions = Vec::new();
+    for candidate in &candidates {
+        let candidate = normalize(candidate);
+        let mut from = 0;
+        while let Some(found) = normalized[from..].find(&candidate) {
+            let position = from + found;
+            if !positions.contains(&position) {
+                positions.push(position);
+            }
+            from = position + 1;
+        }
+    }
+    positions.sort_unstable();
+    positions
 }
 
 fn ordinal_suffix(day: &str) -> &'static str {
@@ -272,5 +290,160 @@ mod tests {
         assert!(!is_valid_iso_date("2025-02-29"));
         assert!(!is_valid_iso_date("2026-13-01"));
         assert!(!is_valid_iso_date("2026-4-1"));
+    }
+}
+
+/// Every ISO date a line states with a written month, a hyphenated written
+/// month, or ISO/slash notation. Purely numeric forms like `3/4/2026` are
+/// deliberately not extracted: without the document's locale they are
+/// ambiguous, and this feeds a substitution that must never guess.
+pub fn extract_stated_dates(line: &str) -> Vec<String> {
+    const MONTHS: [&str; 12] = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ];
+    fn month_number(token: &str) -> Option<usize> {
+        let token = token.trim_end_matches('.');
+        MONTHS.iter().position(|month| {
+            *month == token
+                || (token.len() >= 3 && month.len() > token.len() && month.starts_with(token))
+        })
+    }
+    fn day_number(token: &str) -> Option<u32> {
+        let digits = token.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+        let day = digits.parse::<u32>().ok()?;
+        ((1..=31).contains(&day) && digits.len() <= 2).then_some(day)
+    }
+    fn year_number(token: &str) -> Option<u32> {
+        let token = token.trim_end_matches('.');
+        let year = token.parse::<u32>().ok()?;
+        ((1000..=2999).contains(&year) && token.len() == 4).then_some(year)
+    }
+    fn push(found: &mut Vec<String>, year: u32, month: usize, day: u32) {
+        let iso = format!("{year:04}-{:02}-{day:02}", month + 1);
+        if is_valid_iso_date(&iso) && !found.contains(&iso) {
+            found.push(iso);
+        }
+    }
+
+    let normalized = normalize(line);
+    let tokens: Vec<&str> = normalized
+        .split_whitespace()
+        .map(|token| {
+            token.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '(' | ')' | '"' | '\''))
+        })
+        .collect();
+    let mut found = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        // ISO 2026-04-01 and slashed 2026/04/01, possibly ending a sentence.
+        let bare = token.trim_end_matches('.');
+        if bare.len() == 10 && (bare.as_bytes()[4] == b'-' || bare.as_bytes()[4] == b'/') {
+            let iso = bare.replace('/', "-");
+            if is_valid_iso_date(&iso) && !found.contains(&iso) {
+                found.push(iso);
+            }
+            continue;
+        }
+        // Hyphenated written month: 2-june-2023 or june-2-2023.
+        let parts: Vec<&str> = bare.split('-').collect();
+        if parts.len() == 3 {
+            if let (Some(month), Some(day), Some(year)) = (
+                month_number(parts[1]),
+                day_number(parts[0]),
+                year_number(parts[2]),
+            ) {
+                push(&mut found, year, month, day);
+                continue;
+            }
+            if let (Some(month), Some(day), Some(year)) = (
+                month_number(parts[0]),
+                day_number(parts[1]),
+                year_number(parts[2]),
+            ) {
+                push(&mut found, year, month, day);
+                continue;
+            }
+        }
+        let Some(month) = month_number(bare) else {
+            continue;
+        };
+        // "june 2, 2023" / "june 2 2023" / "june 2nd, 2023"
+        if let (Some(Some(day)), Some(Some(year))) = (
+            tokens.get(index + 1).map(|t| day_number(t)),
+            tokens.get(index + 2).map(|t| year_number(t)),
+        ) {
+            push(&mut found, year, month, day);
+            continue;
+        }
+        // "2 june 2023" and "2nd day of june, 2023"
+        let day_before = index
+            .checked_sub(1)
+            .and_then(|i| day_number(tokens[i]))
+            .or_else(|| {
+                index.checked_sub(3).and_then(|i| {
+                    (tokens[i + 1] == "day" && tokens[i + 2] == "of")
+                        .then(|| day_number(tokens[i]))
+                        .flatten()
+                })
+            });
+        if let (Some(day), Some(Some(year))) =
+            (day_before, tokens.get(index + 1).map(|t| year_number(t)))
+        {
+            push(&mut found, year, month, day);
+        }
+    }
+    found
+}
+
+#[cfg(test)]
+mod stated_date_tests {
+    use super::extract_stated_dates;
+
+    #[test]
+    fn extracts_the_written_and_iso_shapes_documents_use() {
+        assert_eq!(
+            extract_stated_dates("Issued under the Master Services Agreement dated June 2, 2023"),
+            vec!["2023-06-02".to_owned()]
+        );
+        assert_eq!(
+            extract_stated_dates(
+                "This Statement of Work is effective as of April 1, 2026 and continues"
+            ),
+            vec!["2026-04-01".to_owned()]
+        );
+        assert_eq!(
+            extract_stated_dates("Delivered 3 March 2026."),
+            vec!["2026-03-03".to_owned()]
+        );
+        assert_eq!(
+            extract_stated_dates("signed this 2nd day of June, 2023"),
+            vec!["2023-06-02".to_owned()]
+        );
+        assert_eq!(
+            extract_stated_dates("Due on 2026-04-01."),
+            vec!["2026-04-01".to_owned()]
+        );
+        assert_eq!(
+            extract_stated_dates("filed 2-June-2023"),
+            vec!["2023-06-02".to_owned()]
+        );
+    }
+
+    #[test]
+    fn never_guesses_at_ambiguous_or_broken_shapes() {
+        assert!(extract_stated_dates("due 3/4/2026").is_empty());
+        assert!(extract_stated_dates("Invoice 2026 covers May and June").is_empty());
+        assert!(extract_stated_dates("February 30, 2026 is not a date").is_empty());
+        assert!(extract_stated_dates("see section 4, page 2023").is_empty());
     }
 }

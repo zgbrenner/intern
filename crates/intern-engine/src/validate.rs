@@ -10,7 +10,10 @@ use crate::domain::{
     ModelProposal, PartyRelation, ProposalStatus, ReviewReason, ValidatedProposal,
     ValidationOutcome,
 };
-use crate::evidence::{digest_contains, digest_contains_date, is_valid_iso_date, normalize};
+use crate::evidence::{
+    date_match_positions, digest_contains, digest_contains_date, extract_stated_dates,
+    is_valid_iso_date, normalize,
+};
 
 /// Below this self-reported confidence a proposal goes to review even when
 /// every literal check passed.
@@ -38,7 +41,8 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
         push(&mut reasons, ReviewReason::TypeMissing);
     }
 
-    let (document_date, date_role, date_supported) = validate_date(&candidate, digest);
+    let (document_date, date_role, date_supported, date_evidence_override) =
+        validate_date(&candidate, digest);
     if !date_supported {
         push(&mut reasons, ReviewReason::DateUnsupported);
     }
@@ -89,7 +93,13 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
             party_relation,
             description,
             confidence: candidate.confidence,
-            evidence: candidate.evidence,
+            evidence: {
+                let mut evidence = candidate.evidence;
+                if let Some(line) = date_evidence_override {
+                    evidence.date = Some(line);
+                }
+                evidence
+            },
         },
         status,
         reasons,
@@ -143,20 +153,123 @@ fn validate_document_type(
 fn validate_date(
     candidate: &ModelProposal,
     digest: &DocumentDigest,
-) -> (Option<String>, Option<crate::domain::DateRole>, bool) {
+) -> (
+    Option<String>,
+    Option<crate::domain::DateRole>,
+    bool,
+    Option<String>,
+) {
     let Some(date) = candidate
         .document_date
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
-        return (None, None, true);
+        return (None, None, true, None);
     };
     if !is_valid_iso_date(date) || !digest_contains_date(digest, date) {
-        return (None, None, false);
+        return (None, None, false, None);
     }
-    (Some(date.to_owned()), candidate.date_role, true)
+    // A date the document states only while naming ANOTHER agreement -
+    // "Issued under the Master Services Agreement dated June 2, 2023" - is
+    // that other document's date, and must never become this filename's date.
+    // The model is told this and usually complies, but greedy decoding is not
+    // hardware-deterministic and the two candidates can sit a rounding error
+    // apart, so the guarantee lives here, where nothing wobbles: if the
+    // document states exactly one other date on an effective/commencement
+    // line, that date is the answer; otherwise the document goes to review.
+    let lines: Vec<&str> = digest
+        .segments
+        .iter()
+        .flat_map(|segment| segment.lines())
+        .collect();
+    let mut stated = false;
+    let mut tainted = true;
+    for line in &lines {
+        let normalized = normalize(line);
+        for position in date_match_positions(date, &normalized) {
+            stated = true;
+            if !reference_introduced(&normalized, position) {
+                tainted = false;
+            }
+        }
+    }
+    let tainted = stated && tainted;
+    if tainted {
+        let mut alternates: Vec<(String, String)> = Vec::new();
+        for line in &lines {
+            let normalized = normalize(line);
+            if !EFFECTIVE_CUES.iter().any(|cue| normalized.contains(cue)) {
+                continue;
+            }
+            for found in extract_stated_dates(line) {
+                if found == *date || alternates.iter().any(|(existing, _)| *existing == found) {
+                    continue;
+                }
+                let clean = date_match_positions(&found, &normalized)
+                    .iter()
+                    .any(|&position| !reference_introduced(&normalized, position));
+                if clean {
+                    alternates.push((found, line.trim().to_owned()));
+                }
+            }
+        }
+        if let [(alternate, line)] = alternates.as_slice() {
+            return (
+                Some(alternate.clone()),
+                Some(crate::domain::DateRole::Effective),
+                true,
+                Some(line.clone()),
+            );
+        }
+        return (None, None, false, None);
+    }
+    (Some(date.to_owned()), candidate.date_role, true, None)
 }
+
+/// Whether the wording immediately before a date's occurrence marks it as
+/// ANOTHER document's date. Judged per occurrence, not per line, because one
+/// line can state two dates in two roles: "...Amendment to the Consulting
+/// Agreement dated September 1, 2020, is entered into as of September 14,
+/// 2025" references the first date and owns the second.
+///
+/// "dated" directly before the occurrence is the referencing construction -
+/// "the Master Services Agreement dated June 2, 2023" - unless the naming
+/// phrase begins with "this", which is how a document dates itself.
+fn reference_introduced(normalized: &str, position: usize) -> bool {
+    const NEAR: usize = 12;
+    const WIDE: usize = 48;
+    fn window(normalized: &str, position: usize, span: usize) -> &str {
+        let mut start = position.saturating_sub(span);
+        while !normalized.is_char_boundary(start) {
+            start -= 1;
+        }
+        &normalized[start..position]
+    }
+    if window(normalized, position, NEAR).contains("dated") {
+        // "dated" only references another document when a document noun
+        // introduces it - "the Master Services Agreement dated June 2, 2023".
+        // A bare "Dated January 8, 2025" on a title block is the document
+        // dating itself, and "This Agreement dated ..." is too.
+        let wide = window(normalized, position, WIDE);
+        let names_a_document = ["agreement", "contract", "order", "amendment", "memorandum"]
+            .iter()
+            .any(|noun| wide.contains(noun));
+        return names_a_document && !wide.contains("this ");
+    }
+    ["issued under", "pursuant to", "as amended", "amending "]
+        .iter()
+        .any(|cue| window(normalized, position, WIDE).contains(cue))
+}
+
+const EFFECTIVE_CUES: &[&str] = &[
+    "effective",
+    "commencement",
+    "commencing",
+    "start date",
+    "in force",
+    "entered into",
+];
 
 /// A party is accepted when its name appears verbatim in the document.
 fn validate_parties(candidate: &ModelProposal, digest: &DocumentDigest) -> (Vec<String>, bool) {
@@ -340,6 +453,138 @@ its deliverables, and its fees.\n";
             Some("2026-04-01")
         );
         assert_eq!(outcome.proposal.parties.len(), 2);
+    }
+
+    const REFERENCING_DOCUMENT: &str = "STATEMENT OF WORK
+
+Issued under the Master Services Agreement dated June 2, 2023
+
+Capitalized terms have the meanings given to them in the Master Services
+Agreement dated June 2, 2023 between the same parties.
+
+This Statement of Work is effective as of April 1, 2026 and continues
+by and between Acme Corporation and Vistage Worldwide, Inc.
+";
+
+    /// Greedy decoding is not hardware-deterministic, and the corpus showed a
+    /// run filing this exact shape under the referenced agreement's date. The
+    /// guard is code so it cannot wobble.
+    #[test]
+    fn a_date_stated_only_beside_another_agreements_name_is_replaced_by_the_effective_date() {
+        let mut candidate = proposal();
+        candidate.document_date = Some("2023-06-02".into());
+        candidate.evidence.date =
+            Some("Issued under the Master Services Agreement dated June 2, 2023".into());
+        let outcome = validate(candidate, &digest_of(REFERENCING_DOCUMENT));
+        assert_eq!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2026-04-01"),
+            "{:?}",
+            outcome.reasons
+        );
+        assert_eq!(outcome.proposal.date_role, Some(DateRole::Effective));
+        assert_eq!(
+            outcome.proposal.evidence.date.as_deref(),
+            Some("This Statement of Work is effective as of April 1, 2026 and continues"),
+            "the evidence must be the line the substituted date actually stands on"
+        );
+        assert!(!outcome.reasons.contains(&ReviewReason::DateUnsupported));
+    }
+
+    #[test]
+    fn a_referenced_date_with_two_effective_candidates_goes_to_review_not_to_a_guess() {
+        let document = REFERENCING_DOCUMENT.replace(
+            "and continues",
+            "and continues
+with services commencing on October 1, 2026",
+        );
+        let mut candidate = proposal();
+        candidate.document_date = Some("2023-06-02".into());
+        let outcome = validate(candidate, &digest_of(&document));
+        assert!(outcome.proposal.document_date.is_none());
+        assert!(outcome.reasons.contains(&ReviewReason::DateUnsupported));
+    }
+
+    /// One line, two dates, two roles: the referenced contract's and the
+    /// amendment's own. The first guard version tainted whole lines and threw
+    /// away the amendment's real date; this pins the per-occurrence judgment.
+    #[test]
+    fn an_amendments_own_date_survives_sharing_a_line_with_the_referenced_contracts() {
+        let document = "FIRST AMENDMENT
+
+This First Amendment to the Consulting Agreement dated September 1, 2020,
+is entered into as of September 14, 2025 by Acme Corporation and
+Vistage Worldwide, Inc. The work covers the 2026 CRM implementation.
+";
+        let mut candidate = proposal();
+        candidate.document_date = Some("2025-09-14".into());
+        candidate.date_role = Some(DateRole::Amendment);
+        candidate.evidence.date = Some("is entered into as of September 14, 2025".into());
+        let outcome = validate(candidate, &digest_of(document));
+        assert_eq!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2025-09-14"),
+            "{:?}",
+            outcome.reasons
+        );
+        assert_eq!(outcome.proposal.date_role, Some(DateRole::Amendment));
+
+        // And the mirror image: choosing the referenced contract's date is
+        // redirected to the amendment's own.
+        let mut candidate = proposal();
+        candidate.document_date = Some("2020-09-01".into());
+        let outcome = validate(candidate, &digest_of(document));
+        assert_eq!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2025-09-14"),
+            "{:?}",
+            outcome.reasons
+        );
+    }
+
+    /// mixed-signature.pdf dates itself with a bare title-block line, and the
+    /// first per-occurrence guard read its "Dated" as a reference and threw
+    /// the date away.
+    #[test]
+    fn a_bare_title_block_dated_line_is_the_documents_own_date() {
+        let document = "SERVICES AGREEMENT
+Dated January 8, 2025
+
+Acme Corporation and Vistage Worldwide, Inc.
+
+The work covers the 2026 CRM implementation, its deliverables, and fees.
+";
+        let mut candidate = proposal();
+        candidate.document_date = Some("2025-01-08".into());
+        candidate.date_role = Some(DateRole::Execution);
+        candidate.evidence.date = Some("Dated January 8, 2025".into());
+        let outcome = validate(candidate, &digest_of(document));
+        assert_eq!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2025-01-08"),
+            "{:?}",
+            outcome.reasons
+        );
+    }
+
+    #[test]
+    fn a_date_the_document_also_states_on_its_own_line_is_left_alone() {
+        // The chosen date appears both beside the reference and on a plain
+        // line of its own, so nothing here says it belongs to another document.
+        let document = format!(
+            "{REFERENCING_DOCUMENT}
+Countersigned June 2, 2023.
+"
+        );
+        let mut candidate = proposal();
+        candidate.document_date = Some("2023-06-02".into());
+        candidate.date_role = Some(DateRole::Execution);
+        let outcome = validate(candidate, &digest_of(&document));
+        assert_eq!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2023-06-02")
+        );
+        assert_eq!(outcome.proposal.date_role, Some(DateRole::Execution));
     }
 
     #[test]
