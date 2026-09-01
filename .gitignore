@@ -16,3 +16,7 @@ fixtures/generated/
 src-tauri/resources/licenses/
 src-tauri/resources/tessdata/
 src-tauri/resources/native/
+
+# Local agent tooling state: session-scoped scratch, never release input.
+.crux/
+.omc/
