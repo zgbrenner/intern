@@ -1,6 +1,0 @@
-{
- "ts": "2026-09-01T21:10:29+00:00",
- "session_id": "52869697-0045-48bc-84ea-06254b7a3fc3",
- "summary": "**PR #19 merged** \u2014 all three checks green, license now consistent across `LICENSE`, `Cargo.toml`, README, and both site footers.\n\nAlpha.6 version bump underway (14 version-pinned surfaces plus the two that fail the release closed if missed, and real release notes covering the design pass, Help & support, the two status bugs, and the licensing clarification).\n\nThen: PR + CI \u2192 merge \u2192 final QA run at that commit \u2192 sign-off on the fresh capture \u2192 release dispatch. I'll report when alpha.6 publishes.",
- "uncertainties": []
-}

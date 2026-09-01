@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd ~/projects/intern && cat >> README.md <<'MD'\\n\\n## License\\n\\nIntern is © 2026 Vistage Worldwide, Inc., and is **source-available** under the\\n[Elastic License 2.0](LICENSE) — not an OS...",
-  "error": "Exit code 101\n\n Test Files  10 passed (10)\n      Tests  55 passed (55)\nerror: failed to download `async-broadcast v0.7.2`\n\nCaused by:\n  attempting to make an HTTP request, but --offline was specified",
-  "timestamp": "2026-09-01T20:34:23.922Z",
-  "retry_count": 1
-}
