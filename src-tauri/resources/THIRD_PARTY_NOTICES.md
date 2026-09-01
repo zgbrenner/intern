@@ -1,9 +1,10 @@
 # Intern third-party notices
 
-Intern 0.1.0-alpha.6 is distributed under the MIT License. This notice covers
-the third-party software shipped in, linked into, or downloaded by the Windows
-package. `runtime-assets.json` is the authoritative, SHA-256-addressed inventory
-of native files bundled by the release build. `Cargo.lock` and
+Intern 0.1.0-alpha.6 is (c) 2026 Vistage Worldwide, Inc. and is distributed
+under the Elastic License 2.0; see `LICENSE` in the source repository. This
+notice covers the third-party software shipped in, linked into, or downloaded
+by the Windows package. `runtime-assets.json` is the authoritative,
+SHA-256-addressed inventory of native files bundled by the release build. `Cargo.lock` and
 `package-lock.json` are the authoritative source-package inventories.
 
 Model weights are not part of the installer or GitHub release. When the user
