@@ -11,6 +11,7 @@ import type {
   SelectionResult,
   UpdateStatus,
 } from './bridge';
+import { humanizeReason } from './reasons';
 
 /**
  * The update found by the last check, held so that installing it cannot race a
@@ -305,7 +306,9 @@ function normalizeItem(item: QueueItemDto): QueueItem {
     }),
     ...(item.description === undefined ? {} : { description: item.description }),
     ...(item.evidence === undefined ? {} : { evidence: item.evidence }),
-    ...(item.reason === undefined && item.errorCode === undefined ? {} : { reason: item.reason ?? item.errorCode }),
+    ...(item.reason === undefined && item.errorCode === undefined
+      ? {}
+      : { reason: humanizeReason(item.reason ?? item.errorCode ?? '') }),
     ...(item.progress === undefined ? {} : { progress: item.progress }),
     ...(status === 'processing' ? { cancelable: item.status !== 'applying' } : {}),
     ...(item.undoable === undefined ? {} : { undoable: item.undoable }),

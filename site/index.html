@@ -8,25 +8,49 @@
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #fbfaf8;
-    --fg: #1a1a19;
-    --muted: #5f5d58;
-    --rule: #e2ded6;
-    --accent: #1a1a19;
-    --accent-fg: #fbfaf8;
-    --warn-bg: #fdf6e6;
-    --warn-rule: #e8d9ae;
+    --navy: #1B2F5B;
+    --blue: #2456D6;
+    --tint: #E3ECFB;
+    --deep: #101F3C;
+    --bg: #F7F9FC;
+    --fg: #1C2536;
+    --muted: #4A5568;
+    --rule: #DDE4EF;
+    --link: #2456D6;
+    --hero-bg: var(--navy);
+    --hero-fg: #FFFFFF;
+    --hero-muted: #C3D2EE;
+    --hero-rule: #33477E;
+    --panel: var(--tint);
+    --panel-old: #46598A;
+    --panel-new: #1B2F5B;
+    --chip-bg: var(--tint);
+    --chip-fg: #1B2F5B;
+    --btn-bg: var(--blue);
+    --btn-fg: #FFFFFF;
+    --code-bg: #FFFFFF;
+    --warn-bg: #FCF7E8;
+    --warn-rule: #E0CF9E;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16161a;
-      --fg: #ece9e2;
-      --muted: #9a968d;
-      --rule: #2e2e34;
-      --accent: #ece9e2;
-      --accent-fg: #16161a;
-      --warn-bg: #241f14;
-      --warn-rule: #453a20;
+      --bg: #0D1424;
+      --fg: #E5EAF5;
+      --muted: #A7B4CE;
+      --rule: #26324E;
+      --link: #8FB2F5;
+      --hero-bg: var(--deep);
+      --hero-fg: #F2F5FC;
+      --hero-muted: #AFBEDD;
+      --hero-rule: #24365E;
+      --panel: #18294F;
+      --panel-old: #9FB0D4;
+      --panel-new: #E8EFFC;
+      --chip-bg: #22345E;
+      --chip-fg: #CFDDF8;
+      --code-bg: var(--deep);
+      --warn-bg: #262013;
+      --warn-rule: #4A3E22;
     }
   }
   * { box-sizing: border-box; }
@@ -37,25 +61,83 @@
     font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  main { max-width: 40rem; margin: 0 auto; padding: 5rem 1.5rem 4rem; }
-  h1 { font-size: 2.25rem; letter-spacing: -0.02em; margin: 0 0 0.5rem; }
-  .pitch { font-size: 1.15rem; margin: 0 0 0.5rem; }
-  .sub { color: var(--muted); margin: 0 0 2.5rem; }
+  .wrap { max-width: 42rem; margin: 0 auto; padding: 0 1.25rem; }
+  code, .example { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  a { color: var(--link); }
+
+  /* Hero */
+  header {
+    background: var(--hero-bg);
+    color: var(--hero-fg);
+    padding: 3.5rem 0 3rem;
+  }
+  h1 { font-size: 2.75rem; letter-spacing: -0.02em; margin: 0; line-height: 1.1; }
+  .tag {
+    display: inline-block;
+    margin: 0.6rem 0 0;
+    padding: 0.15rem 0.65rem;
+    border: 1px solid var(--hero-rule);
+    border-radius: 99px;
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    color: var(--hero-muted);
+  }
+  .pitch { font-size: 1.25rem; margin: 1.25rem 0 1.5rem; color: var(--hero-fg); }
+  .example {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin: 0 0 1.75rem;
+  }
+  .example .pair { margin: 0 0 0.85rem; overflow-wrap: anywhere; }
+  .example .pair:last-child { margin-bottom: 0; }
+  .example .old { display: block; color: var(--panel-old); }
+  .example .new { display: block; color: var(--panel-new); font-weight: 600; }
+  .example .new::before { content: "→ "; font-weight: 400; }
   .download {
     display: inline-block;
-    background: var(--accent);
-    color: var(--accent-fg);
+    background: var(--btn-bg);
+    color: var(--btn-fg);
     text-decoration: none;
     font-size: 1.05rem;
     font-weight: 600;
     padding: 0.85rem 1.75rem;
     border-radius: 8px;
   }
-  .download:hover { opacity: 0.85; }
-  .meta { color: var(--muted); font-size: 0.9rem; margin: 0.85rem 0 0; }
-  .reqs { color: var(--muted); font-size: 0.9rem; margin: 0.35rem 0 0; }
-  section { border-top: 1px solid var(--rule); margin-top: 3rem; padding-top: 1.75rem; }
-  h2 { font-size: 1rem; letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted); margin: 0 0 0.75rem; }
+  .download:hover { opacity: 0.9; }
+  .meta { color: var(--hero-muted); font-size: 0.9rem; margin: 0.85rem 0 0; }
+  .reqs { color: var(--hero-muted); font-size: 0.9rem; margin: 0.35rem 0 0; }
+
+  /* Body sections */
+  main .wrap { padding-top: 0.5rem; padding-bottom: 1rem; }
+  section { border-top: 1px solid var(--rule); margin-top: 2.5rem; padding-top: 1.75rem; }
+  section:first-child { border-top: none; margin-top: 1.5rem; }
+  h2 { font-size: 1.25rem; letter-spacing: -0.01em; color: var(--navy); margin: 0 0 1rem; }
+  @media (prefers-color-scheme: dark) { h2 { color: var(--fg); } }
+  .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .steps li { position: relative; padding-left: 3rem; margin: 0 0 1.35rem; counter-increment: step; }
+  .steps li:last-child { margin-bottom: 0; }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0.1rem;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--chip-bg);
+    color: var(--chip-fg);
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .steps strong { display: block; margin-bottom: 0.15rem; }
+  p { margin: 0 0 1rem; }
+  p:last-child { margin-bottom: 0; }
+  .aside { color: var(--muted); font-size: 0.9rem; }
   .warning {
     background: var(--warn-bg);
     border: 1px solid var(--warn-rule);
@@ -63,91 +145,153 @@
     padding: 1rem 1.15rem;
     margin: 0 0 1rem;
   }
-  .warning p:first-child { margin-top: 0; }
-  .warning p:last-child { margin-bottom: 0; }
   pre {
-    background: var(--bg);
+    background: var(--code-bg);
     border: 1px solid var(--rule);
     border-radius: 6px;
     padding: 0.75rem 0.9rem;
     overflow-x: auto;
     font-size: 0.85rem;
-    margin: 0;
+    margin: 0 0 1rem;
   }
-  code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
-  a { color: inherit; }
-  footer { border-top: 1px solid var(--rule); margin-top: 3rem; padding-top: 1.5rem; color: var(--muted); font-size: 0.9rem; }
+  footer { border-top: 1px solid var(--rule); margin-top: 2.5rem; padding: 1.5rem 0 3rem; color: var(--muted); font-size: 0.9rem; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Intern</h1>
-  <p class="pitch">Intern reads a document and tells you what to call it.</p>
-  <p class="sub">
-    Alongside the name it gives one sentence on what the document concerns, the
-    verbatim excerpts behind every fact it used, and a confidence. Anything it
-    cannot support goes to review instead of being renamed. Everything happens
-    on your machine — no telemetry, no cloud fallback, no remote processing.
-  </p>
+<header>
+  <div class="wrap">
+    <h1>Intern</h1>
+    <span class="tag">Built for Vistage</span>
+    <p class="pitch">Intern reads a document and tells you what to call it.</p>
 
-  <a class="download" id="download" href="https://github.com/zgbrenner/intern/releases/latest">
-    Download for Windows
-  </a>
-  <p class="meta" id="meta">Fetching the latest release…</p>
-  <p class="reqs">Windows 10 or 11, x86-64. Installs per user — no administrator rights.</p>
-
-  <section>
-    <h2>Before you run it</h2>
-    <div class="warning">
-      <p>
-        <strong>The installer is not Authenticode signed</strong>, because this
-        project has no code-signing certificate. Windows SmartScreen will call it
-        an unrecognized app; to continue, choose <strong>More info</strong> and
-        then <strong>Run anyway</strong>.
-      </p>
-      <p>
-        You should not take an unrecognized-app warning lightly — so verify the
-        download instead of trusting it. Every published installer carries a
-        keyless Sigstore build-provenance attestation naming the repository,
-        workflow, and commit that produced those exact bytes:
-      </p>
+    <div class="example" aria-label="Example renames">
+      <div class="pair">
+        <span class="old">2026-04-09 - Statement of Work.pdf</span>
+        <span class="new">2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf</span>
+      </div>
+      <div class="pair">
+        <span class="old">2026-12-29 - notice.pdf</span>
+        <span class="new">2026-12-29 Notice of Termination - John Smith.pdf</span>
+      </div>
+      <div class="pair">
+        <span class="old">2025-02-14.pdf</span>
+        <span class="new">2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf</span>
+      </div>
     </div>
-    <pre><code id="verify">gh attestation verify Intern_x64-setup.exe --repo zgbrenner/intern</code></pre>
-    <p class="reqs">
-      <code>SHA256SUMS.txt</code> is published beside the installer and catches a
-      corrupted download, but it proves nothing about origin — it sits on the
-      same page as the installer. The attestation is the part that establishes
-      where the file came from.
-    </p>
-  </section>
 
-  <section>
-    <h2>First run</h2>
-    <p>
-      Intern asks to download the one thing the installer deliberately leaves
-      out: the pinned model file, 1.19&nbsp;GiB. The download is resumable, and
-      the file becomes active only after its exact length and SHA-256 match the
-      manifest built into the installer. If you already have the file,
-      <strong>Choose existing model files</strong> points Intern at it. Nothing
-      else needs installing — PDF text extraction, OCR, and inference all ship
-      inside the app.
-    </p>
-  </section>
+    <a class="download" id="download" href="https://github.com/zgbrenner/intern/releases/latest">
+      Download for Windows
+    </a>
+    <p class="meta" id="meta">Fetching the latest release…</p>
+    <p class="reqs">Windows 10 or 11, x86-64. Installs per user — no administrator rights.</p>
+  </div>
+</header>
 
-  <section>
-    <h2>Updates</h2>
-    <p>
-      Intern checks for updates from <strong>Settings → Check for updates</strong>,
-      only when you ask. There is no background poll and no timer. An update is
-      installed only if it is signed by this project's key; anything else is
-      refused.
-    </p>
-  </section>
+<main>
+  <div class="wrap">
+    <section>
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li>
+          <strong>Drop in documents.</strong>
+          PDFs, Word documents, Excel workbooks, emails, scanned images, plain
+          notes — drag them onto the window, or point Intern at a folder to watch.
+        </li>
+        <li>
+          <strong>Intern reads them on your machine.</strong>
+          It uses the document's real text first, and OCR only when a page has
+          none, then runs one AI model that lives entirely on your computer.
+          Every name it proposes comes with the exact passages from the document
+          that support it, and a confidence.
+        </li>
+        <li>
+          <strong>You stay in charge.</strong>
+          Nothing on disk is renamed until you approve it. Anything Intern
+          cannot back up with evidence from the document goes to a review list
+          instead of being guessed at, and every rename can be undone.
+        </li>
+      </ol>
+    </section>
 
-  <footer>
-    <a href="https://github.com/zgbrenner/intern">Source, documentation, and every past release on GitHub</a>
-  </footer>
+    <section>
+      <h2>Private by design</h2>
+      <p>
+        Intern does its work on your computer, start to finish. Document text,
+        extracted pages, OCR output, and the prompts sent to the model never
+        leave the machine — no telemetry, no cloud fallback, no remote
+        processing.
+      </p>
+      <p>
+        It makes exactly two network requests, ever, and both happen only when
+        you press a button: the one-time download of the model file, and
+        <strong>Check for updates</strong> in Settings. Neither carries anything
+        about your documents.
+      </p>
+      <p>
+        Intern still works with OneDrive and SharePoint folders — through the
+        Microsoft sync client already on your machine, not a cloud API and not
+        an account. Intern reads and renames files in the synced folder on your
+        disk; the only thing moving them to the cloud is the sync client you
+        already run.
+      </p>
+    </section>
+
+    <section>
+      <h2>Before you run it</h2>
+      <div class="warning">
+        <p>
+          <strong>The installer is not Authenticode signed</strong>, because this
+          project has no code-signing certificate. Windows SmartScreen will call it
+          an unrecognized app; to continue, choose <strong>More info</strong> and
+          then <strong>Run anyway</strong>.
+        </p>
+        <p>
+          You should not take an unrecognized-app warning lightly — so verify the
+          download instead of trusting it. Every published installer carries a
+          keyless Sigstore build-provenance attestation naming the repository,
+          workflow, and commit that produced those exact bytes:
+        </p>
+      </div>
+      <pre><code id="verify">gh attestation verify Intern_x64-setup.exe --repo zgbrenner/intern</code></pre>
+      <p class="aside">
+        <code>SHA256SUMS.txt</code> is published beside the installer and catches a
+        corrupted download, but it proves nothing about origin — it sits on the
+        same page as the installer. The attestation is the part that establishes
+        where the file came from.
+      </p>
+    </section>
+
+    <section>
+      <h2>First run</h2>
+      <p>
+        The first time you open it, Intern asks to download the one thing the
+        installer deliberately leaves out: the AI model file, 1.19&nbsp;GiB. The
+        download is resumable, and the file becomes active only after its exact
+        length and SHA-256 match the manifest built into the installer. Already
+        have the file? <strong>Choose existing model files</strong> points
+        Intern at it. Nothing else needs installing — PDF text extraction, OCR,
+        and inference all ship inside the app.
+      </p>
+    </section>
+
+    <section>
+      <h2>Updates</h2>
+      <p>
+        Intern checks for updates from <strong>Settings → Check for
+        updates</strong>, only when you ask. There is no background poll and no
+        timer. An update is installed only if it is signed by this project's
+        key; anything else is refused.
+      </p>
+    </section>
+  </div>
 </main>
+
+<footer>
+  <div class="wrap">
+    <a href="https://github.com/zgbrenner/intern">Source, documentation, and every past release on GitHub</a>
+    · Built for Vistage Worldwide
+  </div>
+</footer>
 
 <script>
   // The installer's filename carries its version, so there is no stable URL to
