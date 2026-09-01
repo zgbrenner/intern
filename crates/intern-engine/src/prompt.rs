@@ -102,8 +102,12 @@ party_relation is how they read in a name: "between" for two sides of an agreeme
 the person a notice is about, "with" a counterparty, "from" a sender or invoice issuer, "to"
 a recipient, "none" to keep names out of the filename.
 
-description: ONE sentence under 30 words saying what the document is and what it concerns -
-the subject, the work, the amount, the term. Not "Agreement between two companies."
+description: ONE sentence, roughly 10 to 30 words, saying what the document is, who it
+involves, and what it concerns - the subject, the work, the amount, the term. Not "Agreement
+between two companies", and never a bare "An invoice for $1,248." Names the parties rules
+above keep OUT of the parties list still belong IN the description: an invoice's description
+names both the issuer and the bill-to company. A description under about ten words is
+missing something the document says.
 
 Answer in exactly this shape, replacing every angle-bracket slot with something from the
 document below:
@@ -194,6 +198,11 @@ mod tests {
         assert!(prompt.contains("A first name on its own is never a party"));
         assert!(prompt.contains("Use the document's own words for it, whole"));
         assert!(prompt.contains("Never substitute a label the document does not contain"));
+        // The first corpus run after the party exclusions showed the model
+        // shrinking descriptions to match - "An invoice for $1,248." - so the
+        // description rules explicitly reclaim the names the parties list drops.
+        assert!(prompt.contains("still belong IN the description"));
+        assert!(prompt.contains("names both the issuer and the bill-to company"));
     }
 
     #[test]
