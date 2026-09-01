@@ -79,8 +79,8 @@ date_evidence is the line the date appears on, copied exactly.
 date_role names which kind of date document_date is - pick the one that matches how the
 document presents it, never a default:
   invoice -> an invoice's own date
-  issuance -> a report, journal, minutes, packing slip, or anything simply issued, written,
-  or dated that day
+  issuance -> the date a report, journal, minutes, or packing slip was itself written or
+  put out
   notice -> the date a notice is given or takes effect
   termination -> a termination taking effect
   amendment -> an amendment's own date
@@ -88,6 +88,9 @@ document presents it, never a default:
   filing -> a court or agency filing or certificate date
   effective -> ONLY a stated effective, start, or commencement date of an agreement
   other -> none of these fit
+Whatever the role: a date this document is "issued under", "pursuant to", "dated as of" in a
+reference to another agreement, or "as amended by" belongs to that OTHER document and is
+never this document's date.
 
 parties: the one or two names a person would use to tell this file apart from other files of
 the same type. Fill this in whenever the document names them. Leave out lawyers copied on a
@@ -203,6 +206,21 @@ mod tests {
         // description rules explicitly reclaim the names the parties list drops.
         assert!(prompt.contains("still belong IN the description"));
         assert!(prompt.contains("names both the issuer and the bill-to company"));
+    }
+
+    /// The first issuance wording said "anything simply issued", and the model
+    /// matched it onto "Issued under the Master Services Agreement dated June
+    /// 2, 2023" - filing a statement of work under another contract's date.
+    #[test]
+    fn the_role_list_cannot_hand_another_documents_date_to_issuance() {
+        let digest = distill(
+            &source_from_text("Invoice date: May 1, 2025"),
+            DigestBudget::default(),
+        );
+        let prompt = build_prompt(&digest);
+        assert!(!prompt.contains("anything simply issued"));
+        assert!(prompt.contains("was itself written or"));
+        assert!(prompt.contains("belongs to that OTHER document"));
     }
 
     #[test]
