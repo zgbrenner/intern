@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intern — guide</title>
+<meta name="description" content="How to install and use Intern: first run, OneDrive and SharePoint, watched folders, teams, and troubleshooting.">
+<style>
+  :root {
+    color-scheme: light dark;
+    --navy: #1B2F5B;
+    --blue: #2456D6;
+    --tint: #E3ECFB;
+    --deep: #101F3C;
+    --bg: #F7F9FC;
+    --fg: #1C2536;
+    --muted: #4A5568;
+    --rule: #DDE4EF;
+    --link: #2456D6;
+    --hero-bg: var(--navy);
+    --hero-fg: #FFFFFF;
+    --hero-muted: #C3D2EE;
+    --hero-rule: #33477E;
+    --panel: var(--tint);
+    --chip-bg: var(--tint);
+    --chip-fg: #1B2F5B;
+    --code-bg: #FFFFFF;
+    --warn-bg: #FCF7E8;
+    --warn-rule: #E0CF9E;
+    --card-bg: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0D1424;
+      --fg: #E5EAF5;
+      --muted: #A7B4CE;
+      --rule: #26324E;
+      --link: #8FB2F5;
+      --hero-bg: var(--deep);
+      --hero-fg: #F2F5FC;
+      --hero-muted: #AFBEDD;
+      --hero-rule: #24365E;
+      --panel: #18294F;
+      --chip-bg: #22345E;
+      --chip-fg: #CFDDF8;
+      --code-bg: var(--deep);
+      --warn-bg: #262013;
+      --warn-rule: #4A3E22;
+      --card-bg: #131E36;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 42rem; margin: 0 auto; padding: 0 1.25rem; }
+  code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  a { color: var(--link); }
+
+  /* Hero */
+  header {
+    background: var(--hero-bg);
+    color: var(--hero-fg);
+    padding: 3rem 0 2.5rem;
+  }
+  h1 { font-size: 2.25rem; letter-spacing: -0.02em; margin: 0; line-height: 1.15; }
+  .pitch { font-size: 1.15rem; margin: 1rem 0 1.25rem; color: var(--hero-fg); }
+  .back {
+    display: inline-block;
+    color: var(--hero-muted);
+    font-size: 0.9rem;
+  }
+  .back:hover { color: var(--hero-fg); }
+
+  /* Table of contents */
+  .toc {
+    background: var(--card-bg);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 1.15rem 1.25rem;
+    margin: 1.75rem 0 0;
+  }
+  .toc h2 { margin: 0 0 0.6rem; font-size: 1rem; }
+  .toc ol { margin: 0; padding-left: 1.35rem; }
+  .toc li { margin: 0.25rem 0; }
+  .toc a { text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  /* Body sections */
+  main .wrap { padding-top: 0.5rem; padding-bottom: 1rem; }
+  section { border-top: 1px solid var(--rule); margin-top: 2.5rem; padding-top: 1.75rem; }
+  section:target { scroll-margin-top: 1rem; }
+  h2 { font-size: 1.25rem; letter-spacing: -0.01em; color: var(--navy); margin: 0 0 1rem; }
+  @media (prefers-color-scheme: dark) { h2 { color: var(--fg); } }
+  .steps { list-style: none; margin: 0 0 1rem; padding: 0; counter-reset: step; }
+  .steps li { position: relative; padding-left: 3rem; margin: 0 0 1.35rem; counter-increment: step; }
+  .steps li:last-child { margin-bottom: 0; }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0.1rem;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--chip-bg);
+    color: var(--chip-fg);
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .steps strong { display: block; margin-bottom: 0.15rem; }
+  p { margin: 0 0 1rem; }
+  p:last-child { margin-bottom: 0; }
+  ul { margin: 0 0 1rem; padding-left: 1.35rem; }
+  ul li { margin: 0 0 0.6rem; }
+  .aside { color: var(--muted); font-size: 0.9rem; }
+  .warning {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-rule);
+    border-radius: 8px;
+    padding: 1rem 1.15rem;
+    margin: 0 0 1rem;
+  }
+  .callout {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin: 0 0 1rem;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 0.75rem 0.9rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    margin: 0 0 1rem;
+  }
+
+  /* Q&A accordions */
+  details {
+    background: var(--card-bg);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    margin: 0 0 0.75rem;
+  }
+  details summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.85rem 1rem;
+    list-style-position: inside;
+    border-radius: 8px;
+  }
+  details summary:hover { color: var(--link); }
+  details summary:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+  }
+  details[open] summary { border-bottom: 1px solid var(--rule); border-radius: 8px 8px 0 0; }
+  details .answer { padding: 0.85rem 1rem; }
+  details .answer p:last-child { margin-bottom: 0; }
+
+  footer { border-top: 1px solid var(--rule); margin-top: 2.5rem; padding: 1.5rem 0 3rem; color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>How to use Intern</h1>
+    <p class="pitch">Everything you will actually run into, from the SmartScreen warning to a shared team folder — in plain language.</p>
+    <a class="back" href="./">&larr; Back to the download page</a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <nav class="toc" aria-label="Table of contents">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#what-is-intern">What is Intern?</a></li>
+        <li><a href="#account">Do I need an account or sign-in?</a></li>
+        <li><a href="#installing">Installing it — what you'll experience</a></li>
+        <li><a href="#first-launch">First launch — the model download</a></li>
+        <li><a href="#day-to-day">Using it day to day</a></li>
+        <li><a href="#onedrive">Hooking up OneDrive and SharePoint</a></li>
+        <li><a href="#watching">Watching a folder</a></li>
+        <li><a href="#team">Working as a team</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#updates">Updates</a></li>
+      </ol>
+    </nav>
+
+    <section id="what-is-intern">
+      <h2>1. What is Intern?</h2>
+      <p>
+        Intern reads a document and tells you what to call it. For each
+        document it proposes a filename that starts with the date, writes a
+        one-sentence description of what the document concerns, shows the
+        verbatim excerpts from the document that support every fact it used,
+        and attaches a confidence.
+      </p>
+      <p>
+        Anything it cannot back up with evidence from the document itself goes
+        to a review list instead of being guessed at. And everything — reading,
+        OCR, the AI model — runs on your machine. Your documents never leave it.
+      </p>
+    </section>
+
+    <section id="account">
+      <h2>2. Do I need an account or sign-in?</h2>
+      <div class="callout">
+        <p>
+          <strong>No.</strong> There is no account, no sign-in, and no cloud
+          service. Intern never asks for a password — not even for OneDrive or
+          SharePoint, which it reaches through folders already on your disk
+          (see <a href="#onedrive">section 6</a>).
+        </p>
+        <p>
+          It makes exactly two kinds of network requests, and both happen only
+          when you press a button: the one-time download of the AI model file,
+          and <strong>Check for updates</strong> in Settings. Neither carries
+          anything about your documents.
+        </p>
+      </div>
+    </section>
+
+    <section id="installing">
+      <h2>3. Installing it — what you'll experience, step by step</h2>
+      <ol class="steps">
+        <li>
+          <strong>Download the installer.</strong>
+          Get <code>Intern_&lt;version&gt;_x64-setup.exe</code> from the
+          <a href="./">download page</a>. It runs on Windows 10 or 11, x86-64.
+        </li>
+        <li>
+          <strong>Windows SmartScreen will warn you.</strong>
+          You will see "Windows protected your PC" and "unrecognized app".
+          This is expected: the installer is not Authenticode signed, because
+          the project has no code-signing certificate. Click
+          <strong>More info</strong>, then <strong>Run anyway</strong>.
+        </li>
+        <li>
+          <strong>It installs per user.</strong>
+          No administrator rights, no admin prompt.
+        </li>
+      </ol>
+      <div class="warning">
+        <p>
+          Don't take an unrecognized-app warning lightly in general. The right
+          response is to verify the download rather than trust it. Every
+          published installer carries an attestation proving which repository,
+          workflow, and commit produced those exact bytes — check it with the
+          GitHub CLI:
+        </p>
+      </div>
+      <pre><code>gh attestation verify Intern_&lt;version&gt;_x64-setup.exe --repo zgbrenner/intern</code></pre>
+      <p class="aside">
+        <code>SHA256SUMS.txt</code>, published beside the installer, catches a
+        corrupted download — but it proves nothing about where the file came
+        from. The attestation is the part that establishes origin.
+      </p>
+    </section>
+
+    <section id="first-launch">
+      <h2>4. First launch — the model download</h2>
+      <p>
+        The installer deliberately leaves out one thing: the AI model file,
+        1.19&nbsp;GiB. The first time you open Intern, a setup screen asks to
+        download it.
+      </p>
+      <ul>
+        <li>
+          The download is <strong>resumable</strong> — if the connection drops,
+          reopen Intern and it continues where it stopped.
+        </li>
+        <li>
+          The file only becomes active after its exact length and SHA-256 match
+          the manifest built into the installer, so a broken or tampered
+          download cannot be used.
+        </li>
+        <li>
+          Already have the file from another machine?
+          <strong>Choose existing model files</strong> points Intern at it and
+          skips the download. This is also how you install on a machine with no
+          internet at all.
+        </li>
+      </ul>
+      <p>
+        Nothing else needs installing. PDF reading, OCR, and inference all ship
+        inside the app.
+      </p>
+    </section>
+
+    <section id="day-to-day">
+      <h2>5. Using it day to day</h2>
+      <p>
+        Drag files or folders onto the window, or use <strong>Add
+        files</strong> / <strong>Add folder</strong>. Supported formats: PDF,
+        Word (.docx), Excel (.xlsx), email (.eml), plain text, Markdown, and
+        scanned images (PNG, JPEG, TIFF).
+      </p>
+      <p>
+        Each document moves through statuses: <strong>Waiting</strong> →
+        <strong>Processing</strong> → then one of two outcomes:
+      </p>
+      <ul>
+        <li>
+          <strong>Ready</strong> — a name is proposed, with the supporting
+          evidence attached and a confidence shown.
+        </li>
+        <li>
+          <strong>Needs review</strong> — something could not be verified
+          against the document's own text. The reason is spelled out in plain
+          language in the inspector.
+        </li>
+      </ul>
+      <p>
+        <strong>Nothing on disk is renamed until you approve it.</strong>
+        Approve one document at a time, or use <strong>Apply all
+        ready</strong>. Every rename can be undone from Completed.
+      </p>
+      <p>
+        A document whose content Intern has already filed is flagged as a
+        <strong>duplicate</strong> of the filed name instead of being renamed
+        again.
+      </p>
+      <p>
+        Settings has a destination folder: leave it empty and files are renamed
+        in place; set it and renamed files are moved there.
+      </p>
+      <p class="aside">
+        Intern runs a roughly 2-billion-parameter model on your CPU, so expect
+        tens of seconds per document, processed one at a time. Leave it working
+        through a stack — that pace is the price of nothing leaving your
+        machine.
+      </p>
+    </section>
+
+    <section id="onedrive">
+      <h2>6. Hooking up OneDrive and SharePoint</h2>
+      <p>
+        The key idea: <strong>Intern connects through the folders the
+        Microsoft sync client already keeps on your disk.</strong> It never
+        talks to Microsoft's servers — there is no Graph API client, no OAuth
+        token, no upload code — so it never asks you to sign in to Microsoft.
+        The only thing moving files to the cloud is the OneDrive app you
+        already run.
+      </p>
+      <ol class="steps">
+        <li>
+          <strong>Make the library a folder on your disk.</strong>
+          Your personal OneDrive already is one. For SharePoint, open the
+          document library in the browser and click <strong>Sync</strong>
+          (or <strong>Add shortcut to OneDrive</strong>) — Microsoft's own way
+          of putting it on your disk.
+        </li>
+        <li>
+          <strong>Point Intern at it.</strong>
+          In Intern's Settings, pick that folder (or any folder inside it) as
+          the intake folder and/or the destination. Intern detects sync roots
+          and labels the pick — "Synced with OneDrive – …", "Synced with
+          SharePoint – …" — so you can see what you chose.
+        </li>
+        <li>
+          <strong>That's it.</strong>
+          Files that appear in the folder get processed; renamed files sync
+          back to the cloud through the sync client.
+        </li>
+      </ol>
+      <details>
+        <summary>What about online-only files (the cloud icon in Explorer)?</summary>
+        <div class="answer">
+          <p>
+            Files On-Demand is handled. The read Intern performs is exactly
+            what makes OneDrive download the content. If the machine is
+            offline, the document waits and is picked up once the content
+            arrives, rather than being failed.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>What are these "conflicted copy" files, and will Intern rename them?</summary>
+        <div class="answer">
+          <p>
+            Files like <code>report (Jane's conflicted copy …)</code>, or a
+            name suffixed with a teammate's machine, are OneDrive's conflict
+            bookkeeping — not new documents. Intern counts them in Settings and
+            leaves them alone. Resolve the conflict in the folder, and the
+            surviving file is picked up.
+          </p>
+        </div>
+      </details>
+    </section>
+
+    <section id="watching">
+      <h2>7. Watching a folder (automatic intake)</h2>
+      <p>
+        In Settings, enable <strong>Watch a folder</strong> and pick the intake
+        folder. Two requirements are enforced when you save:
+      </p>
+      <ul>
+        <li>Watching requires a destination folder.</li>
+        <li>
+          The destination must be <strong>outside</strong> the intake folder —
+          renaming in place inside a watched folder would make every result
+          reappear as new work, so Intern refuses that configuration up front.
+        </li>
+      </ul>
+      <p>
+        The watcher scans on a short interval, about every 20 seconds, and only
+        picks a file up once its size and modified time have held still for a
+        full interval — so a half-copied file is never read.
+        <strong>Scan now</strong> forces an immediate pass.
+      </p>
+    </section>
+
+    <section id="team">
+      <h2>8. Working as a team — several computers, one folder</h2>
+      <p>
+        Multiple machines can watch the <strong>same</strong> synced intake
+        folder. They coordinate through a <code>.intern</code> folder inside it
+        — small files the sync client replicates like anything else. Don't
+        delete <code>.intern</code> casually; it is how machines avoid
+        processing the same document twice.
+      </p>
+      <ul>
+        <li>
+          Each document is claimed by exactly one machine — first claim wins,
+          with a time-limited lease. If a machine crashes, its work is taken
+          over automatically after its lease lapses (about 15 minutes).
+        </li>
+        <li>
+          By default, each machine only processes documents dropped on that
+          machine. Turning on <strong>"Also process documents uploaded by
+          others"</strong> makes the folder a shared work queue — with a
+          two-minute courtesy delay, so the uploader's own machine gets first
+          claim on its own work.
+        </li>
+        <li>
+          Name your machine in Settings (<strong>This machine's
+          name</strong>) so teammates can see who is working on what.
+        </li>
+      </ul>
+      <p class="aside">
+        What the shared <code>.intern</code> folder exposes to everyone who can
+        see the folder: filenames, file sizes, machine names, and usernames —
+        never document content, text, or AI output.
+      </p>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>9. Troubleshooting</h2>
+      <details>
+        <summary>Windows says "Windows protected your PC"</summary>
+        <div class="answer">
+          <p>
+            Expected — the installer is not Authenticode signed. Click
+            <strong>More info</strong>, then <strong>Run anyway</strong>. If in
+            doubt, verify the download first with the attestation command in
+            <a href="#installing">section 3</a>.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>The model download stopped partway</summary>
+        <div class="answer">
+          <p>
+            Reopen Intern — the download resumes where it stopped. The file is
+            verified against its exact length and SHA-256 before it is ever
+            used, so a broken download can't be used by accident.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>A document says "Another program is still holding this file open"</summary>
+        <div class="answer">
+          <p>
+            Usually the sync client, mid-upload. Intern already waited a few
+            seconds for the lock to clear before reporting this. Retry once the
+            sync settles.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>A document went to review — is that an error?</summary>
+        <div class="answer">
+          <p>
+            No. It means one of the facts in the proposed name could not be
+            matched word-for-word in the document — the review reason says
+            which one: the date, the document type, a party, or the
+            description. Fix the name yourself in the inspector and approve it,
+            or choose <strong>Keep original</strong>.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>A file in my watched folder isn't being picked up</summary>
+        <div class="answer">
+          <p>Work through the usual causes:</p>
+          <ul>
+            <li>Is it a supported format? Is it zero bytes?</li>
+            <li>
+              Is it still copying or syncing in? A file is only picked up once
+              its size and modified time have held still for a full scan
+              interval.
+            </li>
+            <li>
+              Is it a dot-file, or an Office lock file starting with
+              <code>~$</code>? Those are ignored on purpose.
+            </li>
+            <li>
+              Did another machine claim it? Settings shows the counts.
+            </li>
+          </ul>
+          <p>Then try <strong>Scan now</strong>.</p>
+        </div>
+      </details>
+      <details>
+        <summary>The watched folder settings won't save</summary>
+        <div class="answer">
+          <p>
+            The destination folder must exist and must be outside the intake
+            folder. Intern refuses the loop at save time and tells you which
+            rule was hit, rather than discovering the problem while running.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>A cloud file failed while I was offline</summary>
+        <div class="answer">
+          <p>
+            It is held, not abandoned. Reconnect, and it is retried
+            automatically on a later scan once the content arrives.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>A document failed twice and stopped</summary>
+        <div class="answer">
+          <p>
+            It is in Failed, with the reason shown. Retry it manually from
+            there.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>Everything is slow</summary>
+        <div class="answer">
+          <p>
+            Local CPU inference is the price of nothing leaving your machine.
+            Tens of seconds per document is normal, and the app processes one
+            document at a time on purpose.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>Check for updates fails</summary>
+        <div class="answer">
+          <p>
+            It is the only network call Intern makes besides the model
+            download, so check your connectivity. An update that is not signed
+            by this project's key is refused outright — that is deliberate.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>Where does Intern keep its own data?</summary>
+        <div class="answer">
+          <p>
+            In per-user app data. Your documents stay where they are.
+            Uninstalling removes the app but leaves both your documents and
+            Intern's data alone.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>Can I use it fully offline?</summary>
+        <div class="answer">
+          <p>
+            Yes — after install and the model download, or by using
+            <strong>Choose existing model files</strong> with a copy of the
+            model from another machine. OneDrive folders keep working locally
+            and sync whenever the sync client next connects.
+          </p>
+        </div>
+      </details>
+    </section>
+
+    <section id="updates">
+      <h2>10. Updates</h2>
+      <p>
+        <strong>Settings → Check for updates.</strong> Only when you ask —
+        there is no background polling and no timer. An update installs only if
+        it is signed by this project's key; anything else is refused.
+      </p>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a href="./">Download page</a>
+    · <a href="https://github.com/zgbrenner/intern">Source and releases on GitHub</a>
+    · Built for Vistage Worldwide
+  </div>
+</footer>
+</body>
+</html>
