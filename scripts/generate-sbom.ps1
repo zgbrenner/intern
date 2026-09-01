@@ -74,7 +74,7 @@ try {
             Copy-Item -LiteralPath $Source -Destination $Target
         }
         $Generated = Invoke-SbomGenerate -Drop $Drop -Components $Drop -Name $Package.Name -Version $Package.Version
-        $Published = Join-Path $Release "Intern-v0.1.0-alpha.4-runtime-$SafeName.spdx.json"
+        $Published = Join-Path $Release "Intern-v0.1.0-alpha.5-runtime-$SafeName.spdx.json"
         Copy-Item -LiteralPath $Generated -Destination $Published
         $External = Get-Content -LiteralPath $Published -Raw | ConvertFrom-Json
         if (-not (@($External.packages).name -contains $Package.Name)) { throw "Runtime SBOM omits package identity $($Package.Name)" }
@@ -83,7 +83,7 @@ try {
 
     $ExternalList = Join-Path $Work "external-sboms.txt"
     $ExternalDocuments | Set-Content -LiteralPath $ExternalList -Encoding utf8NoBOM
-    $MainManifest = Invoke-SbomGenerate -Drop $Release -Components $RepositoryRoot -Name "Intern" -Version "0.1.0-alpha.4" -ExternalList $ExternalList
+    $MainManifest = Invoke-SbomGenerate -Drop $Release -Components $RepositoryRoot -Name "Intern" -Version "0.1.0-alpha.5" -ExternalList $ExternalList
     $Main = Get-Content -LiteralPath $MainManifest -Raw | ConvertFrom-Json
     $PackageNames = @($Main.packages | ForEach-Object name)
     # Prove each ecosystem is actually covered, using packages the SBOM tool
@@ -119,7 +119,7 @@ try {
     if (@($Main.externalDocumentRefs).Count -ne $Packages.Count) {
         throw "Application SBOM does not reference every native runtime component SBOM"
     }
-    Copy-Item -LiteralPath $MainManifest -Destination (Join-Path $Release "Intern-v0.1.0-alpha.4.spdx.json")
+    Copy-Item -LiteralPath $MainManifest -Destination (Join-Path $Release "Intern-v0.1.0-alpha.5.spdx.json")
     Remove-Item -LiteralPath (Join-Path $Release "_manifest") -Recurse -Force
     Remove-Item -LiteralPath (Join-Path $Release "sbom-validation.json") -Force
     Write-Host "Pinned Microsoft SBOM Tool generated and validated app, npm, Cargo, and $($Packages.Count) actual runtime package documents."

@@ -1,33 +1,33 @@
-# Intern v0.1.0-alpha.4 release checklist
+# Intern v0.1.0-alpha.5 release checklist
 
 **Release status: blocked pending whole-product QA, rendered fidelity sign-off,
 exact-main validation, and the deliberately dispatched release workflow.** No
-hosted QA run has been recorded for alpha.4 yet, so every gate below is
-**pending/blocked** until a hosted run produces artifacts bound to the alpha.4
+hosted QA run has been recorded for alpha.5 yet, so every gate below is
+**pending/blocked** until a hosted run produces artifacts bound to the alpha.5
 release inputs. Nothing in this checklist authorizes a tag or publication.
 
-## Hosted QA artifacts and accepted alpha.4 evidence
+## Hosted QA artifacts and accepted alpha.5 evidence
 
 - Workflow: Whole-product QA evidence, run `pending`, attempt `pending`.
 - Commit: `pending`; runner: `pending`.
-- Execution result: pending — no alpha.4 hosted QA run has been executed.
+- Execution result: pending — no alpha.5 hosted QA run has been executed.
 - Release-input digest: `pending`.
 - Capture: `docs/qa/latest-implementation.png`, dimensions and SHA-256 pending a
-  fresh alpha.4 capture.
+  fresh alpha.5 capture.
 - Fidelity reviewer: pending; a fresh sign-off must be recorded in
-  `rendered-fidelity-signoff.json` and bound to the alpha.4 release-input digest.
+  `rendered-fidelity-signoff.json` and bound to the alpha.5 release-input digest.
 
 | Gate | Status | Hosted run artifact or post-run evidence |
 |---|---|---|
-| Frontend unit, lint, and build check | pending | `npm run check` has not been recorded for alpha.4. |
-| Browser core interaction, accessibility, and 1024-pixel layout | pending | `npm run test:e2e` capture has not been recorded for alpha.4. |
-| Rendered fidelity review | pending/blocked | A fresh alpha.4 capture must be reviewed and its sign-off bound to the alpha.4 release-input digest. |
+| Frontend unit, lint, and build check | pending | `npm run check` has not been recorded for alpha.5. |
+| Browser core interaction, accessibility, and 1024-pixel layout | pending | `npm run test:e2e` capture has not been recorded for alpha.5. |
+| Rendered fidelity review | pending/blocked | A fresh alpha.5 capture must be reviewed and its sign-off bound to the alpha.5 release-input digest. |
 | Rust formatting and workspace lint | pending | `cargo fmt --all -- --check`; `cargo clippy --locked --workspace --all-targets -- -D warnings`. |
 | Rust workspace tests | pending | `cargo test --locked --workspace --all-targets`. |
 | Pinned runtime assets and native fixtures | pending | `npm run assets:verify -- --require-bundled`. |
 | Windows Tauri/NSIS build | pending | `npm run tauri build -- --bundles nsis -- --locked`. |
 | Installer and installed-core smoke | pending | App launch, clean shutdown, runtime inventory, installed worker core path, uninstall, and retained user data. |
-| Corpus evaluation and model acceptance | pending | `validate-model-evaluation.mjs` must accept a fresh alpha.4 evaluation. |
+| Corpus evaluation and model acceptance | pending | `validate-model-evaluation.mjs` must accept a fresh alpha.5 evaluation. |
 | Exact-main validation | pending | The release workflow must verify its dispatch target is the exact current `main` commit. |
 | Deliberately dispatched release workflow | pending | Rebuild, updater signature verification, checksums/SBOM/evidence acceptance, provenance, annotated tag, and publication remain release-job gates. |
 

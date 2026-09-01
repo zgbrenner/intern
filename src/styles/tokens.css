@@ -2,18 +2,27 @@
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   color: #171a1f;
   background: #ffffff;
+  --brand-navy: #1b2f5b;
+  --brand-blue: #2456d6;
+  --brand-tint: #e3ecfb;
   --surface: #ffffff;
   --surface-subtle: #f7f9fc;
-  --surface-selected: #f2f6ff;
+  /* Brand blue at 5% over white. Selected rows must keep the amber
+     "Needs review" status text at >= 4.5:1, which the full --brand-tint
+     is too dark for; the sidebar active state uses --brand-tint directly. */
+  --surface-selected: #f4f7fd;
+  --selected-border: #c3d3f2;
   --border: #d9dee8;
   --border-strong: #c4cad5;
   --text: #171a1f;
   --text-muted: #667085;
-  --accent: #0b5cff;
-  --accent-hover: #084fdc;
+  --accent: var(--brand-blue);
+  --accent-hover: #1d49bd;
+  --primary: var(--brand-navy);
   --ready: #14804a;
   --review: #a45f00;
   --waiting: #667085;
+  --processing: #0b5cff;
   --radius-sm: 6px;
   --radius-md: 9px;
   --shadow-inspector: -8px 0 24px rgba(23, 26, 31, 0.06);
