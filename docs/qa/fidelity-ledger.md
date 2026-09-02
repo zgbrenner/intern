@@ -1,24 +1,26 @@
-# Intern alpha.5 rendered-fidelity ledger
+# Intern alpha.6 rendered-fidelity ledger
 
 **Rendered sign-off status: accepted.** The accepted record is
-`docs/qa/rendered-fidelity-signoff.json`, reviewed on 2026-09-01 and bound to
+`docs/qa/rendered-fidelity-signoff.json`, reviewed on 2026-09-02 and bound to
 the final non-QA release-input digest
-`f338fbbe5532f18175dff9d95b2d8fe8f225dba30c2f2da775239b4ca7ef0b89`.
+`fe016f3944a190dd932d001367fdcc44a360b5cb6fd2030d6fe233e290a1c05c`.
 
 ## Evidence inspected
 
 - Accepted concept: `docs/design/intern-primary-screen.png`, 1536×1024,
   SHA-256 `c8cf322da777d77bc490b855fd18c5a70fe24192a343505e677d34d925a30de8`.
 - Fresh implementation capture: hosted Whole-product QA evidence run
-  `33481594670`, Windows/X64, commit
-  `0a62f9b63c73e422263d42df8e778dab878552a8`. The capture is 1536×1024 and
-  SHA-256 `5a619cabceb197e39f46624c682d29440c4a604baf8e20eb79c37694306f715e`.
-- The capture differs from alpha.4's on purpose: alpha.5 ships the Vistage
-  brand treatment, and the frame shows it - the small-caps "for Vistage" tag
-  beside the wordmark, the primary action in Vistage navy with white text at
-  roughly 12:1, and focus/selection states on the brand blue. The run's
-  automated contrast assertions passed, including the "Needs review" amber on
-  the retuned selected-row tint.
+  `33572364279`, Windows/X64, commit
+  `9e91511c12ad9a3e727e3fa56e15b7197de191d2`. The capture is 1536×1024 and
+  SHA-256 `1bc7bb1707c743fc87106eb3a2a914d234128cefdc20e92a77c88fa7a6b7fb76`.
+- The capture differs substantially from alpha.5's: alpha.6 rebuilds the review
+  panel. Evidence is now attributed quotations under labelled DATE, TYPE, and
+  PARTIES headings, each party on its own line so it can be checked separately;
+  the model's confidence appears in the panel at all, with an exact percentage
+  beside a proportional track; the approve and keep actions sit in a pinned bar
+  at the foot of the panel; the selected row carries an accent bar as well as a
+  tint, so it is no longer confusable with hover; and a help affordance sits
+  beside the settings gear. The run's automated contrast assertions passed.
 - That run completed every substantive automated gate: 19 Vitest files / 146
   tests, four Playwright tests, `cargo fmt --check`, `cargo clippy -D
   warnings`, workspace Rust tests, native fixture tests, verified pinned
@@ -27,8 +29,8 @@ the final non-QA release-input digest
   every gate above its floor and zero documents filed under a forbidden
   date, with the new reference-date guard converging the hardware-dependent
   model picks. Its final evidence binding correctly failed closed because the
-  prior sign-off was bound to the alpha.4
-  `1e6af646a00b376080c99e7179659c6d3505a9128739f733232ae192c0010d0e` digest;
+  prior sign-off was bound to the alpha.5
+  `f338fbbe5532f18175dff9d95b2d8fe8f225dba30c2f2da775239b4ca7ef0b89` digest;
   this post-run review supplies the accepted replacement record.
 
 ## Review conclusion
@@ -50,7 +52,7 @@ which the capture test arranges deliberately so the head of the proposed name
 is visible rather than its tail.
 
 This is not a pixel-equality assertion: the reference and implementation can
-differ where alpha.5's supported behavior requires it. The native title bar,
+differ where alpha.6's supported behavior requires it. The native title bar,
 1024-pixel layout, hover states, and motion remain supported by the hosted
 automated browser and installed-app gates rather than an assertion that the
 single 1536×1024 frame captures every state.
