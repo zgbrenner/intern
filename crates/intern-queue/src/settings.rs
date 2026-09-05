@@ -7,10 +7,57 @@ use serde::{Deserialize, Serialize};
 
 use crate::pipeline::{PipelineError, PipelineResult};
 
+/// How filed documents are arranged under the destination folder.
+///
+/// A flat destination is the default and what every earlier version did. The
+/// other layouts put each document in a subfolder derived from the facts its
+/// filename already carries, so a year of contracts does not become one
+/// folder of a thousand files. The subfolder names are sanitised the same
+/// way filenames are; a document missing the fact a layout needs goes in a
+/// clearly named catch-all rather than the root.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DestinationLayout {
+    /// Everything directly in the destination folder.
+    #[default]
+    Flat,
+    /// `2026/`
+    Year,
+    /// `2026/Statement of Work/`
+    YearType,
+    /// `Statement of Work/`
+    Type,
+    /// `Ridgeline Cartography LLC/` - the first party.
+    Party,
+}
+
+impl DestinationLayout {
+    pub const ALL: [Self; 5] = [
+        Self::Flat,
+        Self::Year,
+        Self::YearType,
+        Self::Type,
+        Self::Party,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Flat => "flat",
+            Self::Year => "year",
+            Self::YearType => "year_type",
+            Self::Type => "type",
+            Self::Party => "party",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub destination: String,
+    /// Subfolders under the destination, derived from each document's facts.
+    #[serde(default)]
+    pub destination_layout: DestinationLayout,
     pub start_minimized: bool,
     #[serde(default)]
     pub automatic_rename: bool,

@@ -26,10 +26,11 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const bridge = suppliedBridge ?? bridgeRef.current;
   const { items, paused, setPaused, refresh, execute } = useQueue(bridge);
   const [view, setView] = useState<QueueView>('queue');
+  const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>({ destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false });
+  const [settings, setSettings] = useState<AppSettings>({ destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false });
   const [setup, setSetup] = useState<SetupState | undefined>(suppliedBridge ? undefined : { state: 'ready', downloadedBytes: 0, totalBytes: 0 });
   const [setupAction, setSetupAction] = useState<'start' | 'cancel' | 'choose'>();
   const [setupError, setSetupError] = useState('');
@@ -78,6 +79,12 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     }
   }, [items]);
   const filtered = items.filter((item) => view === 'queue' ? item.status !== 'completed' : view === 'review' ? item.status === 'review' : item.status === 'completed');
+  // A folder of four hundred documents is a wall of rows. The filter narrows
+  // the current view by anything a person is likely to remember: the name the
+  // file arrived with, the name it was given, or a word from its description.
+  const query = filter.trim().toLowerCase();
+  const visible = query ? filtered.filter((item) => matchesQuery(item, query)) : filtered;
+  const filterShown = filtered.length > FILTER_THRESHOLD || query.length > 0;
   const selected = items.find((item) => item.id === selectedId);
   const drawerOpen = Boolean(selected && narrowInspector);
   const readyItems = items.filter((item) => item.status === 'ready' && item.proposedFilename);
@@ -259,13 +266,32 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
         <button type="button" disabled={actionPending} onClick={(event) => openHistory(event.currentTarget)}>History</button>
         <button type="button" disabled={actionPending} onClick={() => void (async () => { if (await runQueueAction(() => bridge.clearHistory(), 'History cleared.')) queueMicrotask(() => document.querySelector<HTMLButtonElement>('.sidebar button[aria-label="Completed"]')?.focus()); })()}>Clear history</button>
       </div>}
-      {items.length > 0 && (filtered.length > 0 ? <QueueTable items={filtered} selectedId={selectedId} onSelect={select} /> : <ViewEmpty view={view} />)}
-      <p className="item-count">{filtered.length} {filtered.length === 1 ? 'item' : 'items'}</p></section>
+      {filterShown && <div className="queue-filter" role="search">
+        <input type="search" aria-label="Filter queue" placeholder="Filter by filename or description" value={filter} onChange={(event) => setFilter(event.target.value)} onKeyDown={(event) => {
+          // Escape clears the filter first; only an already-empty box lets the
+          // key through to whatever else listens for it.
+          if (event.key === 'Escape' && filter) { event.stopPropagation(); setFilter(''); }
+        }} />
+      </div>}
+      {items.length > 0 && (visible.length > 0
+        ? <QueueTable items={visible} selectedId={selectedId} onSelect={select} />
+        : query
+          ? <p className="queue-filter-empty" role="status">No items match “{filter.trim()}”.</p>
+          : <ViewEmpty view={view} />)}
+      <p className="item-count">{query ? `${visible.length} of ${filtered.length} ${filtered.length === 1 ? 'item' : 'items'}` : `${filtered.length} ${filtered.length === 1 ? 'item' : 'items'}`}</p></section>
       {selected && <ReviewInspector busy={actionPending} drawer={drawerOpen} item={selected} onClose={closeReview} onApprove={(filename, description) => void refreshAndClear(() => bridge.approve(selected.id, filename, description), 'Rename applied.')} onKeep={() => void refreshAndClear(() => bridge.keepOriginal(selected.id), 'Original filename kept.')} onCancel={() => void refreshAndClear(() => bridge.cancel(selected.id), 'Processing canceled.')} onRetry={() => void refreshAndClear(() => bridge.retry(selected.id), 'Item queued for retry.')} onRemove={() => void refreshAndClear(() => bridge.remove(selected.id), 'Item removed.')} onUndo={() => void refreshAndClear(() => bridge.undo(selected.id), 'Operation undone.')} />}
     </div>
     {historyOpen && <HistoryDialog bridge={bridge} selection={selection} onClose={closeHistory} />}
     {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={closeSettings} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); closeSettings(); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
   </main>;
+}
+
+/** Views with this many items or fewer are short enough to read; the filter box appears above longer ones. */
+const FILTER_THRESHOLD = 6;
+
+function matchesQuery(item: QueueItem, query: string) {
+  return [item.originalFilename, item.proposedFilename, item.description]
+    .some((text) => text !== undefined && text.toLowerCase().includes(query));
 }
 
 function describeActionError(error: unknown) {

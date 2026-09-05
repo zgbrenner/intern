@@ -199,6 +199,33 @@ Self-reported confidence below 0.60 also routes to review, as does any
 fact-affecting parser warning, and any document with no defining date or no
 specific type.
 
+Three things are then decided from the document rather than from the model,
+because a two-billion-parameter model is good at finding facts and poor at
+labelling them consistently:
+
+* **The date's role.** The wording in the ninety-odd characters before the
+  validated date decides whether it is an effective, execution, invoice,
+  notice, termination, amendment, filing, or issuance date - `Effective as
+  of`, `Invoice date`, `Notice is hereby given ... on`, `signed on`. A bare
+  `Date:` label defers to the document type (an invoice's bare date is its
+  invoice date; an amendment's is its own date). The model's stated role is
+  used only when the document's wording says nothing.
+* **A missing type.** When the model offers no document type, or one the
+  document does not support, the document's own title - the first outline
+  heading, at most eight words, containing a type noun (`agreement`,
+  `invoice`, `minutes`, `NDA` ...) - becomes the type, and the document is
+  routed to review with `TYPE_INFERRED` so a person confirms the title names
+  the document. A document with no such title still gets no type.
+* **Who issued an invoice.** An invoice, receipt, statement, or quote is
+  *from* whoever issued it, not *between* its two sides. When the model says
+  `between` for one of those types and the document's own layout names a
+  customer (`Bill to`, `Sold to`, `Attn`) or an issuer (`Remit to`, `From:`),
+  the relation is repaired to `from` the issuing party.
+
+Each is deterministic, unit-tested against the corpus's own date lines and
+titles, and never invents a fact: a role, a type, or a relation is inferred
+only from text the validation has already found in the document.
+
 ## The filename
 
 ```text
@@ -227,7 +254,17 @@ Names longer than 120 characters shed the second party, then the party clause,
 then truncate the type — detail is lost from the least identifying end first.
 Windows-hostile characters, reserved device names, trailing dots and spaces, and
 bidirectional control characters are removed; the original extension is always
-preserved; collisions get a ` (2)` suffix.
+preserved; collisions get a ` (2)` suffix. The engine checks collisions
+against the only folder it knows, the document's own; the queue recomposes the
+name against the folder the document is actually going to, so a suffix means
+a real collision at the destination and never a phantom one at the source.
+
+Where a document lands is the destination folder plus, optionally, a
+subfolder the queue derives from the validated facts: the year, the year and
+type, the type, or the first party (`2026/Statement of Work/`). A fact the
+layout needs but the document lacks sends it to `Undated` or `Unsorted`, never
+the root. Folders are created on first use and removed by the undo that
+empties them; the destination itself is never removed.
 
 ## Model and runtime
 
@@ -313,7 +350,15 @@ this boundary: it decides *which* documents enter the local queue and records
 what happened to them, and knows nothing about models.
 
 The queue reports every completed rename to a *filing sink*, and the desktop
-app's sink writes the description records that let a SharePoint column carry
-the sentence — see [`sharepoint-descriptions.md`](sharepoint-descriptions.md).
-The sink hears about a rename only after it has succeeded and cannot undo it;
-a record that fails to write is reported in Settings, and the rename stands.
+app's sinks write the description records that let a SharePoint column carry
+the sentence — see [`sharepoint-descriptions.md`](sharepoint-descriptions.md)
+— and the filed markers of the shared intake folder. A sink hears about a
+rename only after it has succeeded and cannot undo it; a record that fails to
+write is reported in Settings, and the rename stands.
+
+The mirror image is the *duplicate oracle*: before analysing a document the
+queue checks its own history for the same content, then asks the oracle,
+which in the desktop app reads the shared folder's filed markers. Either
+answer routes the document to review as a duplicate, naming what the content
+was filed as and, for a teammate's filing, by which machine. Analysis never
+runs on a duplicate unless a person asks for it.

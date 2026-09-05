@@ -27,6 +27,7 @@ pub mod download;
 pub mod engine;
 pub mod error;
 pub mod evidence;
+pub mod infer;
 pub mod legacy;
 pub mod manifest;
 pub mod naming;
@@ -43,7 +44,7 @@ pub use domain::*;
 pub use engine::Engine;
 pub use error::{EngineError, EngineErrorCode, EngineResult};
 pub use manifest::{ModelFile, ModelManifest, ModelRole};
-pub use naming::compose_filename;
+pub use naming::{compose_filename, sanitize_folder_name};
 pub use server::{LlamaServer, ServerOptions};
 pub use validate::validate;
 pub use worker::{

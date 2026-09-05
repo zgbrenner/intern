@@ -16,8 +16,16 @@ export interface QueueItem {
   proposalRevision?: string;
 }
 
+/**
+ * How filed documents are arranged under the destination: flat, or in
+ * subfolders derived from each document's facts. A missing fact goes to a
+ * named catch-all ("Undated", "Unsorted"), never the root.
+ */
+export type DestinationLayout = 'flat' | 'year' | 'year_type' | 'type' | 'party';
+
 export interface AppSettings {
   destination: string;
+  destinationLayout: DestinationLayout;
   startMinimized: boolean;
   automaticRename: boolean;
   /** Watched intake folder path; "" = none configured. */

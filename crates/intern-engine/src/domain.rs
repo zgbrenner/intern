@@ -229,6 +229,9 @@ pub enum ReviewReason {
     TypeMissing,
     /// The document type was not literally present in the document.
     TypeUnsupported,
+    /// The model gave no usable type, so the document's own title was used;
+    /// a person should confirm it names the document.
+    TypeInferred,
     /// A named party could not be found in the document.
     PartyUnsupported,
     /// The description asserted something the document does not contain.
@@ -250,6 +253,7 @@ impl ReviewReason {
             Self::DateUnsupported => "DATE_UNSUPPORTED",
             Self::TypeMissing => "TYPE_MISSING",
             Self::TypeUnsupported => "TYPE_UNSUPPORTED",
+            Self::TypeInferred => "TYPE_INFERRED",
             Self::PartyUnsupported => "PARTY_UNSUPPORTED",
             Self::DescriptionUnsupported => "DESCRIPTION_UNSUPPORTED",
             Self::DescriptionInvalid => "DESCRIPTION_INVALID",

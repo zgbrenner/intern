@@ -224,9 +224,22 @@ fitting a prompt to it is not the same as being right:
   document type at all and are named `<date> Document.<ext>`. Both are the
   least contract-like fixtures in the corpus. `nda.docx` answers
   `Non-Disclosure Agreement` where the document says `Mutual Non-Disclosure
-  Agreement` - correct but less specific than the text supports.
+  Agreement` - correct but less specific than the text supports. Since then,
+  a document the model leaves untyped takes its type from its own title when
+  the title names one (`Board Meeting Minutes`, `MUTUAL NDA`) and goes to
+  review flagged `TYPE_INFERRED`; the rule is unit-tested on the corpus's
+  titles, and the corpus has not been re-scored against it.
 * The vendor invoice reads `between` its two sides rather than `from` the party
   that issued it. The direction is under-determined by the document's own layout.
+  The queue now repairs `between` to `from` for invoice-shaped types when the
+  layout names a customer (`Bill to`) or an issuer (`Remit to`), which covers
+  this fixture; a document with neither cue keeps what the model said.
+* `date_role_correct` was the weakest metric (6 of 13 on the after run): the
+  model finds the right date and mislabels it. The role is now read from the
+  document's wording around the date - `Effective as of`, `Invoice date`,
+  `Notice is hereby given ... on` - with the model's label used only when the
+  document says nothing. Each corpus date line is covered by a unit test;
+  the metric itself has not been re-run.
 * The six OCR fixtures are not scored for naming quality. They have since been
   run through the packaged worker against a real Tesseract, and the clean-room
   bitmap font reads at 62-95 mean confidence with digits corrupted often enough

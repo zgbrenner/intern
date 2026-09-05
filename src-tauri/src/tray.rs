@@ -40,6 +40,34 @@ pub fn window_starts_hidden(
     run_in_background && (start_minimized || minimized_launch)
 }
 
+/// The tray's tooltip: "Intern" alone when nothing waits on a person, and
+/// otherwise what does, so a glance at the tray answers "is there anything
+/// for me?" without opening the window.
+pub fn tray_tooltip(needs_review: usize, ready: usize) -> String {
+    let mut parts = Vec::new();
+    if needs_review > 0 {
+        let verb = if needs_review == 1 { "needs" } else { "need" };
+        parts.push(format!("{needs_review} {verb} review"));
+    }
+    if ready > 0 {
+        parts.push(format!("{ready} ready to rename"));
+    }
+    if parts.is_empty() {
+        "Intern".to_owned()
+    } else {
+        format!("Intern – {}", parts.join(", "))
+    }
+}
+
+/// Refreshes the tooltip when there is a tray to carry it. Without one
+/// (background mode off, or no tray on this desktop) there is nothing to do,
+/// and a tooltip the platform refuses is no reason to fail a queue listing.
+pub fn update_tooltip(app: &AppHandle, needs_review: usize, ready: usize) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(tray_tooltip(needs_review, ready)));
+    }
+}
+
 /// Brings the tray presence in line with the setting: create the icon when
 /// background mode is on and it does not exist yet, remove it when the mode
 /// turns off. Idempotent, and never fails the caller — see the module note.
@@ -104,7 +132,19 @@ pub fn show_main_window(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{close_hides_to_tray, window_starts_hidden};
+    use super::{close_hides_to_tray, tray_tooltip, window_starts_hidden};
+
+    #[test]
+    fn the_tooltip_says_what_waits_on_a_person_and_nothing_else() {
+        assert_eq!(tray_tooltip(0, 0), "Intern");
+        assert_eq!(tray_tooltip(1, 0), "Intern – 1 needs review");
+        assert_eq!(tray_tooltip(3, 0), "Intern – 3 need review");
+        assert_eq!(tray_tooltip(0, 2), "Intern – 2 ready to rename");
+        assert_eq!(
+            tray_tooltip(3, 2),
+            "Intern – 3 need review, 2 ready to rename"
+        );
+    }
 
     #[test]
     fn closing_the_window_hides_to_tray_only_in_background_mode() {

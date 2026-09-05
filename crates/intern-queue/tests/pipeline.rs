@@ -17,10 +17,11 @@ use intern_engine::{
 };
 use intern_queue::{
     pipeline::{
-        AnalyzerBoundary, FileActions, FiledDocument, FilingSink, ModelFailure, Pipeline,
-        PipelineError, PipelineEventSink, PipelineProgress, WorkerBoundary, WorkerFailure,
+        AnalyzerBoundary, DuplicateOracle, FileActions, FiledDocument, FilingSink, KnownFiling,
+        ModelFailure, Pipeline, PipelineError, PipelineEventSink, PipelineProgress,
+        UnfiledDocument, WorkerBoundary, WorkerFailure,
     },
-    settings::{AppSettings, SettingsStore},
+    settings::{AppSettings, DestinationLayout, SettingsStore},
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -55,15 +56,33 @@ struct RecordingEvents {
 #[derive(Default)]
 struct RecordingFiling {
     filed: Mutex<Vec<FiledDocument>>,
-    unfiled: Mutex<Vec<PathBuf>>,
+    unfiled: Mutex<Vec<UnfiledDocument>>,
 }
 
 impl FilingSink for RecordingFiling {
     fn filed(&self, document: &FiledDocument) {
         self.filed.lock().unwrap().push(document.clone());
     }
-    fn unfiled(&self, destination: &Path) {
-        self.unfiled.lock().unwrap().push(destination.to_path_buf());
+    fn unfiled(&self, document: &UnfiledDocument) {
+        self.unfiled.lock().unwrap().push(document.clone());
+    }
+}
+
+/// What teammates have filed, keyed by content hash - the shared filed index
+/// as the queue sees it.
+#[derive(Default)]
+struct TeammateFilings {
+    known: Mutex<HashMap<String, KnownFiling>>,
+    asked: Mutex<Vec<(String, PathBuf)>>,
+}
+
+impl DuplicateOracle for TeammateFilings {
+    fn filed_elsewhere(&self, source_hash: &str, source_path: &Path) -> Option<KnownFiling> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((source_hash.to_owned(), source_path.to_path_buf()));
+        self.known.lock().unwrap().get(source_hash).cloned()
     }
 }
 
@@ -1051,6 +1070,8 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
     assert_eq!(filed.len(), 1, "{filed:?}");
     assert_eq!(filed[0].item_id, completed.id);
     assert_eq!(filed[0].source_path, path);
+    assert_eq!(filed[0].source_hash, completed.source_hash);
+    assert_eq!(filed[0].source_hash.len(), 64, "the content hash, as hex");
     assert_eq!(filed[0].destination, receipt.destination);
     assert_eq!(
         filed[0].description,
@@ -1088,7 +1109,12 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
     assert!(!receipt.destination.exists());
     assert_eq!(
         filing.unfiled.lock().unwrap().clone(),
-        vec![receipt.destination.clone()],
+        vec![UnfiledDocument {
+            item_id: completed.id,
+            source_path: path.clone(),
+            source_hash: completed.source_hash.clone(),
+            destination: receipt.destination.clone(),
+        }],
         "an undo retracts the report for the destination it vacated"
     );
     assert!(
@@ -1098,6 +1124,124 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
     assert_eq!(
         pipeline.find_by_source_path(&path).unwrap().unwrap().status,
         QueueStatus::Ready
+    );
+}
+
+/// A year of contracts should not become one folder of a thousand files. The
+/// layout puts each document under its year and type, creates the folders as
+/// documents arrive, and takes them away again when an undo empties them.
+#[test]
+fn a_layout_files_into_year_and_type_subfolders_and_undo_removes_the_empty_ones() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    let filed = temp.path().join("filed");
+    std::fs::create_dir_all(&inbox).unwrap();
+    std::fs::create_dir_all(&filed).unwrap();
+    let path = source(&inbox, "scan.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            destination: filed.to_string_lossy().into_owned(),
+            destination_layout: DestinationLayout::YearType,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let filing = Arc::new(RecordingFiling::default());
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap()
+    .with_filing_sink(filing.clone());
+    pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+
+    pipeline.run_until_idle().unwrap();
+
+    let completed = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(completed.status, QueueStatus::Completed);
+    let receipt = completed.receipt.clone().unwrap();
+    let expected_folder = filed.join("2024").join("Employment Agreement");
+    assert_eq!(
+        receipt.destination.parent(),
+        Some(expected_folder.as_path())
+    );
+    assert_eq!(
+        receipt
+            .destination
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("2024-04-12 Employment Agreement between John Smith and Acme Corporation.pdf")
+    );
+    assert!(receipt.destination.exists());
+    assert_eq!(
+        filing.filed.lock().unwrap()[0].destination,
+        receipt.destination,
+        "the records keeper hears the path with its subfolders"
+    );
+
+    pipeline.undo(completed.id).unwrap();
+
+    assert!(path.exists());
+    assert!(!receipt.destination.exists());
+    assert!(
+        !expected_folder.exists() && !filed.join("2024").exists(),
+        "an undo takes the folders it emptied away again"
+    );
+    assert!(filed.exists(), "the destination itself is never removed");
+}
+
+/// The name that will be applied must not collide in the folder the
+/// document is going to; the engine only knows the source folder.
+#[test]
+fn proposed_names_avoid_collisions_in_the_destination_not_the_source() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    let filed = temp.path().join("filed");
+    std::fs::create_dir_all(&inbox).unwrap();
+    std::fs::create_dir_all(&filed).unwrap();
+    let path = source(&inbox, "scan.pdf");
+    std::fs::write(
+        filed.join("2024-04-12 Employment Agreement between John Smith and Acme Corporation.pdf"),
+        b"already filed",
+    )
+    .unwrap();
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            destination: filed.to_string_lossy().into_owned(),
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+    pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+
+    pipeline.run_until_idle().unwrap();
+
+    let ready = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(ready.status, QueueStatus::Ready);
+    assert_eq!(
+        ready.proposal.unwrap().filename,
+        "2024-04-12 Employment Agreement between John Smith and Acme Corporation (2).pdf",
+        "the reviewer is shown the name that will actually be used"
     );
 }
 
@@ -1331,6 +1475,85 @@ fn refiled_content_at_a_new_path_is_flagged_duplicate_and_retry_analyzes_it() {
         .unwrap();
     assert_eq!(model.calls.load(Ordering::SeqCst), 2);
     assert_eq!(settled.status, QueueStatus::Completed);
+}
+
+/// A teammate filed this content last week from the shared intake folder.
+/// This machine's history has never seen it, so only the shared index knows;
+/// the document goes to review before any analysis, naming the filing and
+/// the machine, and "process anyway" still works.
+#[test]
+fn content_a_teammate_already_filed_is_flagged_before_analysis_and_names_their_machine() {
+    let temp = tempdir().unwrap();
+    let again = source(temp.path(), "agreement-again.pdf");
+    let fresh = source(temp.path(), "fresh.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![]));
+    let model = Arc::new(FakeModel::new(vec![]));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&again, "teammate-hash");
+    files.trust(&fresh, "fresh-hash");
+    let teammates = Arc::new(TeammateFilings::default());
+    teammates.known.lock().unwrap().insert(
+        "teammate-hash".into(),
+        KnownFiling {
+            filename: "2024-04-12 Employment Agreement.pdf".into(),
+            filed_by: Some("Front desk".into()),
+        },
+    );
+    let pipeline = pipeline(
+        temp.path(),
+        worker,
+        model.clone(),
+        files,
+        AppSettings::default(),
+    )
+    .with_duplicate_oracle(teammates.clone());
+
+    let added = pipeline
+        .enqueue_files(&[again.clone(), fresh.clone()])
+        .unwrap();
+
+    assert_eq!(added[0].status, QueueStatus::NeedsReview);
+    assert_eq!(added[0].error_code, Some(ErrorCode::Duplicate));
+    assert_eq!(
+        added[1].status,
+        QueueStatus::Queued,
+        "unknown content is queued"
+    );
+    assert_eq!(added[1].error_code, None);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        teammates.asked.lock().unwrap().clone(),
+        vec![
+            ("teammate-hash".to_string(), again.clone()),
+            ("fresh-hash".to_string(), fresh.clone()),
+        ],
+        "asked once per document, with the hash and the path"
+    );
+    let flagged = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == added[0].id)
+        .unwrap();
+    assert_eq!(
+        flagged.duplicate_of.as_deref(),
+        Some("2024-04-12 Employment Agreement.pdf (filed from Front desk)")
+    );
+
+    // "Process anyway" clears the flag; the oracle is not asked again.
+    pipeline.retry(added[0].id).unwrap();
+    let requeued = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == added[0].id)
+        .unwrap();
+    assert_eq!(requeued.status, QueueStatus::Queued);
+    assert_eq!(requeued.error_code, None);
+    assert_eq!(requeued.duplicate_of, None);
+    // Two enqueues, plus the one listing that named the referent while the
+    // item was still flagged; a retried item is never asked about again.
+    assert_eq!(teammates.asked.lock().unwrap().len(), 3);
 }
 
 #[test]

@@ -14,12 +14,13 @@ use std::{
 
 use intern_core::{OperationDirection, OperationReceipt, OperationStage, QueueStatus};
 use intern_intake::{
-    CloudLocation, CloudProviderKind, CloudRoot, DescriptionLedger, DoneOutcome, IntakeHost,
-    IntakeStatus, ItemState, MachineIdentity, MachinePresence, PRESENCE_ACTIVE_WINDOW_SECONDS,
-    classify, detect_cloud_roots,
+    CloudLocation, CloudProviderKind, CloudRoot, DescriptionLedger, DoneOutcome, FiledIndex,
+    FiledMarker, IntakeHost, IntakeStatus, ItemState, MachineIdentity, MachinePresence,
+    PRESENCE_ACTIVE_WINDOW_SECONDS, classify, detect_cloud_roots,
 };
 use intern_queue::{
-    FiledDocument, FilingSink, Pipeline, PipelineItem, SettingsStore,
+    DuplicateOracle, FiledDocument, FilingSink, KnownFiling, Pipeline, PipelineItem, SettingsStore,
+    UnfiledDocument,
     paths::{canonical_file, display_path},
 };
 use serde::Serialize;
@@ -174,7 +175,9 @@ fn machine_dto(machine: &MachinePresence, now: i64) -> IntakeMachineDto {
 /// Builds the wire status. With no live `watcher` status (intake disabled, or
 /// the watcher failed to start) everything scan-derived stays zeroed and
 /// `error` carries the recorded startup failure; a live status supplies the
-/// folder, counters, and its own error instead.
+/// folder and counters, and its own error when it has one - otherwise
+/// `error` still shows, which is how a filed-index write failure reaches
+/// Settings beside a healthy scan.
 pub(crate) fn status_dto(
     enabled: bool,
     identity: &MachineIdentity,
@@ -220,7 +223,7 @@ pub(crate) fn status_dto(
         claimed_by_others: status.claimed_by_others,
         processed_here: status.processed_here,
         last_scan_at: status.last_scan_at,
-        error: status.error.clone(),
+        error: status.error.clone().or(base.error),
         ..base
     }
 }
@@ -279,6 +282,7 @@ pub(crate) struct PipelineIntakeHost {
     model_ready: Arc<AtomicBool>,
     app: AppHandle,
     identity: MachineIdentity,
+    filed_index: Arc<SharedFiledIndex>,
 }
 
 impl PipelineIntakeHost {
@@ -288,6 +292,7 @@ impl PipelineIntakeHost {
         model_ready: Arc<AtomicBool>,
         app: AppHandle,
         identity: MachineIdentity,
+        filed_index: Arc<SharedFiledIndex>,
     ) -> Self {
         Self {
             pipeline,
@@ -295,6 +300,7 @@ impl PipelineIntakeHost {
             model_ready,
             app,
             identity,
+            filed_index,
         }
     }
 
@@ -357,11 +363,142 @@ impl IntakeHost for PipelineIntakeHost {
             &self.identity,
             &status.folder.to_string_lossy(),
             Some(status),
-            None,
+            self.filed_index.last_error(),
             now_unix(),
         );
         let _ = self.app.emit("intake://changed", dto);
     }
+}
+
+/// The shared filed index, as the queue sees it: the filing sink that leaves
+/// a marker for every document filed out of the watched intake folder, and
+/// the duplicate oracle that reads the markers teammates left there.
+///
+/// Reads the settings on every call, like the ledger, so a newly watched
+/// folder is indexed from its first filing. Only documents that came from
+/// the intake folder are recorded: a document filed from anywhere else is
+/// nobody else's business, and the shared folder should not learn its name.
+/// Failures never reach the rename that caused them; the last one is kept
+/// for the intake status.
+pub(crate) struct SharedFiledIndex {
+    settings: SettingsStore,
+    data_dir: PathBuf,
+    last_error: Mutex<Option<String>>,
+}
+
+impl SharedFiledIndex {
+    pub(crate) fn new(settings: SettingsStore, data_dir: PathBuf) -> Self {
+        Self {
+            settings,
+            data_dir,
+            last_error: Mutex::new(None),
+        }
+    }
+
+    /// The index for the current settings, or `None` when no intake folder
+    /// is being watched.
+    fn index(&self) -> Option<FiledIndex> {
+        let settings = self.settings.load().ok()?;
+        let folder = settings.intake_folder.trim();
+        if !settings.intake_enabled || folder.is_empty() {
+            return None;
+        }
+        let identity =
+            MachineIdentity::load_or_create(&self.data_dir, &settings.machine_label).ok()?;
+        Some(FiledIndex::new(PathBuf::from(folder), identity))
+    }
+
+    /// The last marker write or retraction that failed, as `CODE: detail`,
+    /// until the next success.
+    pub(crate) fn last_error(&self) -> Option<String> {
+        self.last_error.lock().ok().and_then(|error| error.clone())
+    }
+
+    fn note(&self, outcome: Result<(), String>) {
+        if let Ok(mut slot) = self.last_error.lock() {
+            *slot = outcome.err();
+        }
+    }
+}
+
+impl FilingSink for SharedFiledIndex {
+    fn filed(&self, document: &FiledDocument) {
+        let Some(index) = self.index() else {
+            return;
+        };
+        if !index.covers(&document.source_path) {
+            return;
+        }
+        let filename = document
+            .destination
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.note(
+            index
+                .record(
+                    &document.source_hash,
+                    &document.source_path,
+                    &filename,
+                    document.filed_at,
+                )
+                .map(drop)
+                .map_err(|error| format!("FILED_INDEX_WRITE_FAILED: {error}")),
+        );
+    }
+
+    fn unfiled(&self, document: &UnfiledDocument) {
+        let Some(index) = self.index() else {
+            return;
+        };
+        if !index.covers(&document.source_path) {
+            return;
+        }
+        self.note(
+            index
+                .retract(&document.source_hash)
+                .map(drop)
+                .map_err(|error| format!("FILED_INDEX_RETRACT_FAILED: {error}")),
+        );
+    }
+}
+
+impl DuplicateOracle for SharedFiledIndex {
+    fn filed_elsewhere(&self, source_hash: &str, source_path: &Path) -> Option<KnownFiling> {
+        let index = self.index()?;
+        let marker = index.lookup(source_hash)?;
+        known_filing(
+            &marker,
+            &index.identity().id,
+            index.relative_path(source_path).as_deref(),
+        )
+    }
+}
+
+/// What a marker means for a document being enqueued at `relative_path`
+/// (relative to the intake folder; `None` when it comes from elsewhere).
+///
+/// A marker is a duplicate's referent unless it is this machine's own record
+/// of the very document being enqueued again - an undone filing whose
+/// retraction has not reached the folder, which is the document itself, not
+/// a copy of it. A filing this machine made from another path is still a
+/// duplicate, but there is no other machine to name.
+pub(crate) fn known_filing(
+    marker: &FiledMarker,
+    own_machine_id: &str,
+    relative_path: Option<&str>,
+) -> Option<KnownFiling> {
+    let own = marker.machine_id == own_machine_id;
+    if own
+        && relative_path
+            .is_some_and(|path| path.to_lowercase() == marker.relative_path.to_lowercase())
+    {
+        return None;
+    }
+    Some(KnownFiling {
+        filename: marker.filename.clone(),
+        filed_by: (!own).then(|| marker.machine_name.clone()),
+    })
 }
 
 /// What the description records are doing, for Settings.
@@ -538,13 +675,57 @@ impl FilingSink for LedgerSink {
         self.announce();
     }
 
-    fn unfiled(&self, destination: &Path) {
+    fn unfiled(&self, document: &UnfiledDocument) {
         let Some(ledger) = self.ledger() else {
             return;
         };
-        if let Err(error) = ledger.retract(destination) {
+        if let Err(error) = ledger.retract(&document.destination) {
             self.note_failure(format!("DESCRIPTION_RETRACT_FAILED: {error}"));
         }
         self.announce();
+    }
+}
+
+#[cfg(test)]
+mod filed_index_tests {
+    use intern_intake::FiledMarker;
+
+    use super::known_filing;
+
+    fn marker(machine_id: &str) -> FiledMarker {
+        FiledMarker {
+            version: 1,
+            content_hash: "0".repeat(64),
+            filename: "2026-03-02 Agreement.pdf".into(),
+            relative_path: "Scans/scan0012.pdf".into(),
+            machine_id: machine_id.into(),
+            machine_name: "Front desk".into(),
+            user_name: "pat".into(),
+            filed_at: 1,
+        }
+    }
+
+    #[test]
+    fn a_teammates_marker_names_the_filing_and_their_machine() {
+        let known = known_filing(&marker("aaa"), "bbb", Some("Scans/scan0012.pdf")).unwrap();
+        assert_eq!(known.filename, "2026-03-02 Agreement.pdf");
+        assert_eq!(known.filed_by.as_deref(), Some("Front desk"));
+        // From outside the intake folder, the same answer.
+        assert_eq!(known_filing(&marker("aaa"), "bbb", None), Some(known));
+    }
+
+    #[test]
+    fn this_machines_own_marker_for_the_same_document_is_the_document_itself() {
+        assert_eq!(
+            known_filing(&marker("aaa"), "aaa", Some("scans/SCAN0012.pdf")),
+            None,
+            "an undone filing whose retraction did not stick, spelled however"
+        );
+        // The same content from another path is a duplicate, with no other
+        // machine to name.
+        let elsewhere = known_filing(&marker("aaa"), "aaa", Some("Inbox/copy.pdf")).unwrap();
+        assert_eq!(elsewhere.filed_by, None);
+        assert_eq!(elsewhere.filename, "2026-03-02 Agreement.pdf");
+        assert!(known_filing(&marker("aaa"), "aaa", None).is_some());
     }
 }

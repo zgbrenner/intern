@@ -212,6 +212,14 @@ fn strip_duplicate_extension<'a>(value: &'a str, extension: &str) -> &'a str {
     stripped
 }
 
+/// A folder name Windows accepts, built from a fact the way filename segments
+/// are: hostile characters dropped, whitespace collapsed, trailing dots and
+/// spaces removed, reserved device names escaped. `None` when nothing is
+/// left.
+pub fn sanitize_folder_name(value: &str) -> Option<String> {
+    sanitize_segment(value).map(|name| name.chars().take(80).collect::<String>())
+}
+
 fn sanitize_segment(value: &str) -> Option<String> {
     let mut output = String::new();
     let mut pending_space = false;

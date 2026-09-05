@@ -834,11 +834,22 @@
           </div>
           <div>
             <dt>Duplicates</dt>
-            <dd>A document whose content Intern has already filed is flagged as a duplicate of the filed name, rather than renamed again.</dd>
+            <dd>A document whose content Intern has already filed is flagged as a duplicate of the filed name, rather than renamed again. Choose <strong>Retry</strong> to process it anyway.</dd>
           </div>
           <div>
             <dt>Where files land</dt>
-            <dd>Settings has a destination folder. Leave it empty and files are renamed in place; set it and renamed files are moved there.</dd>
+            <dd>
+              <p>Settings has a destination folder. Leave it empty and files are renamed in place; set it and renamed files are moved there.</p>
+              <p><strong>Arrange filed documents</strong> can sort them into subfolders by year, by year and type, by type, or by first party. Folders appear as documents arrive and go away again when an undo empties them.</p>
+            </dd>
+          </div>
+          <div>
+            <dt>Finding a document</dt>
+            <dd>A long queue has a filter box above it. Type part of a filename or a word from the description; <kbd>Esc</kbd> clears it.</dd>
+          </div>
+          <div>
+            <dt>In the tray</dt>
+            <dd>With <strong>Run in the background</strong> on, the tray icon's tooltip says how many documents need review or are ready to rename.</dd>
           </div>
         </dl>
 
@@ -1059,14 +1070,19 @@
             <dt>Who is doing what</dt>
             <dd>Name your machine in Settings under <strong>This machine's name</strong>, so teammates can tell the machines apart.</dd>
           </div>
+          <div>
+            <dt>The same document twice</dt>
+            <dd>The shared folder remembers what every machine has filed out of it, for a year. A document someone uploads again — under any name — is flagged as a duplicate of the filed name, naming the machine that filed it, instead of being filed a second time.</dd>
+          </div>
         </dl>
 
         <div class="callout">
           <svg class="ico" aria-hidden="true"><use href="#i-users"/></svg>
           <div>
             <b>What the shared folder exposes</b>
-            <p>To everyone who can see the folder: filenames, file sizes, machine
-            names, and usernames. Never document content, text, or AI output.</p>
+            <p>To everyone who can see the folder: filenames, including the
+            names documents were filed under, file sizes, machine names, and
+            usernames. Never document content, text, or AI output.</p>
           </div>
         </div>
       </section>

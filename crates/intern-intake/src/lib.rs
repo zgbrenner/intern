@@ -4,7 +4,8 @@
 //! Multiple machines may watch the same OneDrive/SharePoint-synced folder.
 //! They coordinate through small JSON files in `<intake>/.intern/` that the
 //! sync client replicates — best-effort leases with a done tombstone, origin
-//! markers naming the uploading machine, and machine presence. The sync layer
+//! markers naming the uploading machine, machine presence, and filed markers
+//! naming what each document's content was filed as. The sync layer
 //! is eventually consistent, so nothing here is a hard lock; the existing
 //! fingerprint/CAS apply machinery in `intern-core` is the backstop that
 //! keeps a lost race from ever double-renaming a document.
@@ -14,6 +15,7 @@
 pub mod cloud;
 pub mod coordination;
 pub mod descriptions;
+pub mod filed;
 mod fsatomic;
 pub mod identity;
 pub mod scan;
@@ -30,6 +32,7 @@ pub use coordination::{
     SystemClock, document_key,
 };
 pub use descriptions::{DescriptionLedger, DescriptionRecord, FiledDocument, record_key};
+pub use filed::{FILED_RETENTION_SECONDS, FiledIndex, FiledMarker};
 pub use identity::MachineIdentity;
 pub use scan::{
     DEFAULT_SCAN_INTERVAL, Hydration, IntakeConfig, IntakeHost, IntakeStatus, ItemState,
