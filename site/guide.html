@@ -933,8 +933,40 @@
 
         <p class="note">
           Intern detects sync roots and labels your pick — “Synced with
-          OneDrive – …”, “Synced with SharePoint – …” — so you can see what you
-          chose.
+          OneDrive – …”, “Synced with SharePoint – …”, or “On a network
+          share – …” for a UNC path or mapped drive — so you can see what you
+          chose. Settings also lists every <strong>synced location</strong>
+          the sync client keeps on this computer, with a button to use it as
+          the intake or destination folder, because the folder a library syncs
+          to has a name nobody chose and is easy to lose in a folder dialog.
+        </p>
+
+        <h3 class="sym-group">DESCRIPTIONS IN A SHAREPOINT COLUMN</h3>
+        <p class="prose">
+          Alongside the filename, Intern writes one sentence saying what the
+          document concerns. It can leave that sentence beside each document it
+          files, so a column of the library can show it.
+        </p>
+        <ol class="steps">
+          <li>
+            <b>Turn on the records.</b>
+            <p>In Settings, under <strong>Descriptions for SharePoint</strong>, tick <strong>Write a description record for each filed document</strong> and save. It needs a destination folder, because that is where the records live.</p>
+          </li>
+          <li>
+            <b>Intern writes one small file per filed document.</b>
+            <p>Under <code>.intern\descriptions</code> in the destination folder: the new filename, its path in the library, the sentence, and the date, type, and parties behind the name. Never any document text. The sync client uploads it like any other file. Intern makes no network request for this.</p>
+          </li>
+          <li>
+            <b>A flow fills the column.</b>
+            <p>Add a <strong>Description</strong> column to the library and create the Power Automate flow described step by step in the <a href="https://github.com/zgbrenner/intern/blob/main/docs/sharepoint-descriptions.md">description-column guide</a>. It runs under the account of whoever creates it and copies each record's sentence into the column.</p>
+          </li>
+        </ol>
+        <p class="note">
+          Turned it on after filing a stack of documents? <strong>Write
+          records for documents already filed</strong> in the same section
+          writes them now. No flow? The rename history's CSV export has the
+          sentence in its last column, ready to paste into the library's grid
+          view.
         </p>
 
         <h3 class="sym-group">TWO THINGS PEOPLE ASK</h3>
@@ -989,6 +1021,10 @@
           <div>
             <dt>Half-copied files</dt>
             <dd>A file is only picked up once its size and modified time have held still for a full interval, so a file still being copied is never read.</dd>
+          </div>
+          <div>
+            <dt>Folders you cannot open</dt>
+            <dd>A subfolder this account has no permission to read is counted in Settings and skipped. Everything else is still scanned — one locked folder on a share never stops the rest.</dd>
           </div>
         </dl>
       </section>
@@ -1127,6 +1163,35 @@
 
         <h3 class="sym-group">FOLDERS AND SYNC</h3>
         <div class="symptoms">
+          <details>
+            <summary>The SharePoint column stays empty</summary>
+            <div class="answer">
+              <p>
+                Check three things in order. Settings → Descriptions for
+                SharePoint says <em>On</em> and shows the records folder; the
+                folder <code>.intern\descriptions</code> exists in the library
+                (open it in the browser — if it is missing, the sync client has
+                not uploaded it yet); and the flow's run history shows it ran.
+              </p>
+              <p>
+                A record can arrive before its document. The recipe's retry
+                handles that; a flow built without it fails once and needs a
+                re-run.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>Settings says “subfolders could not be read”</summary>
+            <div class="answer">
+              <p>
+                The intake folder has a subfolder this Windows account cannot
+                open — common on a shared drive where permissions are set per
+                folder. Documents in it are not seen; everything else is. Ask
+                for read permission on that folder, or move the documents out
+                of it.
+              </p>
+            </div>
+          </details>
           <details>
             <summary>A file in my watched folder is being ignored</summary>
             <div class="answer">

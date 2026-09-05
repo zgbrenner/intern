@@ -232,13 +232,15 @@ fn scan_once(
     }
     let store = store.as_ref().expect("claim store was just created");
 
-    let files = match walk_intake(&config.intake_root, &config.extensions) {
-        Ok(files) => files,
+    let walk = match walk_intake(&config.intake_root, &config.extensions) {
+        Ok(walk) => walk,
         Err(error) => {
             status.error = Some(format!("INTAKE_FOLDER_UNAVAILABLE: {error}"));
             return status;
         }
     };
+    status.unreadable_folders = walk.unreadable_folders;
+    let files = walk.files;
 
     // Read before the walk is processed so a conflict copy is recognised on the
     // same scan it appears, and include this machine: OneDrive names the losing

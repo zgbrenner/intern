@@ -30,14 +30,17 @@ describe('TauriBridge', () => {
   it('maps the exact narrow command names and JSON-safe payloads', async () => {
     const fake = fakeTransport({
       queue_list: [],
-      settings_get: { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false },
+      settings_get: { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false },
       setup_get: { state: 'required', downloadedBytes: 0, totalBytes: 3278329184 },
       intake_status: {
         enabled: false, watching: false, folder: '', machineId: 'm-1', machineName: 'Reception',
-        cloud: null, machines: [], heldForOthers: 0, syncConflicts: 0, awaitingHydration: 0, claimedByOthers: 0, processedHere: 0,
+        cloud: null, machines: [], heldForOthers: 0, syncConflicts: 0, awaitingHydration: 0, unreadableFolders: 0, claimedByOthers: 0, processedHere: 0,
         lastScanAt: null, error: null,
       },
       folder_classify: { provider: 'onedrive_business', displayName: 'OneDrive – Contoso' },
+      cloud_roots: [{ provider: 'sharepoint', displayName: 'Contoso', path: 'C:\\Users\\pat\\Contoso\\Legal - Documents' }],
+      descriptions_status: { enabled: true, folder: 'C:\\Filed\\.intern\\descriptions', recordedThisSession: 2, lastRecordedAt: 1716282600, lastError: null },
+      descriptions_backfill: { written: 3, failed: 0 },
       history_list: [],
       history_export: 0,
     });
@@ -55,7 +58,7 @@ describe('TauriBridge', () => {
     await bridge.keepOriginal('7');
     await bridge.undo('7');
     await bridge.getSettings();
-    await bridge.saveSettings({ destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true });
+    await bridge.saveSettings({ destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true, recordDescriptions: true });
     await bridge.getSetup();
     await bridge.startModelDownload();
     await bridge.setupCancel();
@@ -66,6 +69,9 @@ describe('TauriBridge', () => {
     await bridge.intakeStatus();
     await bridge.scanIntakeNow();
     await bridge.classifyFolder('C:\\OneDrive\\Scans');
+    expect(await bridge.cloudRoots()).toEqual([{ provider: 'sharepoint', displayName: 'Contoso', path: 'C:\\Users\\pat\\Contoso\\Legal - Documents' }]);
+    expect((await bridge.descriptionsStatus()).recordedThisSession).toBe(2);
+    expect(await bridge.descriptionsBackfill()).toEqual({ written: 3, failed: 0 });
 
     expect(fake.calls).toEqual([
       { command: 'queue_list', args: undefined },
@@ -80,7 +86,7 @@ describe('TauriBridge', () => {
       { command: 'proposal_keep_original', args: { id: '7' } },
       { command: 'operation_undo', args: { id: '7' } },
       { command: 'settings_get', args: undefined },
-      { command: 'settings_save', args: { settings: { destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true } } },
+      { command: 'settings_save', args: { settings: { destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true, recordDescriptions: true } } },
       { command: 'setup_get', args: undefined },
       { command: 'setup_start', args: undefined },
       { command: 'setup_cancel', args: undefined },
@@ -91,7 +97,30 @@ describe('TauriBridge', () => {
       { command: 'intake_status', args: undefined },
       { command: 'intake_scan_now', args: undefined },
       { command: 'folder_classify', args: { path: 'C:\\OneDrive\\Scans' } },
+      { command: 'cloud_roots', args: undefined },
+      { command: 'descriptions_status', args: undefined },
+      { command: 'descriptions_backfill', args: undefined },
     ]);
+  });
+
+  it('keeps a history description only when the backend sent a sentence', async () => {
+    const fake = fakeTransport({
+      history_list: [
+        { receiptId: 3, queueItemId: 7, at: 1, direction: 'apply', kind: 'rename', stage: 'complete', originalPath: 'C:\\a.pdf', newPath: 'C:\\b.pdf', description: 'A sentence.' },
+        { receiptId: 2, queueItemId: 6, at: 0, direction: 'apply', kind: 'rename', stage: 'complete', originalPath: 'C:\\c.pdf', newPath: 'C:\\d.pdf', description: null },
+      ],
+    });
+
+    const entries = await new TauriBridge(fake.transport).historyList();
+
+    expect(entries[0]).toMatchObject({ receiptId: '3', queueItemId: '7', description: 'A sentence.' });
+    expect(entries[1]).not.toHaveProperty('description');
+  });
+
+  it('reports an empty sync-root list as an empty array, never undefined', async () => {
+    const fake = fakeTransport({ cloud_roots: undefined });
+
+    await expect(new TauriBridge(fake.transport).cloudRoots()).resolves.toEqual([]);
   });
 
   it('normalizes backend statuses and never exposes a proposal for waiting items', async () => {

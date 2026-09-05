@@ -1,6 +1,6 @@
 import { GUIDE_URL } from './bridge';
 import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult, UpdateStatus } from './bridge';
-import type { AppSettings, CloudLocation, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
 
 /** Exact size of the single pinned model file this build downloads. */
 export const PINNED_MODEL_BYTES = 1_280_835_840;
@@ -66,15 +66,38 @@ function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
 function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): DesktopBridge {
   let items = (options.items ?? seedItems).map((item) => ({ ...item }));
   let history = seedHistory.map((entry) => ({ ...entry }));
-  let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false };
+  let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false };
   // Deterministic classification so browser dev and e2e runs can exercise the
   // cloud badge without a real sync client: the path only has to mention the
-  // provider. Mirrors the DTO the desktop backend returns from folder_classify.
+  // provider, or start like a UNC path. Mirrors the DTO the desktop backend
+  // returns from folder_classify.
   const classifyPath = async (path: string): Promise<CloudLocation | null> => {
     const lower = path.toLowerCase();
     if (lower.includes('onedrive')) return { provider: 'onedrive_business', displayName: 'OneDrive – Contoso' };
     if (lower.includes('sharepoint')) return { provider: 'sharepoint', displayName: 'Contoso' };
+    const share = /^\\\\([^\\]+)\\([^\\]+)/.exec(path);
+    if (share) return { provider: 'network_share', displayName: `\\\\${share[1]}\\${share[2]}` };
     return null;
+  };
+  // The sync roots a developer machine would show; fixed so the Settings
+  // list renders the same in dev and tests.
+  const roots: CloudRoot[] = [
+    { provider: 'sharepoint', displayName: 'Contoso', path: 'C:\\Users\\pat\\Contoso\\Legal - Documents' },
+    { provider: 'onedrive_business', displayName: 'OneDrive – Contoso', path: 'C:\\Users\\pat\\OneDrive - Contoso' },
+  ];
+  let recordedDescriptions = 0;
+  let lastRecordedAt: number | null = null;
+  const descriptionsStatus = (): DescriptionsStatus => ({
+    enabled: settings.recordDescriptions,
+    folder: settings.destination.trim() ? `${settings.destination.replace(/[\\/]+$/, '')}\\.intern\\descriptions` : '',
+    recordedThisSession: recordedDescriptions,
+    lastRecordedAt,
+    lastError: null,
+  });
+  const noteRecorded = () => {
+    if (!settings.recordDescriptions || !settings.destination.trim()) return;
+    recordedDescriptions += 1;
+    lastRecordedAt = Math.floor(Date.now() / 1000);
   };
   // The pinned model's exact size from src-tauri/resources/model-manifest.json.
   // The previous value, 3_278_329_184, was a model plus a vision projector that
@@ -118,7 +141,7 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     pauseQueue: async () => { items = items.map((item) => item.status === 'processing' ? { ...item, status: 'waiting' as const } : item); },
     resumeQueue: async () => { const item = items.find((entry) => entry.status === 'waiting'); if (item) update(item.id, { status: 'processing', progress: 0 }); },
     cancel: async (id) => update(id, { status: 'failed', progress: undefined, reason: 'Canceled.' }),
-    approve: async (id, filename, description) => update(id, { status: 'completed', proposedFilename: filename, description, undoable: true }),
+    approve: async (id, filename, description) => { update(id, { status: 'completed', proposedFilename: filename, description, undoable: true }); noteRecorded(); },
     keepOriginal: async (id) => update(id, { status: 'completed', proposedFilename: undefined, undoable: true }),
     retry: async (id) => update(id, { status: 'waiting', progress: undefined }),
     remove: async (id) => {
@@ -186,6 +209,7 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
         heldForOthers: enabled ? 2 : 0,
         syncConflicts: 0,
         awaitingHydration: 0,
+        unreadableFolders: 0,
         claimedByOthers: enabled ? 1 : 0,
         processedHere: enabled ? 3 : 0,
         lastScanAt: enabled ? now - 5 : null,
@@ -194,6 +218,17 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     },
     scanIntakeNow: async () => { /* Nothing is watching in the browser; the desktop backend wakes its scan loop. */ },
     classifyFolder: (path) => classifyPath(path),
+    cloudRoots: async () => roots.map((root) => ({ ...root })),
+    descriptionsStatus: async () => descriptionsStatus(),
+    // Mirrors the backend: refused until the setting is saved on, otherwise
+    // one record per completed item that still carries its sentence.
+    descriptionsBackfill: async () => {
+      if (!settings.recordDescriptions) throw { code: 'DESCRIPTIONS_DISABLED', message: 'turn on description records and save before writing them' };
+      const written = items.filter((item) => item.status === 'completed' && item.description).length;
+      recordedDescriptions += written;
+      if (written) lastRecordedAt = Math.floor(Date.now() / 1000);
+      return { written, failed: 0 };
+    },
     // Already in a browser, so the guide opens the way any other link would.
     // noopener keeps the new tab from reaching back into this document.
     openGuide: async () => { window.open(GUIDE_URL, '_blank', 'noopener,noreferrer'); },

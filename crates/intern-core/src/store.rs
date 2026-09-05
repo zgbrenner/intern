@@ -906,6 +906,40 @@ impl QueueStore {
             .map_err(InternError::from)
     }
 
+    /// The newest item enqueued from any of `paths`, compared by the same
+    /// normalized key `enqueue` stores.
+    ///
+    /// The intake watcher asks about one path per file per scan, and the
+    /// answer used to come from listing the whole queue - and loading every
+    /// proposal with it - for each question. One indexed lookup is what the
+    /// question costs. Several spellings of the same path may be offered
+    /// (as entered, and canonicalized) because a file the apply already
+    /// renamed away no longer canonicalizes.
+    pub fn find_newest_by_source_path(&self, paths: &[&Path]) -> InternResult<Option<QueueItem>> {
+        if paths.is_empty() {
+            return Ok(None);
+        }
+        let keys = paths
+            .iter()
+            .map(|path| source_path_key(path))
+            .collect::<Vec<_>>();
+        let placeholders = (1..=keys.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let connection = self.lock()?;
+        connection
+            .query_row(
+                &queue_select(&format!(
+                    "WHERE source_path_key IN ({placeholders}) ORDER BY id DESC LIMIT 1"
+                )),
+                rusqlite::params_from_iter(keys.iter()),
+                row_to_item,
+            )
+            .optional()
+            .map_err(InternError::from)
+    }
+
     pub fn list(&self) -> InternResult<Vec<QueueItem>> {
         let connection = self.lock()?;
         let mut statement = connection

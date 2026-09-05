@@ -28,6 +28,11 @@ pub struct AppSettings {
     /// Register Intern to start when the user signs in.
     #[serde(default)]
     pub start_at_login: bool,
+    /// Write a description record beside every document filed into the
+    /// destination folder (`<destination>/.intern/descriptions/`), so a
+    /// SharePoint column can be filled from it.
+    #[serde(default)]
+    pub record_descriptions: bool,
 }
 
 #[derive(Clone, Debug)]

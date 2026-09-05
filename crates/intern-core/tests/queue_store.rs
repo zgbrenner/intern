@@ -907,3 +907,44 @@ fn duplicate_flag_and_retry_are_compare_and_swap_guarded() {
         ErrorCode::StateConflict
     );
 }
+
+#[test]
+fn the_newest_item_for_a_path_is_found_by_key_across_spellings() {
+    let temp = TempDir::new().unwrap();
+    let db = store(&temp);
+    let scan = temp.path().join("Scans").join("Contract.PDF");
+    fs::create_dir_all(scan.parent().unwrap()).unwrap();
+    let first = db.enqueue(&scan, "hash-one").unwrap();
+    let second = db.enqueue(&scan, "hash-two").unwrap();
+    assert!(second.id > first.id);
+
+    let found = db
+        .find_newest_by_source_path(&[scan.as_path()])
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        found.id, second.id,
+        "the newest row is the path's current fate"
+    );
+
+    let respelled = temp.path().join("scans").join("contract.pdf");
+    let found = db
+        .find_newest_by_source_path(&[respelled.as_path()])
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.id, second.id, "keys fold case like enqueue does");
+
+    let elsewhere = temp.path().join("elsewhere.pdf");
+    assert!(
+        db.find_newest_by_source_path(&[elsewhere.as_path()])
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        db.find_newest_by_source_path(&[elsewhere.as_path(), scan.as_path()])
+            .unwrap()
+            .is_some(),
+        "any offered spelling may match"
+    );
+    assert!(db.find_newest_by_source_path(&[]).unwrap().is_none());
+}

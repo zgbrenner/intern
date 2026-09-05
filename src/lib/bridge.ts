@@ -1,4 +1,4 @@
-import type { AppSettings, CloudLocation, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
 
 /** A JSON-safe local document reference that Task 6 can pass to Tauri. */
 export interface FileSelection {
@@ -103,6 +103,21 @@ export interface DesktopBridge {
    */
   classifyFolder(path: string): Promise<CloudLocation | null>;
   /**
+   * The OneDrive accounts and SharePoint libraries the sync client keeps on
+   * this computer, so Settings can offer them instead of making a person hunt
+   * for the folder under their profile. A local lookup of the sync client's
+   * own configuration; no network request is made.
+   */
+  cloudRoots(): Promise<CloudRoot[]>;
+  /** What the description records are doing: on or off, where, and the last failure. */
+  descriptionsStatus(): Promise<DescriptionsStatus>;
+  /**
+   * Write a description record for every document already filed and not
+   * undone, for a records folder switched on after the fact. Rejected with
+   * DESCRIPTIONS_DISABLED until the setting is saved on.
+   */
+  descriptionsBackfill(): Promise<BackfillResult>;
+  /**
    * Open the published guide (`GUIDE_URL`) in the user's own browser.
    *
    * Deliberately takes no URL. Inside Tauri a bare `<a target="_blank">` has
@@ -119,6 +134,14 @@ export interface DesktopBridge {
  */
 export interface IntakeEventSource {
   subscribeIntake(handler: (status: IntakeStatus) => void): () => void;
+}
+
+/**
+ * Optional capability, duck-typed like IntakeEventSource: bridges that can
+ * push description-record status changes expose it.
+ */
+export interface DescriptionsEventSource {
+  subscribeDescriptions(handler: (status: DescriptionsStatus) => void): () => void;
 }
 
 export type UpdateStatus =

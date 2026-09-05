@@ -12,7 +12,8 @@ pub mod pipeline;
 pub mod settings;
 
 pub use pipeline::{
-    AnalyzerBoundary, FileActions, ModelFailure, Pipeline, PipelineError, PipelineEventSink,
-    PipelineItem, PipelineProgress, PipelineResult, ProposalRecord, WorkerBoundary, WorkerFailure,
+    AnalyzerBoundary, FileActions, FiledDocument, FilingSink, ModelFailure, Pipeline,
+    PipelineError, PipelineEventSink, PipelineItem, PipelineProgress, PipelineResult,
+    ProposalRecord, WorkerBoundary, WorkerFailure,
 };
 pub use settings::{AppSettings, SettingsStore};

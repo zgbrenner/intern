@@ -5,7 +5,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::Sender,
     },
@@ -14,10 +14,14 @@ use std::{
 
 use intern_core::{OperationDirection, OperationReceipt, OperationStage, QueueStatus};
 use intern_intake::{
-    CloudLocation, CloudProviderKind, DoneOutcome, IntakeHost, IntakeStatus, ItemState,
-    MachineIdentity, MachinePresence, PRESENCE_ACTIVE_WINDOW_SECONDS, classify, detect_cloud_roots,
+    CloudLocation, CloudProviderKind, CloudRoot, DescriptionLedger, DoneOutcome, IntakeHost,
+    IntakeStatus, ItemState, MachineIdentity, MachinePresence, PRESENCE_ACTIVE_WINDOW_SECONDS,
+    classify, detect_cloud_roots,
 };
-use intern_queue::{Pipeline, PipelineItem, paths::canonical_file};
+use intern_queue::{
+    FiledDocument, FilingSink, Pipeline, PipelineItem, SettingsStore,
+    paths::{canonical_file, display_path},
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -31,6 +35,8 @@ pub enum CloudProviderDto {
     OneDriveBusiness,
     #[serde(rename = "sharepoint")]
     SharePoint,
+    #[serde(rename = "network_share")]
+    NetworkShare,
 }
 
 impl From<CloudProviderKind> for CloudProviderDto {
@@ -39,7 +45,50 @@ impl From<CloudProviderKind> for CloudProviderDto {
             CloudProviderKind::OneDrivePersonal => Self::OneDrivePersonal,
             CloudProviderKind::OneDriveBusiness => Self::OneDriveBusiness,
             CloudProviderKind::SharePoint => Self::SharePoint,
+            CloudProviderKind::NetworkShare => Self::NetworkShare,
         }
+    }
+}
+
+/// One sync root the sync client keeps on this machine, for Settings to
+/// offer as a folder to watch or file into.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudRootDto {
+    pub provider: CloudProviderDto,
+    pub display_name: String,
+    pub path: String,
+}
+
+impl From<CloudRoot> for CloudRootDto {
+    fn from(root: CloudRoot) -> Self {
+        Self {
+            provider: root.kind.into(),
+            display_name: root.display_name,
+            path: display_path(&root.root),
+        }
+    }
+}
+
+/// The sync roots detected on this machine, SharePoint libraries first,
+/// then OneDrive accounts, each group in path order, so the list reads the
+/// same on every open.
+pub(crate) fn list_cloud_roots() -> Vec<CloudRootDto> {
+    let mut roots = detect_cloud_roots();
+    roots.sort_by(|left, right| {
+        rank(left.kind)
+            .cmp(&rank(right.kind))
+            .then_with(|| left.root.cmp(&right.root))
+    });
+    roots.into_iter().map(Into::into).collect()
+}
+
+fn rank(kind: CloudProviderKind) -> u8 {
+    match kind {
+        CloudProviderKind::SharePoint => 0,
+        CloudProviderKind::OneDriveBusiness => 1,
+        CloudProviderKind::OneDrivePersonal => 2,
+        CloudProviderKind::NetworkShare => 3,
     }
 }
 
@@ -82,6 +131,7 @@ pub struct IntakeStatusDto {
     pub held_for_others: u32,
     pub sync_conflicts: u32,
     pub awaiting_hydration: u32,
+    pub unreadable_folders: u32,
     pub claimed_by_others: u32,
     pub processed_here: u32,
     pub last_scan_at: Option<i64>,
@@ -136,7 +186,7 @@ pub(crate) fn status_dto(
     let base = IntakeStatusDto {
         enabled,
         watching: false,
-        folder: folder.to_owned(),
+        folder: display_path(Path::new(folder)),
         machine_id: identity.id.clone(),
         machine_name: identity.name.clone(),
         cloud: classify_folder(folder),
@@ -144,6 +194,7 @@ pub(crate) fn status_dto(
         held_for_others: 0,
         sync_conflicts: 0,
         awaiting_hydration: 0,
+        unreadable_folders: 0,
         claimed_by_others: 0,
         processed_here: 0,
         last_scan_at: None,
@@ -156,7 +207,7 @@ pub(crate) fn status_dto(
     IntakeStatusDto {
         watching: status.watching,
         cloud: classify_folder(&folder),
-        folder,
+        folder: display_path(&status.folder),
         machines: status
             .machines
             .iter()
@@ -165,6 +216,7 @@ pub(crate) fn status_dto(
         held_for_others: status.held_for_others,
         sync_conflicts: status.sync_conflicts,
         awaiting_hydration: status.awaiting_hydration,
+        unreadable_folders: status.unreadable_folders,
         claimed_by_others: status.claimed_by_others,
         processed_here: status.processed_here,
         last_scan_at: status.last_scan_at,
@@ -252,15 +304,10 @@ impl PipelineIntakeHost {
     /// longer canonicalizes (the apply already renamed it away) still matches
     /// literally — that is what lets a finished item report `Done` instead of
     /// `Unknown`. The newest matching item is the source's current fate;
-    /// older completed rows for the same path are history.
+    /// older completed rows for the same path are history. One indexed
+    /// lookup per file: this is asked once per document on every scan.
     fn find_item(&self, path: &Path) -> Option<PipelineItem> {
-        let canonical = std::fs::canonicalize(path).ok();
-        self.pipeline.list().ok()?.into_iter().rfind(|item| {
-            item.source_path.as_path() == path
-                || canonical
-                    .as_deref()
-                    .is_some_and(|canonical| item.source_path.as_path() == canonical)
-        })
+        self.pipeline.find_by_source_path(path).ok().flatten()
     }
 }
 
@@ -314,5 +361,190 @@ impl IntakeHost for PipelineIntakeHost {
             now_unix(),
         );
         let _ = self.app.emit("intake://changed", dto);
+    }
+}
+
+/// What the description records are doing, for Settings.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DescriptionsStatusDto {
+    /// The setting, as saved.
+    pub enabled: bool,
+    /// Where records go: `<destination>/.intern/descriptions`, or empty when
+    /// no destination is configured.
+    pub folder: String,
+    /// Records written since Intern started.
+    pub recorded_this_session: u32,
+    pub last_recorded_at: Option<i64>,
+    /// The last write that failed, as `CODE: detail`, until the next success.
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct LedgerCounters {
+    recorded: u32,
+    last_recorded_at: Option<i64>,
+    last_error: Option<String>,
+}
+
+/// The queue's filing sink: writes a description record for every completed
+/// rename into the destination folder's ledger, and removes it again when the
+/// rename is undone. Reads the settings on every call, so switching the
+/// feature on or changing the destination takes effect at the next rename
+/// without restarting anything. Failures never reach the rename that caused
+/// them; they are kept here for Settings to show.
+pub(crate) struct LedgerSink {
+    settings: SettingsStore,
+    data_dir: PathBuf,
+    app: Mutex<Option<AppHandle>>,
+    counters: Mutex<LedgerCounters>,
+}
+
+impl LedgerSink {
+    pub(crate) fn new(settings: SettingsStore, data_dir: PathBuf) -> Self {
+        Self {
+            settings,
+            data_dir,
+            app: Mutex::new(None),
+            counters: Mutex::new(LedgerCounters::default()),
+        }
+    }
+
+    /// Attaches the app so record writes can announce themselves as
+    /// `descriptions://changed` events; before this, they are silent.
+    pub(crate) fn attach(&self, app: AppHandle) {
+        if let Ok(mut slot) = self.app.lock() {
+            *slot = Some(app);
+        }
+    }
+
+    /// The ledger for the current settings, or `None` when records are
+    /// switched off or there is no destination to keep them in.
+    fn ledger(&self) -> Option<DescriptionLedger> {
+        let settings = self.settings.load().ok()?;
+        let destination = settings.destination.trim();
+        if !settings.record_descriptions || destination.is_empty() {
+            return None;
+        }
+        let identity =
+            MachineIdentity::load_or_create(&self.data_dir, &settings.machine_label).ok()?;
+        Some(DescriptionLedger::new(
+            PathBuf::from(destination),
+            identity,
+            detect_cloud_roots(),
+        ))
+    }
+
+    pub(crate) fn status(&self) -> DescriptionsStatusDto {
+        let settings = self.settings.load().unwrap_or_default();
+        let destination = settings.destination.trim();
+        let folder = if destination.is_empty() {
+            String::new()
+        } else {
+            display_path(&DescriptionLedger::directory_under(Path::new(destination)))
+        };
+        let counters = self
+            .counters
+            .lock()
+            .map(|counters| LedgerCounters {
+                recorded: counters.recorded,
+                last_recorded_at: counters.last_recorded_at,
+                last_error: counters.last_error.clone(),
+            })
+            .unwrap_or_default();
+        DescriptionsStatusDto {
+            enabled: settings.record_descriptions,
+            folder,
+            recorded_this_session: counters.recorded,
+            last_recorded_at: counters.last_recorded_at,
+            last_error: counters.last_error,
+        }
+    }
+
+    /// Writes records for every document the queue has filed and not undone.
+    /// Returns how many were written and how many failed; the last failure
+    /// is kept for Settings.
+    pub(crate) fn backfill(&self, documents: &[FiledDocument]) -> (u32, u32) {
+        let Some(ledger) = self.ledger() else {
+            return (0, 0);
+        };
+        let mut written = 0;
+        let mut failed = 0;
+        for document in documents {
+            match ledger.record(&record_of(document)) {
+                Ok(_) => {
+                    written += 1;
+                    self.note_success();
+                }
+                Err(error) => {
+                    failed += 1;
+                    self.note_failure(format!("DESCRIPTION_WRITE_FAILED: {error}"));
+                }
+            }
+        }
+        self.announce();
+        (written, failed)
+    }
+
+    fn note_success(&self) {
+        if let Ok(mut counters) = self.counters.lock() {
+            counters.recorded += 1;
+            counters.last_recorded_at = Some(now_unix());
+            counters.last_error = None;
+        }
+    }
+
+    fn note_failure(&self, error: String) {
+        if let Ok(mut counters) = self.counters.lock() {
+            counters.last_error = Some(error);
+        }
+    }
+
+    fn announce(&self) {
+        if let Ok(app) = self.app.lock()
+            && let Some(app) = app.as_ref()
+        {
+            let _ = app.emit("descriptions://changed", self.status());
+        }
+    }
+}
+
+fn record_of(document: &FiledDocument) -> intern_intake::FiledDocument {
+    intern_intake::FiledDocument {
+        path: document.destination.clone(),
+        original_filename: document
+            .source_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        description: document.description.clone(),
+        document_date: document.proposal.document_date.clone(),
+        document_type: document.proposal.document_type.clone(),
+        parties: document.proposal.parties.clone(),
+        confidence: Some(document.proposal.confidence),
+        filed_at: document.filed_at,
+    }
+}
+
+impl FilingSink for LedgerSink {
+    fn filed(&self, document: &FiledDocument) {
+        let Some(ledger) = self.ledger() else {
+            return;
+        };
+        match ledger.record(&record_of(document)) {
+            Ok(_) => self.note_success(),
+            Err(error) => self.note_failure(format!("DESCRIPTION_WRITE_FAILED: {error}")),
+        }
+        self.announce();
+    }
+
+    fn unfiled(&self, destination: &Path) {
+        let Some(ledger) = self.ledger() else {
+            return;
+        };
+        if let Err(error) = ledger.retract(destination) {
+            self.note_failure(format!("DESCRIPTION_RETRACT_FAILED: {error}"));
+        }
+        self.announce();
     }
 }

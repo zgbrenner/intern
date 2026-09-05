@@ -69,6 +69,33 @@ Renaming in place inside a watched folder would make every result reappear as
 a new document; Intern refuses the configuration at save time rather than
 discovering the loop at run time.
 
+A subfolder the scan cannot list — a folder this account has no permission to
+open, or one the sync client removed between the listing and the descent — is
+counted in Settings and skipped. Everything else in the folder is still
+scanned; one locked folder never stops the rest of a share from being filed.
+Only the intake root itself has to be readable.
+
+### Finding the folder
+
+The folder a SharePoint library syncs to lives under the user's profile with
+a name nobody chose (`C:\Users\pat\Contoso\Legal - Documents`), and finding
+it in a folder dialog was the step people got stuck on. Settings therefore
+lists the **synced locations** the sync client has registered on the machine
+— every SharePoint library and OneDrive account, with its local folder — and
+fills the intake or destination field from one click. A subfolder can still
+be typed or browsed afterwards.
+
+## Network shares
+
+Nothing here requires a sync client. A folder on a network share — a UNC path
+such as `\\fileserver\legal\intake`, or a mapped drive letter Windows reports
+as remote — is recognised and labelled *On a network share* in Settings, and
+several machines watching the same share coordinate through exactly the same
+`.intern/` claim files. The difference is in the guarantees: a share is one
+filesystem, so claim creation is genuinely exclusive there, and the
+eventual-consistency caveats below do not apply. What the share does not do is
+hydrate anything; every file on it is already local to every machine.
+
 ## Several machines, one intake folder
 
 When more than one machine watches the same synced folder, they coordinate
@@ -125,6 +152,15 @@ The `.intern/` metadata is visible to everyone who can see the folder. It
 contains filenames, file sizes, machine names, and usernames — never document
 content, text, or model output. If a filename is itself sensitive, the folder
 you are sharing already reveals it; Intern adds nothing beyond that.
+
+The destination folder can carry a second kind of `.intern/` metadata, opt-in:
+**description records**, one small JSON file per filed document with the
+one-sentence description and the date, type, and parties behind the name, so
+a SharePoint column can be filled from them. Those do state what a document
+concerns, in one sentence, to everyone who can see the destination — which is
+the point of putting them in a library column, and the reason the setting is
+off by default. [`sharepoint-descriptions.md`](sharepoint-descriptions.md)
+describes the record and the flow that consumes it.
 
 ## Failure behavior, stated plainly
 

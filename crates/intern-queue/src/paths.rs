@@ -127,6 +127,33 @@ pub fn collect_supported_files(root: &Path) -> PipelineResult<Vec<PathBuf>> {
     Ok(files)
 }
 
+/// The largest path Windows accepts without the `\\?\` prefix.
+const WINDOWS_MAX_PATH: usize = 260;
+
+/// A path as a person should read it.
+///
+/// `canonicalize` on Windows answers in the verbatim form - `\\?\C:\Users\...`
+/// and `\\?\UNC\server\share\...` - which every file API accepts and every
+/// person squints at. Settings and history showed it as stored. The prefix
+/// is dropped only when the plain spelling is safe: short enough to work
+/// without it, and free of the trailing dots and spaces the prefix exists to
+/// protect. Storage keeps the verbatim form; this is for display alone.
+pub fn display_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    let plain = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        return text.into_owned();
+    };
+    let simple = plain.chars().count() < WINDOWS_MAX_PATH
+        && plain
+            .split(['\\', '/'])
+            .all(|component| !component.ends_with([' ', '.']));
+    if simple { plain } else { text.into_owned() }
+}
+
 fn supported(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())

@@ -629,3 +629,34 @@ fn a_document_deleted_while_awaiting_hydration_stops_being_waited_on() {
     assert_eq!(rig.watcher.status().awaiting_hydration, 0);
     assert!(!rig.claim_file(&key).exists());
 }
+
+/// A shared drive grants permissions per folder. One folder this machine may
+/// not list must not stop every other document in the share from being filed.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_subfolder_is_counted_and_skipped_rather_than_failing_the_scan() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let locked = rig.temp.path().join("locked");
+    fs::create_dir(&locked).unwrap();
+    fs::write(locked.join("hidden.pdf"), b"cannot be listed").unwrap();
+    let open = rig.write("open.pdf", b"can be listed");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    // Root runs skip permission checks, and the restoration below must happen
+    // even when the assertions fail, so the check is a guarded closure.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rig.step();
+        rig.step();
+        let status = rig.watcher.status();
+        if fs::read_dir(&locked).is_ok() {
+            return;
+        }
+        assert_eq!(status.unreadable_folders, 1, "{status:?}");
+        assert_eq!(status.error, None, "{status:?}");
+        assert_eq!(rig.host.enqueued(), vec![open.clone()]);
+    }));
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    result.unwrap();
+}

@@ -32,12 +32,13 @@ use intern_queue::{
     PipelineItem, PipelineProgress, SettingsStore,
     paths::{
         SUPPORTED_EXTENSIONS, canonical_file, canonical_folder, canonical_model_file,
-        collect_supported_files, parse_item_id,
+        collect_supported_files, display_path, parse_item_id,
     },
 };
 
 use crate::intake::{
-    CloudLocationDto, IntakeStatusDto, PipelineIntakeHost, classify_folder, now_unix, status_dto,
+    CloudLocationDto, CloudRootDto, DescriptionsStatusDto, IntakeStatusDto, LedgerSink,
+    PipelineIntakeHost, classify_folder, list_cloud_roots, now_unix, status_dto,
 };
 
 #[derive(Clone, Debug, Deserialize)]
@@ -629,6 +630,9 @@ pub struct AppState {
     /// readers never block the pipeline's writes) instead of widening the
     /// pipeline's surface.
     history: QueueStore,
+    /// Writes description records beside filed documents when the setting
+    /// asks for them; the pipeline reports every completed rename to it.
+    ledger: Arc<LedgerSink>,
 }
 
 impl AppState {
@@ -681,16 +685,21 @@ impl AppState {
             code: "APP_DATA_UNAVAILABLE".into(),
             message: "private worker temporary directory is unavailable".into(),
         })?;
-        let pipeline = Arc::new(Pipeline::with_local_files(
-            data.join("queue.sqlite3"),
-            Arc::new(SupervisedWorker::with_temp_root(
-                executable_directory.join(worker_name),
-                worker_temp_root,
-            )),
-            runtime,
-            Arc::new(TauriPipelineEvents { app: app.clone() }),
-            settings.clone(),
-        )?);
+        let ledger = Arc::new(LedgerSink::new(settings.clone(), data.clone()));
+        ledger.attach(app.clone());
+        let pipeline = Arc::new(
+            Pipeline::with_local_files(
+                data.join("queue.sqlite3"),
+                Arc::new(SupervisedWorker::with_temp_root(
+                    executable_directory.join(worker_name),
+                    worker_temp_root,
+                )),
+                runtime,
+                Arc::new(TauriPipelineEvents { app: app.clone() }),
+                settings.clone(),
+            )?
+            .with_filing_sink(ledger.clone()),
+        );
         pipeline.recover()?;
         // Opened after the pipeline so the pipeline's own store has already
         // migrated the schema this connection reads.
@@ -724,6 +733,7 @@ impl AppState {
             intake: Mutex::new(None),
             intake_error: Mutex::new(None),
             history,
+            ledger,
         };
         if matches!(state.setup.get()?.state, SetupStatus::Ready) {
             state.schedule()?;
@@ -971,9 +981,24 @@ pub fn operation_undo(id: String, state: State<'_, AppState>) -> Result<(), Comm
     Ok(())
 }
 
+/// The settings as the interface should show them: folders in their readable
+/// spelling. Storage keeps the canonical form (on Windows, the verbatim
+/// `\\?\` prefix that long and oddly named paths need), and `settings_save`
+/// canonicalizes whatever comes back, so the round trip is lossless.
 #[tauri::command]
 pub fn settings_get(state: State<'_, AppState>) -> Result<AppSettings, CommandError> {
-    state.settings.load().map_err(Into::into)
+    let mut settings = state.settings.load()?;
+    settings.destination = display_folder(&settings.destination);
+    settings.intake_folder = display_folder(&settings.intake_folder);
+    Ok(settings)
+}
+
+fn display_folder(folder: &str) -> String {
+    if folder.trim().is_empty() {
+        String::new()
+    } else {
+        display_path(Path::new(folder))
+    }
 }
 
 #[tauri::command]
@@ -990,6 +1015,7 @@ pub fn settings_save(
             .to_string_lossy()
             .into_owned();
     }
+    validate_description_settings(&settings)?;
     // Applied before anything persists so an operating system that refuses
     // the login entry leaves the stored settings unchanged - the dialog shows
     // the error against a state that is still true.
@@ -1085,9 +1111,64 @@ fn validate_intake_settings(
     Ok(())
 }
 
+/// Description records live under the destination folder, so asking for them
+/// without one is a configuration that could never do anything. Refused at
+/// save time, like the intake rules, rather than silently ignored.
+fn validate_description_settings(settings: &AppSettings) -> Result<(), CommandError> {
+    if settings.record_descriptions && settings.destination.trim().is_empty() {
+        return Err(CommandError {
+            code: "DESCRIPTIONS_NEED_DESTINATION".into(),
+            message: "description records need a destination folder to live in".into(),
+        });
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn intake_status(state: State<'_, AppState>) -> Result<IntakeStatusDto, CommandError> {
     state.intake_status_dto()
+}
+
+/// The OneDrive accounts and SharePoint libraries the sync client keeps on
+/// this machine. A local lookup of the sync client's own configuration; no
+/// network request is made.
+#[tauri::command]
+pub fn cloud_roots() -> Result<Vec<CloudRootDto>, CommandError> {
+    Ok(list_cloud_roots())
+}
+
+#[tauri::command]
+pub fn descriptions_status(
+    state: State<'_, AppState>,
+) -> Result<DescriptionsStatusDto, CommandError> {
+    Ok(state.ledger.status())
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillResultDto {
+    pub written: u32,
+    pub failed: u32,
+}
+
+/// Writes a description record for every document Intern has already filed
+/// and not undone, for a records folder switched on after the fact. Each
+/// document's record is rewritten from the queue's own copy of its sentence
+/// and facts, so running it twice changes nothing.
+#[tauri::command]
+pub fn descriptions_backfill(
+    state: State<'_, AppState>,
+) -> Result<BackfillResultDto, CommandError> {
+    let settings = state.settings.load()?;
+    if !settings.record_descriptions {
+        return Err(CommandError {
+            code: "DESCRIPTIONS_DISABLED".into(),
+            message: "turn on description records and save before writing them".into(),
+        });
+    }
+    let documents = state.pipeline.filed_documents()?;
+    let (written, failed) = state.ledger.backfill(&documents);
+    Ok(BackfillResultDto { written, failed })
 }
 
 #[tauri::command]
@@ -1151,9 +1232,12 @@ pub struct HistoryEntryDto {
     stage: OperationStage,
     original_path: String,
     new_path: String,
+    /// The one-sentence description that was applied with the rename, when
+    /// the item still has its proposal.
+    description: Option<String>,
 }
 
-fn history_entry_dto(entry: HistoryEntry) -> HistoryEntryDto {
+fn history_entry_dto(entry: HistoryEntry, description: Option<String>) -> HistoryEntryDto {
     HistoryEntryDto {
         receipt_id: entry.receipt_id.to_string(),
         queue_item_id: entry.queue_item_id.to_string(),
@@ -1161,9 +1245,27 @@ fn history_entry_dto(entry: HistoryEntry) -> HistoryEntryDto {
         direction: entry.direction,
         kind: entry.kind,
         stage: entry.stage,
-        original_path: entry.original_path.to_string_lossy().into_owned(),
-        new_path: entry.new_path.to_string_lossy().into_owned(),
+        original_path: display_path(&entry.original_path),
+        new_path: display_path(&entry.new_path),
+        description,
     }
+}
+
+/// The applied description for every queue item that still has a proposal,
+/// so history rows and the CSV export can carry the sentence beside the
+/// rename it belongs to.
+fn descriptions_by_item(
+    state: &AppState,
+) -> Result<std::collections::HashMap<i64, String>, CommandError> {
+    Ok(state
+        .pipeline
+        .list()?
+        .into_iter()
+        .filter_map(|item| {
+            item.proposal
+                .map(|proposal| (item.id, proposal.description))
+        })
+        .collect())
 }
 
 fn history_read_error(error: intern_core::InternError) -> CommandError {
@@ -1182,12 +1284,16 @@ fn history_export_failed(message: impl Into<String>) -> CommandError {
 
 #[tauri::command]
 pub fn history_list(state: State<'_, AppState>) -> Result<Vec<HistoryEntryDto>, CommandError> {
+    let descriptions = descriptions_by_item(&state)?;
     Ok(state
         .history
         .list_operation_history(HISTORY_LIMIT)
         .map_err(history_read_error)?
         .into_iter()
-        .map(history_entry_dto)
+        .map(|entry| {
+            let description = descriptions.get(&entry.queue_item_id).cloned();
+            history_entry_dto(entry, description)
+        })
         .collect())
 }
 
@@ -1215,15 +1321,21 @@ pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize,
         .history
         .list_operation_history(HISTORY_LIMIT)
         .map_err(history_read_error)?;
-    std::fs::write(destination, history_csv(&entries))
+    let descriptions = descriptions_by_item(&state)?;
+    std::fs::write(destination, history_csv(&entries, &descriptions))
         .map_err(|_| history_export_failed("the history CSV could not be written"))?;
     Ok(entries.len())
 }
 
 /// Renders history entries as RFC 4180 CSV: CRLF row endings, and any field
 /// containing a comma, quote, or line break is quoted with quotes doubled.
-fn history_csv(entries: &[HistoryEntry]) -> String {
-    let mut csv = String::from("at,direction,kind,stage,originalPath,newPath\r\n");
+/// The description column is last, so a spreadsheet opened from this export
+/// can be pasted straight into a SharePoint grid view beside the filenames.
+fn history_csv(
+    entries: &[HistoryEntry],
+    descriptions: &std::collections::HashMap<i64, String>,
+) -> String {
+    let mut csv = String::from("at,direction,kind,stage,originalPath,newPath,description\r\n");
     for entry in entries {
         let fields = [
             iso8601_utc(entry.at),
@@ -1242,8 +1354,12 @@ fn history_csv(entries: &[HistoryEntry]) -> String {
                 // receipt must never be silently mislabeled if that changes.
                 other => format!("{other:?}").to_lowercase(),
             },
-            entry.original_path.to_string_lossy().into_owned(),
-            entry.new_path.to_string_lossy().into_owned(),
+            display_path(&entry.original_path),
+            display_path(&entry.new_path),
+            descriptions
+                .get(&entry.queue_item_id)
+                .cloned()
+                .unwrap_or_default(),
         ];
         let row = fields
             .iter()
@@ -1325,8 +1441,8 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
                 && receipt.stage == OperationStage::Published
         })
         .map(|receipt| ReconciliationDto {
-            source_path: receipt.source.to_string_lossy().into_owned(),
-            destination_path: receipt.destination.to_string_lossy().into_owned(),
+            source_path: display_path(&receipt.source),
+            destination_path: display_path(&receipt.destination),
             error_code: "SOURCE_DELETE_FAILED".into(),
         });
     Ok(QueueItemDto {
@@ -1374,7 +1490,7 @@ mod intake_tests {
     use intern_intake::{CloudProviderKind, DoneOutcome, ItemState, MachineIdentity};
     use intern_queue::AppSettings;
 
-    use super::validate_intake_settings;
+    use super::{validate_description_settings, validate_intake_settings};
     use crate::intake::{CloudProviderDto, item_fate, presence_active, status_dto};
 
     /// A fake folder canonicalizer: pairs of (as-entered, canonical form).
@@ -1415,6 +1531,20 @@ mod intake_tests {
             error_code(validate_intake_settings(&mut missing, &fs)),
             "INTAKE_FOLDER_MISSING"
         );
+    }
+
+    #[test]
+    fn description_records_require_a_destination_to_live_in() {
+        let mut wanted = settings(false, "", "");
+        wanted.record_descriptions = true;
+        assert_eq!(
+            error_code(validate_description_settings(&wanted)),
+            "DESCRIPTIONS_NEED_DESTINATION"
+        );
+        wanted.destination = "/out".into();
+        assert!(validate_description_settings(&wanted).is_ok());
+        let unwanted = settings(false, "", "");
+        assert!(validate_description_settings(&unwanted).is_ok());
     }
 
     #[test]
@@ -1585,10 +1715,16 @@ mod intake_tests {
             (CloudProviderKind::OneDrivePersonal, "onedrive_personal"),
             (CloudProviderKind::OneDriveBusiness, "onedrive_business"),
             (CloudProviderKind::SharePoint, "sharepoint"),
+            (CloudProviderKind::NetworkShare, "network_share"),
         ] {
             assert_eq!(
                 serde_json::to_value(CloudProviderDto::from(kind)).unwrap(),
                 serde_json::Value::String(expected.into())
+            );
+            assert_eq!(
+                kind.as_str(),
+                expected,
+                "the record format spells it the same way"
             );
         }
     }
@@ -1603,12 +1739,23 @@ mod intake_tests {
         let dto = status_dto(false, &identity, "", None, None, 1_755_850_000);
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["enabled"], false);
+        assert_eq!(json["folder"], "");
+        let verbatim = status_dto(
+            true,
+            &identity,
+            r"\\?\C:\Users\pat\Scans",
+            None,
+            None,
+            1_755_850_000,
+        );
+        assert_eq!(verbatim.folder, r"C:\Users\pat\Scans");
         assert_eq!(json["watching"], false);
         assert_eq!(json["machineId"], "0123456789abcdef0123456789abcdef");
         assert_eq!(json["machineName"], "Front desk");
         assert_eq!(json["cloud"], serde_json::Value::Null);
         assert_eq!(json["machines"], serde_json::json!([]));
         assert_eq!(json["heldForOthers"], 0);
+        assert_eq!(json["unreadableFolders"], 0);
         assert_eq!(json["claimedByOthers"], 0);
         assert_eq!(json["processedHere"], 0);
         assert_eq!(json["lastScanAt"], serde_json::Value::Null);
@@ -1676,6 +1823,8 @@ mod history_tests {
 
     use intern_core::{HistoryEntry, OperationDirection, OperationKind, OperationStage};
 
+    use std::collections::HashMap;
+
     use super::{history_csv, history_entry_dto, iso8601_utc};
 
     fn entry(at: i64, original: &str, new: &str) -> HistoryEntry {
@@ -1715,24 +1864,30 @@ mod history_tests {
             )
         };
 
-        let csv = history_csv(&[awkward, plain]);
+        let descriptions = HashMap::from([(
+            7,
+            "Lease agreement for a twelve-month term, beginning January 22, 2024.".to_owned(),
+        )]);
+        let csv = history_csv(&[awkward, plain], &descriptions);
 
         let mut lines = csv.split("\r\n");
         assert_eq!(
             lines.next(),
-            Some("at,direction,kind,stage,originalPath,newPath")
+            Some("at,direction,kind,stage,originalPath,newPath,description")
         );
         assert_eq!(
             lines.next(),
             Some(
                 "2024-04-15T09:34:56Z,undo,verified_copy,rolled_back,\
-                 \"C:\\drop\\comma, quote \"\" and\nnewline.pdf\",C:\\filed\\plain.pdf"
+                 \"C:\\drop\\comma, quote \"\" and\nnewline.pdf\",C:\\filed\\plain.pdf,\
+                 \"Lease agreement for a twelve-month term, beginning January 22, 2024.\""
             )
         );
         assert_eq!(
             lines.next(),
             Some(
-                "1970-01-01T00:00:00Z,apply,rename,complete,C:\\drop\\scan.pdf,C:\\filed\\2024 Agreement.pdf"
+                "1970-01-01T00:00:00Z,apply,rename,complete,C:\\drop\\scan.pdf,C:\\filed\\2024 Agreement.pdf,\
+                 \"Lease agreement for a twelve-month term, beginning January 22, 2024.\""
             )
         );
         assert_eq!(lines.next(), Some(""));
@@ -1741,11 +1896,14 @@ mod history_tests {
 
     #[test]
     fn history_dto_serializes_the_camel_case_wire_contract() {
-        let json = serde_json::to_value(history_entry_dto(entry(
-            1_713_173_696,
-            "C:/drop/scan.pdf",
-            "C:/filed/2024 Agreement.pdf",
-        )))
+        let json = serde_json::to_value(history_entry_dto(
+            entry(
+                1_713_173_696,
+                "C:/drop/scan.pdf",
+                "C:/filed/2024 Agreement.pdf",
+            ),
+            Some("A sentence.".to_owned()),
+        ))
         .unwrap();
         assert_eq!(
             json,
@@ -1758,8 +1916,22 @@ mod history_tests {
                 "stage": "complete",
                 "originalPath": "C:/drop/scan.pdf",
                 "newPath": "C:/filed/2024 Agreement.pdf",
+                "description": "A sentence.",
             })
         );
+        // Verbatim Windows paths are shown the way a person reads them.
+        let json = serde_json::to_value(history_entry_dto(
+            entry(
+                0,
+                r"\\?\C:\drop\scan.pdf",
+                r"\\?\UNC\server\share\filed\a.pdf",
+            ),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(json["originalPath"], r"C:\drop\scan.pdf");
+        assert_eq!(json["newPath"], r"\\server\share\filed\a.pdf");
+        assert_eq!(json["description"], serde_json::Value::Null);
     }
 }
 

@@ -70,6 +70,10 @@ pub struct IntakeStatus {
     pub sync_conflicts: u32,
     /// Claims held open because the document's content is not on this disk yet.
     pub awaiting_hydration: u32,
+    /// Subfolders the last scan could not read - a permission the share does
+    /// not grant, or a folder that vanished mid-scan. The rest of the folder
+    /// is still scanned; these are counted so a person can see them.
+    pub unreadable_folders: u32,
     pub claimed_by_others: u32,
     /// Done-by-us claims seen.
     pub processed_here: u32,
@@ -87,6 +91,7 @@ impl IntakeStatus {
             held_for_others: 0,
             sync_conflicts: 0,
             awaiting_hydration: 0,
+            unreadable_folders: 0,
             claimed_by_others: 0,
             processed_here: 0,
             machines: Vec::new(),
@@ -100,6 +105,9 @@ impl IntakeStatus {
         self.watching != other.watching
             || self.folder != other.folder
             || self.held_for_others != other.held_for_others
+            || self.sync_conflicts != other.sync_conflicts
+            || self.awaiting_hydration != other.awaiting_hydration
+            || self.unreadable_folders != other.unreadable_folders
             || self.claimed_by_others != other.claimed_by_others
             || self.processed_here != other.processed_here
             || self.machines != other.machines
@@ -118,15 +126,39 @@ pub(crate) struct FileFacts {
     pub modified_secs: i64,
 }
 
+/// What one walk of the intake folder found.
+#[derive(Debug, Default)]
+pub(crate) struct Walk {
+    pub files: Vec<FileFacts>,
+    /// Subfolders that could not be listed and were skipped.
+    pub unreadable_folders: u32,
+}
+
 /// Recursive walk with the same skip rules as intern-queue's path handling:
 /// dot-names (which covers `.intern` itself), `~$` office lock files,
 /// unsupported extensions, zero-byte files, and symlinks.
-pub(crate) fn walk_intake(root: &Path, extensions: &[String]) -> io::Result<Vec<FileFacts>> {
+///
+/// Only the root has to be readable. A subfolder that refuses to be listed -
+/// a shared drive grants permissions per folder, and a sync client can remove
+/// one between the listing and the descent - is counted and skipped rather
+/// than failing the whole scan, so one locked folder never stops every other
+/// document in the share from being filed.
+pub(crate) fn walk_intake(root: &Path, extensions: &[String]) -> io::Result<Walk> {
     let mut pending = vec![root.to_path_buf()];
-    let mut files = Vec::new();
+    let mut walk = Walk::default();
     while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(&directory)? {
-            let entry = entry?;
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if directory == root => return Err(error),
+            Err(_) => {
+                walk.unreadable_folders += 1;
+                continue;
+            }
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
             let path = entry.path();
             if skipped_name(&path) {
                 continue;
@@ -153,7 +185,7 @@ pub(crate) fn walk_intake(root: &Path, extensions: &[String]) -> io::Result<Vec<
             let Some(relative_path) = relative_slash_path(root, &path) else {
                 continue;
             };
-            files.push(FileFacts {
+            walk.files.push(FileFacts {
                 size: metadata.len(),
                 modified_secs: modified_secs(&metadata),
                 path,
@@ -161,8 +193,9 @@ pub(crate) fn walk_intake(root: &Path, extensions: &[String]) -> io::Result<Vec<
             });
         }
     }
-    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok(files)
+    walk.files
+        .sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(walk)
 }
 
 /// A file only becomes claimable after it is observed with an identical
@@ -303,5 +336,74 @@ fn modified_secs(metadata: &fs::Metadata) -> i64 {
     match modified.duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs() as i64,
         Err(error) => -(error.duration().as_secs() as i64),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::walk_intake;
+
+    fn extensions() -> Vec<String> {
+        vec!["pdf".to_string()]
+    }
+
+    #[test]
+    fn a_missing_root_is_an_error_not_an_empty_folder() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let gone = temp.path().join("gone");
+        assert!(walk_intake(&gone, &extensions()).is_err());
+    }
+
+    #[test]
+    fn dot_names_lock_files_and_empty_files_are_skipped() {
+        let temp = tempfile::TempDir::new().unwrap();
+        fs::write(temp.path().join("keep.pdf"), b"x").unwrap();
+        fs::write(temp.path().join("~$lock.pdf"), b"x").unwrap();
+        fs::write(temp.path().join(".hidden.pdf"), b"x").unwrap();
+        fs::write(temp.path().join("empty.pdf"), b"").unwrap();
+        fs::write(temp.path().join("notes.txt"), b"x").unwrap();
+        fs::create_dir(temp.path().join(".intern")).unwrap();
+        fs::write(temp.path().join(".intern").join("claim.pdf"), b"x").unwrap();
+        let walk = walk_intake(temp.path(), &extensions()).unwrap();
+        let names: Vec<String> = walk
+            .files
+            .iter()
+            .map(|facts| facts.relative_path.clone())
+            .collect();
+        assert_eq!(names, vec!["keep.pdf".to_string()]);
+        assert_eq!(walk.unreadable_folders, 0);
+    }
+
+    /// A shared drive grants permissions per folder. One folder this machine
+    /// may not list is counted and skipped, and every readable document is
+    /// still found.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_subfolder_is_counted_and_skipped() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let locked = temp.path().join("locked");
+        fs::create_dir(&locked).unwrap();
+        fs::write(locked.join("hidden.pdf"), b"cannot be listed").unwrap();
+        fs::write(temp.path().join("open.pdf"), b"can be listed").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let outcome = walk_intake(temp.path(), &extensions());
+        let listable = fs::read_dir(&locked).is_ok();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let walk = outcome.unwrap();
+        if listable {
+            // Root ignores permission bits; nothing to prove here.
+            return;
+        }
+        assert_eq!(walk.unreadable_folders, 1);
+        let names: Vec<String> = walk
+            .files
+            .iter()
+            .map(|facts| facts.relative_path.clone())
+            .collect();
+        assert_eq!(names, vec!["open.pdf".to_string()]);
     }
 }
