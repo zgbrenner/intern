@@ -14,6 +14,12 @@ export interface QueueItem {
   cancelable?: boolean;
   undoable?: boolean;
   proposalRevision?: string;
+  /**
+   * A date the model proposed that Intern could not find written in the
+   * document, so it was left out of the filename. Offered in review for a
+   * person to accept with one click.
+   */
+  suggestedDate?: string;
 }
 
 /**
@@ -22,6 +28,17 @@ export interface QueueItem {
  * named catch-all ("Undated", "Unsorted"), never the root.
  */
 export type DestinationLayout = 'flat' | 'year' | 'year_type' | 'type' | 'party';
+
+/**
+ * Which model reads documents. `local` keeps every document on this
+ * computer. `hosted` sends the distilled text of each document to a service
+ * the user named, under their own API key - the one setting that moves
+ * document text off the machine, and never the default.
+ */
+export type ModelSource = 'local' | 'hosted';
+
+/** The wire format a hosted model speaks. */
+export type HostedProvider = 'anthropic' | 'openai_compatible';
 
 export interface AppSettings {
   destination: string;
@@ -45,6 +62,36 @@ export interface AppSettings {
    * column can be filled from it. Needs a destination folder.
    */
   recordDescriptions: boolean;
+  modelSource: ModelSource;
+  hostedProvider: HostedProvider;
+  /** The hosted model's API root; "" = the provider's default. */
+  hostedBaseUrl: string;
+  /** The hosted model's name; "" = the provider's default, where there is one. */
+  hostedModel: string;
+}
+
+/** What Settings shows about the hosted model. The key itself never comes back. */
+export interface HostedModelStatus {
+  keyStored: boolean;
+  /** The tail of the stored key, e.g. "…a1b2". */
+  keyHint: string | null;
+  /** The endpoint the saved settings resolve to, when they do. */
+  endpoint: string | null;
+  providers: HostedProviderDefaults[];
+}
+
+export interface HostedProviderDefaults {
+  provider: HostedProvider;
+  baseUrl: string;
+  model: string;
+}
+
+/** A successful test connection: the calibration document came back named. */
+export interface HostedModelTestResult {
+  model: string;
+  endpoint: string;
+  filename: string;
+  inferenceMillis: number;
 }
 
 /** One finished rename/undo operation from the durable receipt journal. */
@@ -130,4 +177,6 @@ export interface SetupState {
   downloadedBytes: number;
   totalBytes: number;
   error?: string;
+  /** A hosted model is chosen and configured, so documents can be processed without the local one. */
+  hostedModelReady?: boolean;
 }

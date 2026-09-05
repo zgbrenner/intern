@@ -270,6 +270,10 @@ pub struct ValidationOutcome {
     pub proposal: ValidatedProposal,
     pub status: ProposalStatus,
     pub reasons: Vec<ReviewReason>,
+    /// The reply exactly as the model gave it, before any check. What
+    /// validation withheld from `proposal` is still here for a reviewer to
+    /// be offered - a date the document did not state verbatim, say.
+    pub candidate: ModelProposal,
 }
 
 /// A composed filename and the collision suffix it needed.
@@ -300,4 +304,8 @@ pub struct DocumentAnalysis {
     pub review_reasons: Vec<ReviewReason>,
     pub proposal: ValidatedProposal,
     pub telemetry: AnalysisTelemetry,
+    /// The model's reply before validation. Absent for analyses stored by
+    /// versions that did not keep it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_proposal: Option<ModelProposal>,
 }

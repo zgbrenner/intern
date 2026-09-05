@@ -22,8 +22,11 @@ is no Graph API client, no OAuth token, no upload code. The product's core
 promise — document text, extracted pages, OCR output, and model prompts never
 leave the machine — survives this feature intact, because the only thing moving
 files to the cloud is the sync client you already run, under the account you
-already audit. Intern still makes exactly the two network requests it always
-made, both user-initiated, neither about your documents.
+already audit. Intern still makes only the network requests it always made —
+the model download and the update check, both user-initiated, neither about
+your documents — unless a hosted model has been chosen in Settings, which is a
+separate and explicit decision described in the README, and has nothing to do
+with the sync client.
 
 Files On-Demand is handled: an online-only file is a placeholder on disk, and
 Intern queues it like any other document. The read that extraction performs is

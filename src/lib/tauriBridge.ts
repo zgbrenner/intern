@@ -1,6 +1,6 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, QueueItem, SetupState } from '../types';
 import { GUIDE_URL } from './bridge';
 import type {
   DescriptionsEventSource,
@@ -61,6 +61,7 @@ interface QueueItemDto {
   progress?: number;
   undoable?: boolean;
   proposalRevision?: string | number;
+  suggestedDate?: string;
 }
 
 interface HistoryEntryDto {
@@ -170,6 +171,10 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
 
   descriptionsStatus(): Promise<DescriptionsStatus> { return this.transport.invoke('descriptions_status'); }
   descriptionsBackfill(): Promise<BackfillResult> { return this.transport.invoke('descriptions_backfill'); }
+  hostedModelStatus(): Promise<HostedModelStatus> { return this.transport.invoke('hosted_model_status'); }
+  hostedModelSetKey(key: string): Promise<void> { return this.transport.invoke('hosted_model_set_key', { key }); }
+  hostedModelClearKey(): Promise<void> { return this.transport.invoke('hosted_model_clear_key'); }
+  hostedModelTest(settings: AppSettings): Promise<HostedModelTestResult> { return this.transport.invoke('hosted_model_test', { settings }); }
 
   // Same shape as subscribeIntake: synchronous unsubscribe over an async
   // listen, dropping events until the listener is registered.
@@ -354,6 +359,7 @@ function normalizeItem(item: QueueItemDto): QueueItem {
     ...(status === 'processing' ? { cancelable: item.status !== 'applying' } : {}),
     ...(item.undoable === undefined ? {} : { undoable: item.undoable }),
     ...(item.proposalRevision === undefined ? {} : { proposalRevision: String(item.proposalRevision) }),
+    ...(item.suggestedDate === undefined ? {} : { suggestedDate: item.suggestedDate }),
   };
 }
 

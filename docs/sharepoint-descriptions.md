@@ -35,7 +35,8 @@ Documents renamed in place (no destination configured) get no record.
 
 Intern itself makes no network request for any of this. The two requests
 described in the README — the one-off model download and the update check —
-remain the only ones.
+remain the only ones, unless a hosted model has been chosen in Settings; that
+is a separate decision, and these records play no part in it.
 
 ## The record
 
@@ -168,7 +169,8 @@ the records.
 **It does not call Microsoft Graph or the SharePoint REST API.** Doing so
 would give Intern a sign-in, a token to store, an app registration for an
 administrator to consent to, and a third network connection to audit — for a
-product whose central promise is that it makes exactly two. The record
+product whose central promise is that it makes exactly two unless a person
+chooses otherwise. The record
 approach keeps that promise intact: the only thing moving anything to the
 cloud is the sync client already installed and already trusted.
 

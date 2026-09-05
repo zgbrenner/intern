@@ -1,6 +1,6 @@
 import { ExternalLink, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, DestinationLayout, IntakeStatus } from '../types';
+import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, DestinationLayout, HostedModelStatus, HostedProvider, IntakeStatus } from '../types';
 import { GUIDE_URL } from '../lib/bridge';
 import type { DescriptionsEventSource, DesktopBridge, IntakeEventSource, SelectionBoundary, UpdateStatus } from '../lib/bridge';
 import { Icon } from './Icon';
@@ -38,6 +38,17 @@ function saveFailure(error: unknown): string {
     case 'AUTOSTART_FAILED': return 'Your system would not let Intern change whether it starts at sign-in, so nothing was saved. Try again. (AUTOSTART_FAILED)';
     case 'DESCRIPTIONS_NEED_DESTINATION': return 'Description records live in the destination folder, so choose a destination before turning them on. (DESCRIPTIONS_NEED_DESTINATION)';
     case 'DESCRIPTIONS_DISABLED': return 'Turn on description records and save settings first; then records can be written for documents already filed. (DESCRIPTIONS_DISABLED)';
+    case 'HOSTED_MODEL_KEY_MISSING': return 'Paste an API key before choosing the hosted model. (HOSTED_MODEL_KEY_MISSING)';
+    case 'HOSTED_MODEL_KEY_EMPTY': return 'The API key is empty. (HOSTED_MODEL_KEY_EMPTY)';
+    case 'HOSTED_MODEL_MISCONFIGURED': return 'The hosted model\'s address or model name is not usable. The address must start with https:// (plain http:// only for a server on this computer), and the model needs a name. (HOSTED_MODEL_MISCONFIGURED)';
+    case 'HOSTED_MODEL_UNAUTHORIZED': return 'The service rejected the API key. Check the key and the provider. (HOSTED_MODEL_UNAUTHORIZED)';
+    case 'HOSTED_MODEL_UNREACHABLE': return 'The service could not be reached. Check the address and your connection. (HOSTED_MODEL_UNREACHABLE)';
+    case 'HOSTED_MODEL_RATE_LIMITED': return 'The service asked for a slower pace. Try again in a moment. (HOSTED_MODEL_RATE_LIMITED)';
+    case 'HOSTED_MODEL_REJECTED': return 'The service rejected the request — usually a model name it does not know. (HOSTED_MODEL_REJECTED)';
+    case 'HOSTED_MODEL_REFUSED': return 'The model declined to read the calibration document, so it cannot be relied on to file yours. (HOSTED_MODEL_REFUSED)';
+    case 'MODEL_SELF_TEST_FAILED': return 'The model answered, but not correctly: it did not name the calibration document. Try a more capable model. (MODEL_SELF_TEST_FAILED)';
+    case 'MODEL_RESPONSE_INVALID': return 'The model did not answer in the shape Intern needs, twice. Try a more capable model. (MODEL_RESPONSE_INVALID)';
+    case 'SECRET_STORE_UNAVAILABLE': return 'Your operating system\'s credential store could not be used, so the key was not saved. (SECRET_STORE_UNAVAILABLE)';
   }
   if (error instanceof Error && error.message.trim()) return error.message.trim();
   if (typeof error === 'object' && error && 'message' in error && typeof error.message === 'string' && error.message.trim()) return error.message.trim();
@@ -120,6 +131,15 @@ function isLayout(value: string): value is DestinationLayout {
   return LAYOUTS.some((layout) => layout.value === value);
 }
 
+const PROVIDERS: Array<{ value: HostedProvider; label: string }> = [
+  { value: 'anthropic', label: 'Anthropic (Claude)' },
+  { value: 'openai_compatible', label: 'OpenAI-compatible (OpenAI, OpenRouter, Ollama, LM Studio, and others)' },
+];
+
+function isProvider(value: string): value is HostedProvider {
+  return PROVIDERS.some((provider) => provider.value === value);
+}
+
 function formatScanTime(lastScanAt: number | null): string {
   if (lastScanAt === null) return 'not yet';
   return new Date(lastScanAt * 1000).toLocaleTimeString();
@@ -152,6 +172,13 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
   const [backfillMessage, setBackfillMessage] = useState('');
   const [backfillError, setBackfillError] = useState('');
   const [helpError, setHelpError] = useState('');
+  const [hostedStatus, setHostedStatus] = useState<HostedModelStatus>();
+  // The key is typed here and sent to the credential store on Save or Test;
+  // it never becomes part of `next`, so it never reaches the settings file.
+  const [keyDraft, setKeyDraft] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testMessage, setTestMessage] = useState('');
+  const [testError, setTestError] = useState('');
   const busy = checking || installing;
   const dialog = useRef<HTMLElement>(null);
   const destination = useRef<HTMLInputElement>(null);
@@ -182,17 +209,62 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
     const stop = source.subscribeDescriptions?.((current) => { if (active) setDescriptions(current); });
     return () => { active = false; stop?.(); };
   }, [bridge]);
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve().then(() => bridge.hostedModelStatus())
+      .then((current) => { if (active) setHostedStatus(current); })
+      .catch(() => { /* An older bridge without the hosted model leaves the section quiet. */ });
+    return () => { active = false; };
+  }, [bridge]);
   const browse = async (apply: (path: string) => void) => {
     const folder = await selection?.pickFolder();
     if (folder) apply(folder.path);
+  };
+  const providerDefaults = hostedStatus?.providers.find((entry) => entry.provider === next.hostedProvider);
+  // A typed key goes to the credential store first, so that what is saved or
+  // tested is the configuration the person is looking at.
+  const storeKeyDraft = async () => {
+    if (!keyDraft.trim()) return;
+    await bridge.hostedModelSetKey(keyDraft);
+    setKeyDraft('');
+    setHostedStatus(await bridge.hostedModelStatus());
   };
   const runSave = async () => {
     if (saving) return;
     setSaving(true);
     setSaveError('');
-    try { await onSave(next); }
+    try {
+      await storeKeyDraft();
+      await onSave(next);
+    }
     catch (error) { setSaveError(saveFailure(error)); }
     finally { setSaving(false); }
+  };
+  const runHostedTest = async () => {
+    if (testing) return;
+    setTesting(true);
+    setTestError('');
+    setTestMessage('');
+    try {
+      await storeKeyDraft();
+      const result = await bridge.hostedModelTest(next);
+      setTestMessage(`Connected. ${result.model} at ${result.endpoint} named the calibration document “${result.filename}” in ${(result.inferenceMillis / 1000).toFixed(1)} s.`);
+    } catch (error) {
+      setTestError(saveFailure(error));
+    } finally {
+      setTesting(false);
+    }
+  };
+  const runClearKey = async () => {
+    setTestError('');
+    setTestMessage('');
+    try {
+      await bridge.hostedModelClearKey();
+      setKeyDraft('');
+      setHostedStatus(await bridge.hostedModelStatus());
+    } catch (error) {
+      setTestError(saveFailure(error));
+    }
   };
   const runBackfill = async () => {
     if (backfilling) return;
@@ -289,6 +361,36 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
         <p className="check-hint">{LAYOUTS.find((layout) => layout.value === next.destinationLayout)?.example}{next.destinationLayout === 'flat' ? '.' : ' — a document missing that fact goes in an “Undated” or “Unsorted” folder, never loose in the root. Undo removes a folder it empties.'}</p>
         <label className="check-label"><input type="checkbox" checked={Boolean(next.automaticRename)} onChange={(event) => setNext({ ...next, automaticRename: event.target.checked })} />Automatically rename high-confidence files</label>
         <p className="check-hint">Anything Intern is less sure about still waits for you in Needs Review.</p>
+      </section>
+      <section className="settings-group">
+        <h3>Model</h3>
+        {/*
+          The local model is the product's promise and the default. The hosted
+          option exists for people who have decided the trade is worth it, and
+          the section says exactly what the trade is - in the lead, again when
+          it is chosen, and in the header badge once it is on.
+        */}
+        <p className="section-lead">Which model reads your documents. The local model keeps every document on this computer. A hosted model sends the text of each document to the service you name, under your own API key.</p>
+        <label className="check-label"><input type="radio" name="model-source" value="local" checked={next.modelSource === 'local'} onChange={() => setNext({ ...next, modelSource: 'local' })} />Local model on this computer (recommended)</label>
+        <label className="check-label"><input type="radio" name="model-source" value="hosted" checked={next.modelSource === 'hosted'} onChange={() => setNext({ ...next, modelSource: 'hosted' })} />Hosted model with my API key</label>
+        {next.modelSource === 'hosted' && <div className="hosted-model" role="group" aria-label="Hosted model">
+          <p className="privacy-warning" role="note">With this on, the text Intern reads from each document — not the file, but the words in it, condensed — is sent to this service to be named. It is the only setting that sends document text off this computer. Your key, your account, your provider's terms.</p>
+          <label>Provider<select value={next.hostedProvider} onChange={(event) => { const value = event.target.value; if (isProvider(value)) setNext({ ...next, hostedProvider: value }); }}>
+            {PROVIDERS.map((provider) => <option key={provider.value} value={provider.value}>{provider.label}</option>)}
+          </select></label>
+          <label>API address<input value={next.hostedBaseUrl} placeholder={providerDefaults?.baseUrl} spellCheck={false} onChange={(event) => setNext({ ...next, hostedBaseUrl: event.target.value })} /></label>
+          <p className="check-hint">Leave empty for {providerDefaults?.baseUrl ?? 'the provider\'s own address'}. Plain http:// is accepted only for a server on this computer, such as Ollama or LM Studio.</p>
+          <label>Model<input value={next.hostedModel} placeholder={providerDefaults?.model || 'The model name as the service knows it'} spellCheck={false} onChange={(event) => setNext({ ...next, hostedModel: event.target.value })} /></label>
+          {providerDefaults?.model && <p className="check-hint">Leave empty for {providerDefaults.model}.</p>}
+          <label>API key<input type="password" value={keyDraft} autoComplete="off" placeholder={hostedStatus?.keyStored ? `Stored in your credential manager (${hostedStatus.keyHint ?? '…'})` : 'Paste your API key'} onChange={(event) => setKeyDraft(event.target.value)} /></label>
+          <p className="check-hint">Kept in your operating system's credential store under “Intern”, never in Intern's settings file.{hostedStatus?.keyStored ? ' A new key replaces the stored one.' : ''}</p>
+          {testMessage && <p role="status" aria-label="Hosted model test" aria-live="polite">{testMessage}</p>}
+          {testError && <p className="form-error" role="alert">{testError}</p>}
+          <div className="update-actions">
+            <button type="button" disabled={testing} onClick={() => void runHostedTest()}>{testing ? 'Testing…' : 'Test connection'}</button>
+            {hostedStatus?.keyStored && <button type="button" disabled={testing} onClick={() => void runClearKey()}>Remove stored key</button>}
+          </div>
+        </div>}
       </section>
       <section className="settings-group">
         <h3>This computer</h3>

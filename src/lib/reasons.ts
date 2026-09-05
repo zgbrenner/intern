@@ -26,6 +26,15 @@ const SENTENCES: Record<string, string> = {
   SOURCE_DELETE_FAILED: 'The renamed copy is safe, but the original file could not be removed.',
   PROPOSAL_MISSING: 'Analysis finished without a usable proposal.',
   IO_ERROR: 'A file operation failed.',
+  DATE_REQUIRED: 'Every rename needs a date. Start the filename with the document\'s date as YYYY-MM-DD.',
+  MODEL_DECLINED: 'The hosted model declined to answer about this document. Name it yourself, or keep the original.',
+  HOSTED_MODEL_MISCONFIGURED: 'The hosted model\'s address, model name, or key is not usable. Check the Model section in Settings.',
+  HOSTED_MODEL_KEY_MISSING: 'No API key is stored for the hosted model. Paste one in the Model section in Settings.',
+  HOSTED_MODEL_UNAUTHORIZED: 'The hosted service rejected the API key. Check the key in Settings.',
+  HOSTED_MODEL_UNREACHABLE: 'The hosted service could not be reached. Check the connection and try again.',
+  HOSTED_MODEL_RATE_LIMITED: 'The hosted service asked for a slower pace. Intern will retry.',
+  HOSTED_MODEL_REJECTED: 'The hosted service rejected the request — often an unknown model name. Check the Model section in Settings.',
+  HOSTED_MODEL_REFUSED: 'The hosted model declined to answer about this document.',
   // Raised before analysis when the content was filed before; the name it was
   // filed under is normally given instead, as "Duplicate of ...". The bare code
   // only reaches here once the record of that filing is gone.

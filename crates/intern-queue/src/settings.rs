@@ -3,9 +3,33 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use intern_engine::HostedProvider;
 use serde::{Deserialize, Serialize};
 
 use crate::pipeline::{PipelineError, PipelineResult};
+
+/// Which model reads documents.
+///
+/// Local is the product: a model on this machine, and document text that
+/// never leaves it. Hosted sends the distilled text of every document to a
+/// service behind an API key the user supplied, and exists for people who
+/// have decided that trade is worth making. It is never chosen by default.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSource {
+    #[default]
+    Local,
+    Hosted,
+}
+
+impl ModelSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Hosted => "hosted",
+        }
+    }
+}
 
 /// How filed documents are arranged under the destination folder.
 ///
@@ -80,6 +104,20 @@ pub struct AppSettings {
     /// SharePoint column can be filled from it.
     #[serde(default)]
     pub record_descriptions: bool,
+    /// The local model, or a hosted one behind an API key.
+    #[serde(default)]
+    pub model_source: ModelSource,
+    /// The wire format the hosted model speaks.
+    #[serde(default)]
+    pub hosted_provider: HostedProvider,
+    /// The hosted model's API root; empty means the provider's default.
+    #[serde(default)]
+    pub hosted_base_url: String,
+    /// The hosted model's name; empty means the provider's default, where
+    /// there is one. The API key is never stored here - it lives in the
+    /// operating system's credential store.
+    #[serde(default)]
+    pub hosted_model: String,
 }
 
 #[derive(Clone, Debug)]

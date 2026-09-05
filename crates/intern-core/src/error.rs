@@ -19,6 +19,8 @@ pub enum ErrorCode {
     InvalidData,
     ModelOutputInvalid,
     Duplicate,
+    /// The model declined to answer about this document.
+    ModelDeclined,
 }
 
 impl ErrorCode {
@@ -36,6 +38,7 @@ impl ErrorCode {
             Self::InvalidData => "INVALID_DATA",
             Self::ModelOutputInvalid => "MODEL_OUTPUT_INVALID",
             Self::Duplicate => "DUPLICATE",
+            Self::ModelDeclined => "MODEL_DECLINED",
         }
     }
 
@@ -53,6 +56,7 @@ impl ErrorCode {
             "INVALID_DATA" => Self::InvalidData,
             "MODEL_OUTPUT_INVALID" => Self::ModelOutputInvalid,
             "DUPLICATE" => Self::Duplicate,
+            "MODEL_DECLINED" => Self::ModelDeclined,
             _ => return None,
         })
     }

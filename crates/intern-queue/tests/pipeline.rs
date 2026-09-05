@@ -833,6 +833,55 @@ fn automatic_apply_targets_only_ready_items_and_rechecks_source_fingerprint() {
     );
 }
 
+/// Every rename carries a date. A reviewer who strips it - or a document
+/// whose date the model could not support - is told so at approval, and the
+/// name is applied only once a date leads it.
+#[test]
+fn an_approved_name_without_a_leading_date_is_refused_until_one_is_added() {
+    let temp = tempdir().unwrap();
+    let review = source(temp.path(), "review.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.70, true))]));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&review, "review-hash");
+    let pipeline = pipeline(
+        temp.path(),
+        worker,
+        model,
+        Arc::clone(&files),
+        AppSettings::default(),
+    );
+    pipeline.enqueue_files(&[review]).unwrap();
+    pipeline.run_until_idle().unwrap();
+    let item = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(item.status, QueueStatus::NeedsReview);
+
+    for undated in [
+        "Employment Agreement with John Smith.pdf",
+        "Employment Agreement 2024-04-12 with John Smith.pdf",
+        "2024-04-1 Employment Agreement.pdf",
+    ] {
+        let refused = pipeline
+            .approve(item.id, undated, "A sentence.")
+            .unwrap_err();
+        assert_eq!(refused.code, "DATE_REQUIRED", "{undated}");
+    }
+    let unchanged = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(unchanged.status, QueueStatus::NeedsReview);
+    assert!(files.applies.lock().unwrap().is_empty());
+
+    pipeline
+        .approve(
+            item.id,
+            "2024-04-12 Employment Agreement with John Smith.pdf",
+            "A sentence.",
+        )
+        .unwrap();
+    assert_eq!(files.applies.lock().unwrap().as_slice(), &[item.id]);
+}
+
 #[test]
 fn fingerprint_failure_is_durable_and_does_not_stop_the_queue() {
     let temp = tempdir().unwrap();

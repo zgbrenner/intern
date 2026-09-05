@@ -1,17 +1,22 @@
 //! The document-understanding engine: one call in, one structured result out.
 //!
 //! ```text
-//! DocumentSource ─▶ distill ─▶ prompt ─▶ one local inference ─▶ validate ─▶ name
+//! DocumentSource ─▶ distill ─▶ prompt ─▶ one inference ─▶ validate ─▶ name
 //! ```
 //!
 //! Everything above this line (extraction, OCR) and everything below it (the
 //! queue, the file operations, the UI) is somebody else's problem. That is what
 //! makes a CLI, a watched folder, or a future connector able to reuse this
 //! without touching how documents are understood.
+//!
+//! The inference is local by default. A hosted model behind an API key can
+//! stand in the same place - see [`crate::hosted`] - and everything on either
+//! side of it, the distillation the model reads and the validation its reply
+//! must pass, is identical.
 
 use std::time::Instant;
 
-use crate::client::{ModelClient, ModelRequest};
+use crate::client::{ModelClient, ModelRequest, Proposer};
 use crate::distill::{DigestBudget, DocumentDigest, distill};
 use crate::domain::{
     AnalysisTelemetry, DocumentAnalysis, DocumentSource, ProposalStatus, ReviewReason,
@@ -30,12 +35,18 @@ use crate::validate::validate;
 pub const MIN_READABLE_CHARACTERS: usize = 200;
 
 pub struct Engine {
-    client: ModelClient,
+    client: Box<dyn Proposer>,
     budget: DigestBudget,
 }
 
 impl Engine {
     pub fn new(client: ModelClient) -> Self {
+        Self::with_proposer(Box::new(client))
+    }
+
+    /// An engine over any model that can answer the prompt - the local server
+    /// or a hosted one.
+    pub fn with_proposer(client: Box<dyn Proposer>) -> Self {
         Self {
             client,
             budget: DigestBudget::default(),
@@ -130,6 +141,7 @@ pub fn finish(
         review_reasons: outcome.reasons,
         proposal: outcome.proposal,
         telemetry,
+        model_proposal: Some(outcome.candidate),
     }
 }
 

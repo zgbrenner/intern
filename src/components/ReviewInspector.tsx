@@ -1,11 +1,15 @@
-import { Ban, ClipboardCopy, Ellipsis, FileCheck2, FileText, RotateCcw, Trash2, X } from 'lucide-react';
+import { Ban, CalendarPlus, ClipboardCopy, Ellipsis, FileCheck2, FileText, RotateCcw, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { ConfidenceMeter } from './ConfidenceMeter';
 import { FileKindIcon } from './FileKindIcon';
 import { Icon } from './Icon';
 import { StatusCell } from './StatusCell';
+import { leadingDate, withLeadingDate } from '../lib/filenames';
 import type { QueueItem } from '../types';
+
+/** What the inspector says when a name has no date; the backend says the same in DATE_REQUIRED. */
+export const DATE_REQUIRED_MESSAGE = 'Every rename needs a date. Start the filename with the document\'s date as YYYY-MM-DD.';
 
 /**
  * The pipeline joins several parties into one string with semicolons. Shown as
@@ -31,7 +35,17 @@ export function ReviewInspector({ item, drawer, busy, onClose, onApprove, onKeep
     if (filenameInput && !filenameInput.disabled) filenameInput.focus();
     else inspectorRef.current?.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
   }, [drawer, item.id]);
-  const approve = () => { if (!filename.trim()) { setError('Filename is required'); return; } onApprove(filename.trim(), description); };
+  const dated = leadingDate(filename) !== undefined;
+  const approve = () => {
+    if (!filename.trim()) { setError('Filename is required'); return; }
+    if (!dated) { setError(DATE_REQUIRED_MESSAGE); return; }
+    onApprove(filename.trim(), description);
+  };
+  // The model's date, when Intern could not find it written in the document
+  // and so left it out of the name. Offered until the name carries a date.
+  const suggestedDate = item.suggestedDate && !dated ? item.suggestedDate : undefined;
+  const useSuggestedDate = () => { setFilename(withLeadingDate(filename, suggestedDate!)); setError(''); };
+  const acceptSuggestedDate = () => onApprove(withLeadingDate(filename, suggestedDate!), description);
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!drawer) return;
     if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
@@ -64,6 +78,21 @@ export function ReviewInspector({ item, drawer, busy, onClose, onApprove, onKeep
       <h3>Proposed rename</h3>
       <label>Filename<input ref={filenameRef} aria-label="Filename" className="filename-input" value={filename} onChange={(event) => setFilename(event.target.value)} aria-invalid={Boolean(error)} /></label>
       {error && <p className="form-error" role="alert">{error}</p>}
+      {!error && filename.trim() && !dated && !suggestedDate && <p className="check-hint date-hint">{DATE_REQUIRED_MESSAGE}</p>}
+      {/*
+        The gate above would otherwise be a dead end for the commonest review:
+        the model read a date the document never states verbatim, so the name
+        has none. The model's reading is shown, said to be unverified, and
+        accepted in one click - into the field, or straight through to the
+        rename.
+      */}
+      {suggestedDate && <div className="suggestion" role="group" aria-label="Suggested date">
+        <p><Icon icon={CalendarPlus} />The model read <strong>{suggestedDate}</strong> as the document's date, but Intern could not find it written in the document. Every rename needs a date.</p>
+        <div className="suggestion-actions">
+          <button type="button" disabled={busy} onClick={useSuggestedDate}>Use this date</button>
+          <button type="button" className="primary" disabled={busy} onClick={acceptSuggestedDate}>Use date &amp; rename</button>
+        </div>
+      </div>}
       {item.confidence !== undefined && <p className={`confidence-readout confidence ${item.status}`}><span className="field-label">Confidence</span><ConfidenceMeter value={item.confidence} status={item.status} variant="panel" /></p>}
       <label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
     </section>}

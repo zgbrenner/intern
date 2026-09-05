@@ -1,4 +1,4 @@
-import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, QueueItem, SetupState } from '../types';
 
 /** A JSON-safe local document reference that Task 6 can pass to Tauri. */
 export interface FileSelection {
@@ -84,7 +84,8 @@ export interface DesktopBridge {
    * Ask GitHub whether a newer signed release exists.
    *
    * This is the only network request Intern makes apart from the one-off model
-   * download, it happens only when someone presses the button in Settings, and
+   * download (and a hosted model, only if a person chose one in Settings),
+   * it happens only when someone presses the button in Settings, and
    * it sends nothing but a request for the release manifest. No filenames, no
    * document contents, no identifier of any kind.
    */
@@ -126,6 +127,22 @@ export interface DesktopBridge {
    * capability for the sake of one help link.
    */
   openGuide(): Promise<void>;
+  /** Whether a hosted-model key is stored, and each provider's defaults. */
+  hostedModelStatus(): Promise<HostedModelStatus>;
+  /**
+   * Store the hosted model's API key in the operating system's credential
+   * store. It never enters the settings file. Rejected with
+   * HOSTED_MODEL_KEY_EMPTY for a blank key.
+   */
+  hostedModelSetKey(key: string): Promise<void>;
+  hostedModelClearKey(): Promise<void>;
+  /**
+   * Send the calibration document to the hosted model described by
+   * `settings` (the dialog's draft, so what is tested is what is on screen)
+   * with the stored key. This is the one deliberate network request to a
+   * third party Intern makes, and it carries no document of the user's.
+   */
+  hostedModelTest(settings: AppSettings): Promise<HostedModelTestResult>;
 }
 
 /**

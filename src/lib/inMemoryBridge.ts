@@ -1,6 +1,7 @@
 import { GUIDE_URL } from './bridge';
 import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult, UpdateStatus } from './bridge';
-import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, QueueItem, SetupState } from '../types';
+import { leadingDate } from './filenames';
 
 /** Exact size of the single pinned model file this build downloads. */
 export const PINNED_MODEL_BYTES = 1_280_835_840;
@@ -36,6 +37,8 @@ const seedHistory: HistoryEntry[] = [
 export interface InMemoryBridgeOptions {
   items?: QueueItem[];
   setup?: Partial<SetupState>;
+  /** A hosted-model key already in the (fake) credential store. */
+  hostedKey?: string;
   downloadStepBytes?: number;
   downloadIntervalMs?: number;
   update?: UpdateStatus;
@@ -66,7 +69,28 @@ function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
 function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): DesktopBridge {
   let items = (options.items ?? seedItems).map((item) => ({ ...item }));
   let history = seedHistory.map((entry) => ({ ...entry }));
-  let settings: AppSettings = { destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false };
+  let settings: AppSettings = { destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' };
+  // The hosted model's key, as the desktop backend keeps it: out of the
+  // settings, reported only as stored-or-not with a hint.
+  let hostedKey: string | undefined = options.hostedKey;
+  const providerDefaults = [
+    { provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com/v1', model: 'claude-opus-5' },
+    { provider: 'openai_compatible' as const, baseUrl: 'https://api.openai.com/v1', model: '' },
+  ];
+  const hostedEndpoint = (draft: AppSettings): string | null => {
+    const defaults = providerDefaults.find((entry) => entry.provider === draft.hostedProvider)!;
+    const base = (draft.hostedBaseUrl.trim() || defaults.baseUrl).replace(/\/+$/, '');
+    const model = draft.hostedModel.trim() || defaults.model;
+    if (!model || !/^https:\/\//.test(base) && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(base)) return null;
+    return `${base}/${draft.hostedProvider === 'anthropic' ? 'messages' : 'chat/completions'}`;
+  };
+  const hostedConfigured = (draft: AppSettings) => hostedKey !== undefined && hostedEndpoint(draft) !== null;
+  const hostedModelStatus = (): HostedModelStatus => ({
+    keyStored: hostedKey !== undefined,
+    keyHint: hostedKey === undefined ? null : `…${hostedKey.slice(-4)}`,
+    endpoint: hostedConfigured(settings) ? hostedEndpoint(settings) : null,
+    providers: providerDefaults.map((entry) => ({ ...entry })),
+  });
   // Deterministic classification so browser dev and e2e runs can exercise the
   // cloud badge without a real sync client: the path only has to mention the
   // provider, or start like a UNC path. Mirrors the DTO the desktop backend
@@ -141,7 +165,12 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     pauseQueue: async () => { items = items.map((item) => item.status === 'processing' ? { ...item, status: 'waiting' as const } : item); },
     resumeQueue: async () => { const item = items.find((entry) => entry.status === 'waiting'); if (item) update(item.id, { status: 'processing', progress: 0 }); },
     cancel: async (id) => update(id, { status: 'failed', progress: undefined, reason: 'Canceled.' }),
-    approve: async (id, filename, description) => { update(id, { status: 'completed', proposedFilename: filename, description, undoable: true }); noteRecorded(); },
+    // Mirrors the backend's gate: a rename carries a date or it does not happen.
+    approve: async (id, filename, description) => {
+      if (!leadingDate(filename)) throw { code: 'DATE_REQUIRED', message: 'the filename must start with the document\'s date as YYYY-MM-DD' };
+      update(id, { status: 'completed', proposedFilename: filename, description, undoable: true });
+      noteRecorded();
+    },
     keepOriginal: async (id) => update(id, { status: 'completed', proposedFilename: undefined, undoable: true }),
     retry: async (id) => update(id, { status: 'waiting', progress: undefined }),
     remove: async (id) => {
@@ -152,8 +181,16 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     },
     undo: async (id) => update(id, { status: 'review', undoable: false }),
     getSettings: async () => ({ ...settings }),
-    saveSettings: async (next) => { settings = { ...next }; },
-    getSetup: async () => ({ ...setup }),
+    // Mirrors the backend: a hosted model is refused at save time without a
+    // stored key or a usable address, never silently kept.
+    saveSettings: async (next) => {
+      if (next.modelSource === 'hosted') {
+        if (hostedKey === undefined) throw { code: 'HOSTED_MODEL_KEY_MISSING', message: 'no API key is stored for the hosted model' };
+        if (hostedEndpoint(next) === null) throw { code: 'HOSTED_MODEL_MISCONFIGURED', message: 'the hosted model\'s address or model name is not usable' };
+      }
+      settings = { ...next };
+    },
+    getSetup: async () => ({ ...setup, hostedModelReady: settings.modelSource === 'hosted' && hostedConfigured(settings) }),
     startModelDownload: async () => {
       if (setup.state === 'downloading') return;
       setup = { ...setup, state: 'downloading', error: undefined };
@@ -232,6 +269,22 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     // Already in a browser, so the guide opens the way any other link would.
     // noopener keeps the new tab from reaching back into this document.
     openGuide: async () => { window.open(GUIDE_URL, '_blank', 'noopener,noreferrer'); },
+    hostedModelStatus: async () => hostedModelStatus(),
+    hostedModelSetKey: async (key) => {
+      if (!key.trim()) throw { code: 'HOSTED_MODEL_KEY_EMPTY', message: 'the API key is empty' };
+      hostedKey = key.trim();
+    },
+    hostedModelClearKey: async () => { hostedKey = undefined; },
+    // No request leaves the browser: the fake answers the way the desktop
+    // backend does once the key, address, and model resolve.
+    hostedModelTest: async (draft): Promise<HostedModelTestResult> => {
+      if (hostedKey === undefined) throw { code: 'HOSTED_MODEL_KEY_MISSING', message: 'no API key is stored for the hosted model' };
+      const endpoint = hostedEndpoint(draft);
+      if (endpoint === null) throw { code: 'HOSTED_MODEL_MISCONFIGURED', message: 'the hosted model\'s address or model name is not usable' };
+      if (hostedKey.startsWith('bad-')) throw { code: 'HOSTED_MODEL_UNAUTHORIZED', message: 'the hosted service rejected the API key' };
+      const defaults = providerDefaults.find((entry) => entry.provider === draft.hostedProvider)!;
+      return { model: draft.hostedModel.trim() || defaults.model, endpoint, filename: '2024-01-02 Notice of Calibration - Northstar Calibration Holdings LLC.pdf', inferenceMillis: 1840 };
+    },
   };
 }
 

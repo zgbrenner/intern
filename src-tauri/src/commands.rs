@@ -15,6 +15,7 @@ use intern_engine::{
     DocumentAnalysis, DocumentSource, Engine, LlamaServer, ModelClient, ModelManifest,
     ServerOptions, SupervisedWorker, prepare_worker_temp_root,
 };
+use intern_queue::ModelSource;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -40,6 +41,10 @@ use crate::intake::{
     CloudLocationDto, CloudRootDto, DescriptionsStatusDto, IntakeStatusDto, LedgerSink,
     PipelineIntakeHost, SharedFiledIndex, classify_folder, list_cloud_roots, now_unix, status_dto,
 };
+use crate::model::{
+    HostedModel, HostedModelStatusDto, HostedModelTestDto, SwitchingModel, suggested_date,
+};
+use crate::secrets::{KeyringStore, SecretStore};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -81,7 +86,7 @@ impl From<intern_engine::EngineError> for CommandError {
     fn from(error: intern_engine::EngineError) -> Self {
         Self {
             code: error.code().as_str().into(),
-            message: "local model operation failed".into(),
+            message: error.message().into(),
         }
     }
 }
@@ -101,6 +106,10 @@ pub struct QueueItemDto {
     undoable: bool,
     proposal_revision: Option<String>,
     reconciliation: Option<ReconciliationDto>,
+    /// A date the model proposed that validation withheld from the filename,
+    /// for the reviewer to accept with one click.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggested_date: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -135,6 +144,9 @@ pub struct SetupStateDto {
     downloaded_bytes: u64,
     total_bytes: u64,
     error: Option<String>,
+    /// Whether a hosted model is chosen and configured, which lets documents
+    /// be processed whatever the local model's state.
+    hosted_model_ready: bool,
 }
 
 struct TauriPipelineEvents {
@@ -341,7 +353,11 @@ struct SetupManager {
     state: Mutex<SetupStateDto>,
     operation: SetupOperationGate,
     scheduler: Mutex<Option<std::sync::mpsc::Sender<SchedulerMessage>>>,
+    /// Whether the queue may run: the local model is ready, or a hosted one
+    /// is chosen and configured. The scheduler reads this.
     model_ready: Arc<AtomicBool>,
+    local_ready: AtomicBool,
+    hosted_active: AtomicBool,
 }
 
 impl SetupManager {
@@ -357,6 +373,7 @@ impl SetupManager {
             downloaded_bytes: if installed { total_bytes } else { 0 },
             total_bytes,
             error: None,
+            hosted_model_ready: false,
         };
         Self {
             app,
@@ -365,6 +382,39 @@ impl SetupManager {
             operation: SetupOperationGate::default(),
             scheduler: Mutex::new(None),
             model_ready: Arc::new(AtomicBool::new(installed)),
+            local_ready: AtomicBool::new(installed),
+            hosted_active: AtomicBool::new(false),
+        }
+    }
+
+    /// Records whether a hosted model stands ready, and lets the queue run
+    /// on it when the local model is not there.
+    fn set_hosted_active(&self, active: bool) {
+        self.hosted_active.store(active, Ordering::SeqCst);
+        let ready = self.refresh_ready();
+        if let Ok(mut current) = self.state.lock() {
+            current.hosted_model_ready = active;
+            let _ = self.app.emit("setup://progress", current.clone());
+        }
+        if ready {
+            self.wake_scheduler();
+        }
+    }
+
+    fn refresh_ready(&self) -> bool {
+        let ready = model_ready(
+            self.local_ready.load(Ordering::SeqCst),
+            self.hosted_active.load(Ordering::SeqCst),
+        );
+        self.model_ready.store(ready, Ordering::SeqCst);
+        ready
+    }
+
+    fn wake_scheduler(&self) {
+        if let Ok(scheduler) = self.scheduler.lock()
+            && let Some(sender) = scheduler.as_ref()
+        {
+            let _ = sender.send(SchedulerMessage::Wake);
         }
     }
 
@@ -379,7 +429,7 @@ impl SetupManager {
     }
 
     fn start(self: &Arc<Self>) -> Result<(), CommandError> {
-        if self.model_ready.load(Ordering::SeqCst) {
+        if self.local_ready.load(Ordering::SeqCst) {
             return Ok(());
         }
         self.start_operation(SetupSource::Download)
@@ -389,7 +439,7 @@ impl SetupManager {
         self: &Arc<Self>,
         selection: ExistingModelSelection,
     ) -> Result<(), CommandError> {
-        if self.model_ready.load(Ordering::SeqCst) {
+        if self.local_ready.load(Ordering::SeqCst) {
             return Err(CommandError {
                 code: "SETUP_ALREADY_READY".into(),
                 message: "local model setup is already complete".into(),
@@ -501,21 +551,25 @@ impl SetupManager {
     }
 
     fn set_state(&self, state: SetupStatus, downloaded_bytes: u64, error: Option<String>) {
-        let ready = matches!(state, SetupStatus::Ready);
-        self.model_ready.store(ready, Ordering::SeqCst);
+        let local_ready = matches!(state, SetupStatus::Ready);
+        self.local_ready.store(local_ready, Ordering::SeqCst);
+        let ready = self.refresh_ready();
         if let Ok(mut current) = self.state.lock() {
             current.state = state;
             current.downloaded_bytes = downloaded_bytes.min(current.total_bytes);
             current.error = error;
+            current.hosted_model_ready = self.hosted_active.load(Ordering::SeqCst);
             let _ = self.app.emit("setup://progress", current.clone());
         }
-        if ready
-            && let Ok(scheduler) = self.scheduler.lock()
-            && let Some(sender) = scheduler.as_ref()
-        {
-            let _ = sender.send(SchedulerMessage::Wake);
+        if ready {
+            self.wake_scheduler();
         }
     }
+}
+
+/// The queue runs when either model can answer.
+fn model_ready(local_ready: bool, hosted_active: bool) -> bool {
+    local_ready || hosted_active
 }
 
 enum SetupSource {
@@ -637,6 +691,9 @@ pub struct AppState {
     /// out of it, and reads the markers teammates left, so the same content
     /// is never filed twice across machines.
     filed_index: Arc<SharedFiledIndex>,
+    /// The hosted model, when one is chosen: its key in the credential
+    /// store, its engine, and its test.
+    hosted: Arc<HostedModel>,
 }
 
 impl AppState {
@@ -692,6 +749,13 @@ impl AppState {
         let ledger = Arc::new(LedgerSink::new(settings.clone(), data.clone()));
         ledger.attach(app.clone());
         let filed_index = Arc::new(SharedFiledIndex::new(settings.clone(), data.clone()));
+        let secrets: Arc<dyn SecretStore> = Arc::new(KeyringStore);
+        let hosted = Arc::new(HostedModel::new(secrets));
+        let model = Arc::new(SwitchingModel::new(
+            Arc::clone(&runtime),
+            Arc::clone(&hosted),
+            settings.clone(),
+        ));
         let pipeline = Arc::new(
             Pipeline::with_local_files(
                 data.join("queue.sqlite3"),
@@ -699,7 +763,7 @@ impl AppState {
                     executable_directory.join(worker_name),
                     worker_temp_root,
                 )),
-                runtime,
+                model,
                 Arc::new(TauriPipelineEvents { app: app.clone() }),
                 settings.clone(),
             )?
@@ -744,8 +808,10 @@ impl AppState {
             history,
             ledger,
             filed_index,
+            hosted,
         };
-        if matches!(state.setup.get()?.state, SetupStatus::Ready) {
+        state.refresh_hosted_active(&startup_settings);
+        if state.setup.model_ready.load(Ordering::SeqCst) {
             state.schedule()?;
         }
         if startup_settings.intake_enabled
@@ -762,6 +828,14 @@ impl AppState {
             self.scheduler.wake()?;
         }
         Ok(())
+    }
+
+    /// Tells setup whether a hosted model is chosen and able to answer, so
+    /// the queue runs on it - or stops, when the key is gone.
+    fn refresh_hosted_active(&self, settings: &AppSettings) {
+        let active =
+            settings.model_source == ModelSource::Hosted && self.hosted.configured(settings);
+        self.setup.set_hosted_active(active);
     }
 
     /// Stops any running watcher and starts a fresh one when the settings
@@ -1036,6 +1110,13 @@ pub fn settings_save(
             .into_owned();
     }
     validate_description_settings(&settings)?;
+    // A hosted model that could not be sent to is refused at save time, like
+    // every other configuration that could never do anything: the key must
+    // be in the credential store and the address must be one a key may be
+    // sent to.
+    if settings.model_source == ModelSource::Hosted {
+        state.hosted.config(&settings)?;
+    }
     // Applied before anything persists so an operating system that refuses
     // the login entry leaves the stored settings unchanged - the dialog shows
     // the error against a state that is still true.
@@ -1043,6 +1124,10 @@ pub fn settings_save(
         apply_autostart(&state.app, settings.start_at_login)?;
     }
     state.settings.save(&settings)?;
+    state.refresh_hosted_active(&settings);
+    if previous.model_source != settings.model_source {
+        state.schedule()?;
+    }
     if previous.run_in_background != settings.run_in_background {
         crate::tray::sync_tray(&state.app, settings.run_in_background);
         // A tray that was just created starts with the bare tooltip; give it
@@ -1155,6 +1240,44 @@ fn validate_description_settings(settings: &AppSettings) -> Result<(), CommandEr
 #[tauri::command]
 pub fn intake_status(state: State<'_, AppState>) -> Result<IntakeStatusDto, CommandError> {
     state.intake_status_dto()
+}
+
+#[tauri::command]
+pub fn hosted_model_status(
+    state: State<'_, AppState>,
+) -> Result<HostedModelStatusDto, CommandError> {
+    let settings = state.settings.load().unwrap_or_default();
+    Ok(state.hosted.status(&settings))
+}
+
+/// Stores the API key in the operating system's credential store. The key
+/// travels from the dialog to here and no further; it is never written to
+/// the settings file.
+#[tauri::command]
+pub fn hosted_model_set_key(key: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.hosted.set_key(&key)?;
+    let settings = state.settings.load().unwrap_or_default();
+    state.refresh_hosted_active(&settings);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn hosted_model_clear_key(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.hosted.clear_key()?;
+    let settings = state.settings.load().unwrap_or_default();
+    state.refresh_hosted_active(&settings);
+    Ok(())
+}
+
+/// Sends the calibration document to the hosted model described by
+/// `settings` - the dialog's draft, so what is tested is what is on screen -
+/// with the stored key.
+#[tauri::command]
+pub fn hosted_model_test(
+    settings: AppSettings,
+    state: State<'_, AppState>,
+) -> Result<HostedModelTestDto, CommandError> {
+    state.hosted.test(&settings)
 }
 
 /// The OneDrive accounts and SharePoint libraries the sync client keeps on
@@ -1505,6 +1628,7 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
             }),
         proposal_revision: proposal.map(|record| record.revision.to_string()),
         reconciliation,
+        suggested_date: proposal.and_then(|record| suggested_date(&record.analysis)),
     })
 }
 

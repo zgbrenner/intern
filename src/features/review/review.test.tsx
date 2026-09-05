@@ -269,7 +269,7 @@ describe('review actions', () => {
 
   it('writes records for documents already filed once the setting is saved on', async () => {
     const bridge = createInMemoryBridge();
-    await bridge.saveSettings({ destination: 'C:\\Filed', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: true });
+    await bridge.saveSettings({ destination: 'C:\\Filed', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: true, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' });
     render(<App bridge={bridge} />);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
 
@@ -298,7 +298,7 @@ describe('review actions', () => {
 
   it('renders the live intake status with the held-for-others count', async () => {
     const bridge = createInMemoryBridge();
-    await bridge.saveSettings({ destination: 'C:\\Filed', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false });
+    await bridge.saveSettings({ destination: 'C:\\Filed', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' });
     render(<App bridge={bridge} />);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
 
