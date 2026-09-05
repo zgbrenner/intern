@@ -2297,6 +2297,7 @@ dependencies = [
 name = "intern-app"
 version = "0.1.0-alpha.6"
 dependencies = [
+ "chrono",
  "intern-core",
  "intern-engine",
  "intern-intake",

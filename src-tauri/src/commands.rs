@@ -110,6 +110,14 @@ pub struct QueueItemDto {
     /// for the reviewer to accept with one click.
     #[serde(skip_serializing_if = "Option::is_none")]
     suggested_date: Option<String>,
+    /// Every date the document states, for a reviewer who must give a
+    /// document a date the model did not.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dates_in_document: Vec<String>,
+    /// The file's own last-modified date, in this machine's calendar - a
+    /// last resort for a document that states no date, labelled as such.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_modified_date: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1629,7 +1637,28 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
         proposal_revision: proposal.map(|record| record.revision.to_string()),
         reconciliation,
         suggested_date: proposal.and_then(|record| suggested_date(&record.analysis)),
+        dates_in_document: proposal
+            .map(|record| record.analysis.stated_dates.clone())
+            .unwrap_or_default(),
+        // One stat per reviewable item per listing; a settled item's source
+        // is gone or no longer of interest.
+        file_modified_date: matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready)
+            .then(|| file_modified_date(&item.source_path))
+            .flatten(),
     })
+}
+
+/// The calendar date, in this machine's time zone, that a file was last
+/// modified - or `None` when the file cannot be read.
+fn file_modified_date(path: &Path) -> Option<String> {
+    let modified = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()?;
+    Some(
+        chrono::DateTime::<chrono::Local>::from(modified)
+            .format("%Y-%m-%d")
+            .to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -2084,6 +2113,27 @@ mod history_tests {
         assert_eq!(json["originalPath"], r"C:\drop\scan.pdf");
         assert_eq!(json["newPath"], r"\\server\share\filed\a.pdf");
         assert_eq!(json["description"], serde_json::Value::Null);
+    }
+}
+
+#[cfg(test)]
+mod file_date_tests {
+    use super::file_modified_date;
+
+    #[test]
+    fn a_files_date_is_todays_local_date_for_a_file_just_written_and_none_when_missing() {
+        let temp = std::env::temp_dir().join(format!("intern-file-date-{}", std::process::id()));
+        std::fs::write(&temp, b"x").unwrap();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let yesterday = (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let date = file_modified_date(&temp).unwrap();
+        // Written a moment ago; a midnight between the write and the check is
+        // the one legitimate reason for "yesterday".
+        assert!(date == today || date == yesterday, "{date}");
+        let _ = std::fs::remove_file(&temp);
+        assert_eq!(file_modified_date(&temp), None);
     }
 }
 

@@ -18,6 +18,7 @@ path = "src/main.rs"
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 intern-core = { path = "../crates/intern-core" }
 intern-engine = { path = "../crates/intern-engine" }
 intern-intake = { path = "../crates/intern-intake" }

@@ -308,4 +308,8 @@ pub struct DocumentAnalysis {
     /// versions that did not keep it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_proposal: Option<ModelProposal>,
+    /// Every date the document states, in first-mention order, for a
+    /// reviewer who must give the document a date the model did not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stated_dates: Vec<String>,
 }

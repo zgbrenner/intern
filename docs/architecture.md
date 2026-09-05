@@ -251,7 +251,12 @@ every applied name must begin with a date (`DATE_REQUIRED`, refused at
 approval and again at the apply), so the reviewer types one or accepts the
 model's unverified reading. The analysis keeps the model's reply beside the
 validated facts for exactly that offer — a date the document never states
-verbatim is withheld from the name, not lost.
+verbatim is withheld from the name, not lost — and lists every date the
+document does state, so a document the model could not date is dated from
+its own page in a click, with the file's last-modified date as the labelled
+last resort. Whatever date the applied name carries is the date the queue
+files under: the layout's year folder and the description record read it
+from the name, never from the fact validation withheld.
 
 The party clause is composed from a validated relation and validated names, not
 from free text, so every name in a filename has been found in the document.

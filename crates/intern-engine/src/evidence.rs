@@ -406,6 +406,28 @@ mod tests {
     }
 }
 
+/// Every date the document states, in the order it first states them, with
+/// duplicates removed and the list capped so a long agreement's schedule of
+/// dates does not become a wall of buttons. Drawn from the digest's date
+/// lines, so each is a date a person could find on the page - which is what
+/// makes it fit to offer a reviewer who has to give a document a date the
+/// model did not.
+pub fn stated_dates(digest: &DocumentDigest) -> Vec<String> {
+    const MOST: usize = 8;
+    let mut found: Vec<String> = Vec::new();
+    for line in &digest.date_lines {
+        for date in extract_stated_dates(line) {
+            if !found.contains(&date) {
+                found.push(date);
+                if found.len() == MOST {
+                    return found;
+                }
+            }
+        }
+    }
+    found
+}
+
 /// Every ISO date a line states with a written month, a hyphenated written
 /// month, or ISO/slash notation. Purely numeric forms like `3/4/2026` are
 /// deliberately not extracted: without the document's locale they are
