@@ -56,6 +56,29 @@ describe('the date gate', () => {
     await waitFor(() => expect(screen.queryByRole('group', { name: 'Suggested date' })).not.toBeInTheDocument());
   });
 
+  it('offers the dates the document states, and the file date last, when the name has none', async () => {
+    const stated: QueueItem = {
+      ...undated,
+      id: 'minutes',
+      originalFilename: 'Scan 0043.pdf',
+      proposedFilename: 'Board Meeting Minutes - Vistage Worldwide, Inc.pdf',
+      suggestedDate: undefined,
+      reason: 'No date that defines the document was found.',
+      datesInDocument: ['2024-06-18', '2024-07-01'],
+      fileModifiedDate: '2024-06-20',
+    };
+    render(<App bridge={createInMemoryBridge({ items: [stated] })} />);
+    selectRow(await screen.findByRole('row', { name: /Scan 0043.pdf/i }));
+
+    const choices = screen.getByRole('group', { name: 'Dates to choose from' });
+    expect(choices).toHaveTextContent('Dates the document states');
+    expect(within(choices).getByRole('button', { name: '2024-06-20 · file date' })).toHaveAttribute('title', expect.stringMatching(/last-modified/));
+    fireEvent.click(within(choices).getByRole('button', { name: '2024-07-01' }));
+
+    expect(screen.getByLabelText('Filename')).toHaveValue('2024-07-01 Board Meeting Minutes - Vistage Worldwide, Inc.pdf');
+    expect(screen.queryByRole('group', { name: 'Dates to choose from' })).not.toBeInTheDocument();
+  });
+
   it('can put the suggested date into the field to edit before renaming', async () => {
     render(<App bridge={createInMemoryBridge({ items: [undated] })} />);
     selectRow(await screen.findByRole('row', { name: /Scan 0042.pdf/i }));

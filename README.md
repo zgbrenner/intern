@@ -100,7 +100,10 @@ date as `YYYY-MM-DD` is refused, in the inspector and again in the queue, so
 nothing undated is ever filed. When the model read a date that Intern could
 not find written in the document, review shows the date, says it is
 unverified, and accepts it in one click — into the name to edit, or straight
-through to the rename.
+through to the rename. When the model offered none, every date the document
+states is one click away, and the file's own last-modified date is the last,
+labelled resort. The date a reviewer gives a name is the date the document
+is filed under: the year folder and the description record follow it.
 
 Filed documents can be **arranged into subfolders** of the destination —
 by year, by year and document type, by type, or by first party — with

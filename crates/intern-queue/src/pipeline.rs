@@ -923,7 +923,11 @@ impl Pipeline {
         // must not collide in the folder the document is going to.
         let filename = match self.settings.load() {
             Ok(settings) => {
-                let target = target_folder(&settings, &item.source_path, &analysis.proposal);
+                let target = target_folder(
+                    &settings,
+                    &item.source_path,
+                    &proposal_as_applied(&analysis.proposal, &analysis.filename),
+                );
                 compose_filename(
                     &analysis.proposal,
                     &extension,
@@ -1109,7 +1113,11 @@ impl Pipeline {
         }
         let proposal = self.repository.load_proposal(item.id)?;
         let target = match proposal.as_ref() {
-            Some(record) => target_folder(settings, &item.source_path, &record.analysis.proposal),
+            Some(record) => target_folder(
+                settings,
+                &item.source_path,
+                &proposal_as_applied(&record.analysis.proposal, filename),
+            ),
             None => destination_root(settings, &item.source_path),
         };
         // A layout subfolder exists only once a document is filed into it; a
@@ -1804,9 +1812,28 @@ fn filed_document(
             source_hash: source_hash.to_owned(),
             destination: receipt.destination.clone(),
             description: proposal.description.clone(),
-            proposal: proposal.analysis.proposal.clone(),
+            proposal: proposal_as_applied(
+                &proposal.analysis.proposal,
+                &receipt
+                    .destination
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ),
             filed_at,
         })
+}
+
+/// The validated facts as the applied name carries them. A reviewer who
+/// types a date, or accepts the one the model read, puts it in the filename
+/// and nowhere else; the layout folder and the description record must
+/// follow that date, not the one validation withheld.
+pub fn proposal_as_applied(proposal: &ValidatedProposal, filename: &str) -> ValidatedProposal {
+    let mut applied = proposal.clone();
+    if let Some(date) = leading_date(filename) {
+        applied.document_date = Some(date.to_owned());
+    }
+    applied
 }
 
 /// When a completed rename happened, as best the receipt can say: the
@@ -1889,7 +1916,47 @@ fn existing_names(directory: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod date_gate_tests {
-    use super::leading_date;
+    use intern_engine::{Evidence, PartyRelation, ValidatedProposal};
+
+    use super::{leading_date, proposal_as_applied};
+
+    #[test]
+    fn the_applied_name_lends_its_date_to_the_facts_but_never_takes_one_away() {
+        let withheld = ValidatedProposal {
+            document_type: Some("Invoice".into()),
+            document_date: None,
+            date_role: None,
+            parties: Vec::new(),
+            party_relation: PartyRelation::None,
+            description: "An invoice.".into(),
+            confidence: 0.8,
+            evidence: Evidence::default(),
+        };
+        assert_eq!(
+            proposal_as_applied(&withheld, "2026-03-02 Invoice.pdf")
+                .document_date
+                .as_deref(),
+            Some("2026-03-02")
+        );
+        let dated = ValidatedProposal {
+            document_date: Some("2026-01-01".into()),
+            ..withheld.clone()
+        };
+        assert_eq!(
+            proposal_as_applied(&dated, "2026-03-02 Invoice.pdf")
+                .document_date
+                .as_deref(),
+            Some("2026-03-02"),
+            "a reviewer's date wins over the model's"
+        );
+        assert_eq!(
+            proposal_as_applied(&dated, "Invoice.pdf")
+                .document_date
+                .as_deref(),
+            Some("2026-01-01"),
+            "a name without a date changes nothing"
+        );
+    }
 
     #[test]
     fn a_filename_carries_a_date_only_when_it_starts_with_a_real_one() {

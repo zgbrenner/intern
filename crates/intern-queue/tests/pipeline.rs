@@ -1247,6 +1247,96 @@ fn a_layout_files_into_year_and_type_subfolders_and_undo_removes_the_empty_ones(
     assert!(filed.exists(), "the destination itself is never removed");
 }
 
+/// A reviewer's date lives in the filename and nowhere else. The layout
+/// folder and the filing report must follow it, not the date validation
+/// withheld, or a document dated by hand lands in "Undated" with a record
+/// that says it has no date.
+#[test]
+fn a_date_given_in_review_is_the_date_the_document_is_filed_under() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    let filed = temp.path().join("filed");
+    std::fs::create_dir_all(&inbox).unwrap();
+    std::fs::create_dir_all(&filed).unwrap();
+    let path = source(&inbox, "scan.pdf");
+    // The model's date is nowhere in the text, so validation withholds it.
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement between John Smith and Acme Corporation covering duties, salary, and term.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            destination: filed.to_string_lossy().into_owned(),
+            destination_layout: DestinationLayout::Year,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let filing = Arc::new(RecordingFiling::default());
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap()
+    .with_filing_sink(filing.clone());
+    pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+    pipeline.run_until_idle().unwrap();
+
+    let item = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(item.status, QueueStatus::NeedsReview);
+    let record = item.proposal.as_ref().unwrap();
+    assert_eq!(record.analysis.proposal.document_date, None);
+    assert!(
+        record
+            .reasons
+            .iter()
+            .any(|reason| reason == "DATE_UNSUPPORTED")
+    );
+    assert_eq!(
+        record
+            .analysis
+            .model_proposal
+            .as_ref()
+            .and_then(|reply| reply.document_date.as_deref()),
+        Some("2024-04-12"),
+        "the model's reading is kept for the reviewer to accept"
+    );
+
+    pipeline
+        .approve(
+            item.id,
+            "2025-01-15 Employment Agreement with John Smith.pdf",
+            "Employment agreement between John Smith and Acme Corporation.",
+        )
+        .unwrap();
+
+    let completed = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(completed.status, QueueStatus::Completed);
+    let receipt = completed.receipt.unwrap();
+    assert_eq!(
+        receipt.destination,
+        filed
+            .join("2025")
+            .join("2025-01-15 Employment Agreement with John Smith.pdf"),
+        "the year folder follows the date the reviewer gave"
+    );
+    let heard = filing.filed.lock().unwrap();
+    assert_eq!(heard.len(), 1);
+    assert_eq!(
+        heard[0].proposal.document_date.as_deref(),
+        Some("2025-01-15")
+    );
+    drop(heard);
+    let replay = pipeline.filed_documents().unwrap();
+    assert_eq!(
+        replay[0].proposal.document_date.as_deref(),
+        Some("2025-01-15")
+    );
+}
+
 /// The name that will be applied must not collide in the folder the
 /// document is going to; the engine only knows the source folder.
 #[test]

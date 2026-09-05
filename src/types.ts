@@ -20,6 +20,10 @@ export interface QueueItem {
    * person to accept with one click.
    */
   suggestedDate?: string;
+  /** Every date the document states, in the order it states them, for a name that has none yet. */
+  datesInDocument?: string[];
+  /** The file's own last-modified date, a labelled last resort when the document states none. */
+  fileModifiedDate?: string;
 }
 
 /**

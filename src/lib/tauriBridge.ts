@@ -62,6 +62,8 @@ interface QueueItemDto {
   undoable?: boolean;
   proposalRevision?: string | number;
   suggestedDate?: string;
+  datesInDocument?: string[];
+  fileModifiedDate?: string;
 }
 
 interface HistoryEntryDto {
@@ -360,6 +362,8 @@ function normalizeItem(item: QueueItemDto): QueueItem {
     ...(item.undoable === undefined ? {} : { undoable: item.undoable }),
     ...(item.proposalRevision === undefined ? {} : { proposalRevision: String(item.proposalRevision) }),
     ...(item.suggestedDate === undefined ? {} : { suggestedDate: item.suggestedDate }),
+    ...(item.datesInDocument?.length ? { datesInDocument: [...item.datesInDocument] } : {}),
+    ...(item.fileModifiedDate === undefined ? {} : { fileModifiedDate: item.fileModifiedDate }),
   };
 }
 

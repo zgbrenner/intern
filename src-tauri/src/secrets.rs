@@ -3,10 +3,11 @@
 //! Not in `settings.json`. That file is plain text in the profile, it is
 //! what a person pastes into a bug report, and a key in it would be one
 //! copy-paste from the wrong inbox. The operating system already keeps a
-//! store for exactly this - Windows Credential Manager, the macOS Keychain,
-//! the kernel keyring on Linux - where the key is encrypted to the signed-in
-//! user and visible to them under Intern's name, to inspect or delete without
-//! Intern's help.
+//! store for exactly this - Windows Credential Manager, the macOS Keychain -
+//! where the key is encrypted to the signed-in user and visible to them under
+//! Intern's name, to inspect or delete without Intern's help. On Linux, which
+//! Intern does not ship for, the kernel keyring stands in and lasts only until
+//! sign-out; a developer there re-enters the key per session.
 //!
 //! The store is a seam so tests never touch a real credential manager.
 

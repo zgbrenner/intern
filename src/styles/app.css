@@ -196,6 +196,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, tr:focus-visi
 .suggestion p svg { flex: none; margin-top: 2px; }
 .suggestion-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .suggestion-actions button { min-height: 34px; }
+.date-choices { margin: 0 0 16px; }
+.date-choices .field-label { margin-bottom: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { min-height: 30px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.chip:hover:not(:disabled) { background: var(--surface-subtle); border-color: var(--text-muted); }
+.chip--file { color: var(--text-muted); }
 .confidence-readout { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
 
 /* Evidence, as evidence: what the document says, attributed to the part of

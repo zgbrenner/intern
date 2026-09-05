@@ -46,6 +46,11 @@ export function ReviewInspector({ item, drawer, busy, onClose, onApprove, onKeep
   const suggestedDate = item.suggestedDate && !dated ? item.suggestedDate : undefined;
   const useSuggestedDate = () => { setFilename(withLeadingDate(filename, suggestedDate!)); setError(''); };
   const acceptSuggestedDate = () => onApprove(withLeadingDate(filename, suggestedDate!), description);
+  // When the name has no date and the model offered none worth showing, the
+  // document's own dates - and, last, the file's - are one click each.
+  const dateChoices = !dated ? (item.datesInDocument ?? []) : [];
+  const fileDate = !dated ? item.fileModifiedDate : undefined;
+  const chooseDate = (date: string) => { setFilename(withLeadingDate(filename, date)); setError(''); };
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!drawer) return;
     if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
@@ -86,6 +91,13 @@ export function ReviewInspector({ item, drawer, busy, onClose, onApprove, onKeep
         accepted in one click - into the field, or straight through to the
         rename.
       */}
+      {(dateChoices.length > 0 || fileDate) && <div className="date-choices" role="group" aria-label="Dates to choose from">
+        <p className="field-label">{dateChoices.length > 0 ? 'Dates the document states' : 'The document states no date'}</p>
+        <div className="chips">
+          {dateChoices.map((date) => <button type="button" key={date} className="chip" disabled={busy} onClick={() => chooseDate(date)}>{date}</button>)}
+          {fileDate && <button type="button" className="chip chip--file" disabled={busy} title="The file's last-modified date on this computer, not a date from the document" onClick={() => chooseDate(fileDate)}>{fileDate} · file date</button>}
+        </div>
+      </div>}
       {suggestedDate && <div className="suggestion" role="group" aria-label="Suggested date">
         <p><Icon icon={CalendarPlus} />The model read <strong>{suggestedDate}</strong> as the document's date, but Intern could not find it written in the document. Every rename needs a date.</p>
         <div className="suggestion-actions">

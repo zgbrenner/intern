@@ -365,6 +365,7 @@ mod tests {
                 needs_review: false,
                 evidence: Evidence::default(),
             }),
+            stated_dates: Vec::new(),
         }
     }
 

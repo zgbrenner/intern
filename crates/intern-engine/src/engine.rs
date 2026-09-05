@@ -23,6 +23,7 @@ use crate::domain::{
     ValidationOutcome,
 };
 use crate::error::EngineResult;
+use crate::evidence::stated_dates;
 use crate::naming::compose_filename;
 use crate::validate::validate;
 
@@ -133,7 +134,6 @@ pub fn finish(
     telemetry: AnalysisTelemetry,
 ) -> DocumentAnalysis {
     let filename = compose_filename(&outcome.proposal, extension, existing_names).value;
-    let _ = digest;
     DocumentAnalysis {
         filename,
         description: outcome.proposal.description.clone(),
@@ -142,6 +142,7 @@ pub fn finish(
         proposal: outcome.proposal,
         telemetry,
         model_proposal: Some(outcome.candidate),
+        stated_dates: stated_dates(digest),
     }
 }
 
@@ -185,6 +186,41 @@ mod tests {
     #[test]
     fn a_scan_that_yielded_nothing_is_flagged_rather_than_guessed_at() {
         assert!(barely_readable(&source_with_image("l1 ll  I")));
+    }
+
+    /// The dates a reviewer is offered are the document's own, each once, in
+    /// the order the document states them, and never more than a handful.
+    #[test]
+    fn the_analysis_lists_the_dates_the_document_states_once_each_in_order() {
+        use crate::domain::{ModelProposal, PartyRelation};
+
+        let source = source_from_text(
+            "CONSULTING AGREEMENT\n\nThis Agreement is effective as of April 1, 2026.\n\
+             Signed on March 28, 2026 by both parties.\n\
+             The initial term ends on 2027-03-31. Effective as of April 1, 2026 again.\n\
+             Invoices are due 30 days after 15 May 2026.",
+        );
+        let digest = crate::distill::distill(&source, crate::distill::DigestBudget::default());
+        let outcome = validate(
+            ModelProposal {
+                document_type: Some("Consulting Agreement".into()),
+                document_date: Some("2026-04-01".into()),
+                date_role: Some(crate::domain::DateRole::Effective),
+                parties: Vec::new(),
+                party_relation: PartyRelation::None,
+                description: "Consulting agreement effective April 1, 2026 for an initial term."
+                    .into(),
+                confidence: 0.9,
+                needs_review: false,
+                evidence: crate::domain::Evidence::default(),
+            },
+            &digest,
+        );
+        let analysis = finish(outcome, &digest, "pdf", &[], AnalysisTelemetry::default());
+        assert_eq!(
+            analysis.stated_dates,
+            vec!["2026-04-01", "2026-03-28", "2027-03-31", "2026-05-15"]
+        );
     }
 
     #[test]
