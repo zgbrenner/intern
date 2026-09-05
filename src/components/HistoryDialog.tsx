@@ -93,7 +93,7 @@ export function HistoryDialog({ bridge, selection, onClose }: Props) {
 
   return <div className="dialog-backdrop" role="presentation"><section ref={dialog} className="settings-dialog history-dialog" role="dialog" aria-modal="true" aria-label="Rename history">
     <div className="dialog-head"><h2>Rename history</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Close history"><Icon icon={X} /></button></div>
-    <p className="update-note">Every rename and undo Intern has applied, newest first.</p>
+    <p className="update-note">Every rename and undo Intern has applied, newest first. The CSV export carries each document's description in its last column.</p>
     {loadError && <p className="form-error" role="alert">{loadError}</p>}
     {entries && entries.length === 0 && !loadError && <p className="history-empty">No renames yet.</p>}
     {entries && entries.length > 0 && <div className="history-table-wrap"><table>
@@ -102,7 +102,7 @@ export function HistoryDialog({ bridge, selection, onClose }: Props) {
         <td>{formatWhen(entry.at)}</td>
         <td>{actionLabel(entry)}</td>
         <td title={entry.originalPath}>{pathLeaf(entry.originalPath)}</td>
-        <td title={entry.newPath}>{pathLeaf(entry.newPath)}</td>
+        <td title={entry.newPath}>{pathLeaf(entry.newPath)}{entry.description && <span className="row-description">{entry.description}</span>}</td>
       </tr>)}</tbody>
     </table></div>}
     {exportMessage && <p role="status" aria-label="Export status" aria-live="polite">{exportMessage}</p>}

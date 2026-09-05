@@ -87,6 +87,9 @@ pub fn run() {
             commands::intake_status,
             commands::intake_scan_now,
             commands::folder_classify,
+            commands::cloud_roots,
+            commands::descriptions_status,
+            commands::descriptions_backfill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Intern");

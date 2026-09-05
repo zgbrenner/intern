@@ -31,6 +31,12 @@ export interface AppSettings {
   runInBackground: boolean;
   /** Start Intern automatically when the user signs in. */
   startAtLogin: boolean;
+  /**
+   * Write a description record beside every document filed into the
+   * destination (`<destination>/.intern/descriptions/`), so a SharePoint
+   * column can be filled from it. Needs a destination folder.
+   */
+  recordDescriptions: boolean;
 }
 
 /** One finished rename/undo operation from the durable receipt journal. */
@@ -45,12 +51,43 @@ export interface HistoryEntry {
   stage: 'complete' | 'rolled_back';
   originalPath: string;
   newPath: string;
+  /** The one-sentence description applied with the rename, when the item still has it. */
+  description?: string;
 }
 
-/** A folder recognised as living inside a OneDrive/SharePoint sync root. */
+export type CloudProvider = 'onedrive_personal' | 'onedrive_business' | 'sharepoint' | 'network_share';
+
+/**
+ * A folder recognised as living inside a OneDrive/SharePoint sync root, or
+ * reached over the network (a UNC path or a mapped drive).
+ */
 export interface CloudLocation {
-  provider: 'onedrive_personal' | 'onedrive_business' | 'sharepoint';
+  provider: CloudProvider;
   displayName: string;
+}
+
+/** One sync root the sync client keeps on this computer. */
+export interface CloudRoot {
+  provider: CloudProvider;
+  displayName: string;
+  path: string;
+}
+
+/** What the description records are doing. */
+export interface DescriptionsStatus {
+  /** The setting, as saved. */
+  enabled: boolean;
+  /** Where records go, or "" when no destination is configured. */
+  folder: string;
+  recordedThisSession: number;
+  lastRecordedAt: number | null;
+  /** The last write that failed, until the next success. */
+  lastError: string | null;
+}
+
+export interface BackfillResult {
+  written: number;
+  failed: number;
 }
 
 export interface IntakeMachine {
@@ -72,6 +109,8 @@ export interface IntakeStatus {
   heldForOthers: number;
   syncConflicts: number;
   awaitingHydration: number;
+  /** Subfolders the last scan could not read; the rest was still scanned. */
+  unreadableFolders: number;
   claimedByOthers: number;
   processedHere: number;
   lastScanAt: number | null;

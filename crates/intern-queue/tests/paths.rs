@@ -1,7 +1,9 @@
 use std::fs;
 
+use std::path::Path;
+
 use intern_queue::paths::{
-    canonical_file, canonical_folder, canonical_model_file, collect_supported_files,
+    canonical_file, canonical_folder, canonical_model_file, collect_supported_files, display_path,
     is_cloud_reparse_tag, parse_item_id,
 };
 use tempfile::tempdir;
@@ -119,4 +121,38 @@ fn item_ids_are_positive_canonical_decimal_strings() {
     for value in ["", "0", "-1", " 1", "01", "+1", "1.0"] {
         assert!(parse_item_id(value).is_err(), "accepted {value:?}");
     }
+}
+
+/// `canonicalize` on Windows answers `\\?\C:\...`; a person reads `C:\...`.
+/// The prefix is dropped only where the plain spelling is safe to use.
+#[test]
+fn display_paths_drop_the_verbatim_prefix_only_when_the_plain_form_is_safe() {
+    assert_eq!(
+        display_path(Path::new(r"\\?\C:\Users\pat\OneDrive - Contoso\Scans")),
+        r"C:\Users\pat\OneDrive - Contoso\Scans"
+    );
+    assert_eq!(
+        display_path(Path::new(r"\\?\UNC\fileserver\legal\intake")),
+        r"\\fileserver\legal\intake"
+    );
+    assert_eq!(
+        display_path(Path::new(r"C:\Users\pat\Scans")),
+        r"C:\Users\pat\Scans",
+        "a plain path is left alone"
+    );
+    assert_eq!(
+        display_path(Path::new("/home/pat/scans")),
+        "/home/pat/scans"
+    );
+    // A component ending in a space or a dot only survives under the prefix.
+    assert_eq!(
+        display_path(Path::new(r"\\?\C:\Users\pat\Scans.")),
+        r"\\?\C:\Users\pat\Scans."
+    );
+    let deep = format!(r"\\?\C:\{}\file.pdf", "folder\\".repeat(40));
+    assert_eq!(
+        display_path(Path::new(&deep)),
+        deep,
+        "a path too long for the plain form keeps the prefix that makes it work"
+    );
 }

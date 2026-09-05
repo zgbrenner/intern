@@ -11,8 +11,8 @@ use crate::domain::{
     ValidationOutcome,
 };
 use crate::evidence::{
-    date_match_positions, digest_contains, digest_contains_date, extract_stated_dates,
-    is_valid_iso_date, normalize,
+    date_match_positions, digest_contains, digest_contains_date, digest_contains_loosely,
+    extract_stated_dates, is_valid_iso_date, normalize,
 };
 
 /// Below this self-reported confidence a proposal goes to review even when
@@ -271,7 +271,13 @@ const EFFECTIVE_CUES: &[&str] = &[
     "entered into",
 ];
 
-/// A party is accepted when its name appears verbatim in the document.
+/// A party is accepted when its name appears in the document.
+///
+/// Verbatim first; failing that, with punctuation disregarded, because
+/// "Vistage Worldwide Inc" for a document that writes "Vistage Worldwide,
+/// Inc." is the same company and the corpus showed the model dropping the
+/// comma often enough that a real name was reaching review over it. Words are
+/// never loosened: a name the document does not contain is still rejected.
 fn validate_parties(candidate: &ModelProposal, digest: &DocumentDigest) -> (Vec<String>, bool) {
     let mut kept = Vec::new();
     let mut all_supported = true;
@@ -281,7 +287,7 @@ fn validate_parties(candidate: &ModelProposal, digest: &DocumentDigest) -> (Vec<
             all_supported = false;
             continue;
         }
-        if digest_contains(digest, party) {
+        if digest_contains(digest, party) || digest_contains_loosely(digest, party) {
             if !kept.iter().any(|existing: &String| existing == party) {
                 kept.push(party.to_owned());
             }
@@ -335,7 +341,8 @@ fn is_abbreviation_period(value: &str, index: usize) -> bool {
     let before = value[..index]
         .split(|character: char| character.is_whitespace())
         .next_back()
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .trim_start_matches(|character: char| !character.is_alphanumeric());
     matches!(
         before.to_ascii_lowercase().as_str(),
         "inc"
@@ -352,6 +359,21 @@ fn is_abbreviation_period(value: &str, index: usize) -> bool {
             | "sr"
             | "st"
             | "u.s"
+            | "e.g"
+            | "i.e"
+            | "etc"
+            | "vs"
+            | "approx"
+            | "dept"
+            | "assoc"
+            | "bros"
+            | "ave"
+            | "blvd"
+            | "ste"
+            | "esq"
+            | "ph.d"
+            | "m.d"
+            | "j.d"
     ) || before.chars().filter(char::is_ascii_alphabetic).count() == 1
 }
 
@@ -390,11 +412,40 @@ fn first_unsupported_claim(description: &str, digest: &DocumentDigest) -> Option
         if !(has_digit || capitalised) {
             continue;
         }
-        if !digest_contains(digest, token) {
+        if !claim_is_supported(digest, token) {
             return Some(token.to_owned());
         }
     }
     None
+}
+
+/// Whether one specific claim is in the document, allowing for the ways a
+/// sentence reshapes a fact it is quoting.
+///
+/// A possessive ("Acme's" for a document that writes "Acme"), a thousands
+/// separator the document omits ("248,000" for "248000"), or a hyphen the
+/// model added between two words that the document keeps apart are all the
+/// same fact. Words themselves are never changed; a name that is not in the
+/// document is still an unsupported claim.
+fn claim_is_supported(digest: &DocumentDigest, token: &str) -> bool {
+    if digest_contains(digest, token) {
+        return true;
+    }
+    let mut variants: Vec<String> = Vec::new();
+    for possessive in ["'s", "\u{2019}s"] {
+        if let Some(stem) = token.strip_suffix(possessive) {
+            variants.push(stem.to_owned());
+        }
+    }
+    if token.bytes().any(|byte| byte.is_ascii_digit()) && token.contains(',') {
+        variants.push(token.replace(',', ""));
+    }
+    if token.contains('-') {
+        variants.push(token.replace('-', " "));
+    }
+    variants
+        .iter()
+        .any(|variant| variant.chars().count() >= 3 && digest_contains(digest, variant))
 }
 
 fn push(reasons: &mut Vec<ReviewReason>, reason: ReviewReason) {
@@ -696,5 +747,70 @@ Countersigned June 2, 2023.
     fn a_company_suffix_period_does_not_truncate_the_description() {
         let outcome = validate(proposal(), &digest_of(DOCUMENT));
         assert!(outcome.proposal.description.contains("CRM implementation"));
+    }
+
+    /// The model drops the comma from "Vistage Worldwide, Inc." often enough
+    /// that a correct party was reaching review, and the filename lost the
+    /// name. Punctuation is typography; the words are still checked.
+    #[test]
+    fn a_party_that_differs_from_the_document_only_in_punctuation_is_kept() {
+        let mut candidate = proposal();
+        candidate.parties = vec!["Acme Corporation".into(), "Vistage Worldwide Inc".into()];
+        let outcome = validate(candidate, &digest_of(DOCUMENT));
+        assert_eq!(
+            outcome.proposal.parties,
+            vec![
+                "Acme Corporation".to_owned(),
+                "Vistage Worldwide Inc".to_owned()
+            ]
+        );
+        assert!(!outcome.reasons.contains(&ReviewReason::PartyUnsupported));
+        assert_eq!(outcome.proposal.party_relation, PartyRelation::Between);
+
+        let mut candidate = proposal();
+        candidate.parties = vec!["Vistage Worldwide LLC".into()];
+        let outcome = validate(candidate, &digest_of(DOCUMENT));
+        assert!(outcome.proposal.parties.is_empty());
+        assert!(outcome.reasons.contains(&ReviewReason::PartyUnsupported));
+    }
+
+    #[test]
+    fn a_description_may_reshape_a_fact_it_quotes_but_not_invent_one() {
+        let document = format!(
+            "{DOCUMENT}\nThe total fee is $248000 payable to Acme.\nWork begins in Ridgeline Cartography's office.\n"
+        );
+        let mut candidate = proposal();
+        candidate.description = "Statement of work between Acme Corporation and Vistage Worldwide, Inc. for Ridgeline-Cartography's 2026 CRM implementation at a fee of $248,000.".into();
+        let outcome = validate(candidate, &digest_of(&document));
+        assert!(
+            !outcome
+                .reasons
+                .contains(&ReviewReason::DescriptionUnsupported),
+            "{:?}",
+            outcome.reasons
+        );
+
+        let mut candidate = proposal();
+        candidate.description = "Statement of work between Acme Corporation and Vistage Worldwide, Inc. for Northwind's 2026 CRM implementation.".into();
+        let outcome = validate(candidate, &digest_of(&document));
+        assert!(
+            outcome
+                .reasons
+                .contains(&ReviewReason::DescriptionUnsupported)
+        );
+    }
+
+    #[test]
+    fn an_abbreviation_inside_the_sentence_does_not_end_it() {
+        let mut candidate = proposal();
+        candidate.description =
+            "Statement of work between Acme Corporation and Vistage Worldwide, Inc. covering deliverables (e.g. the 2026 CRM implementation) and fees."
+                .into();
+        let outcome = validate(candidate, &digest_of(DOCUMENT));
+        assert!(
+            outcome.proposal.description.ends_with("and fees."),
+            "{}",
+            outcome.proposal.description
+        );
     }
 }

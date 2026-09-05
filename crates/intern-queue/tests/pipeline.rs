@@ -17,8 +17,8 @@ use intern_engine::{
 };
 use intern_queue::{
     pipeline::{
-        AnalyzerBoundary, FileActions, ModelFailure, Pipeline, PipelineError, PipelineEventSink,
-        PipelineProgress, WorkerBoundary, WorkerFailure,
+        AnalyzerBoundary, FileActions, FiledDocument, FilingSink, ModelFailure, Pipeline,
+        PipelineError, PipelineEventSink, PipelineProgress, WorkerBoundary, WorkerFailure,
     },
     settings::{AppSettings, SettingsStore},
 };
@@ -49,6 +49,22 @@ fn analyze_locally(
 struct RecordingEvents {
     changed: AtomicUsize,
     progress: Mutex<Vec<PipelineProgress>>,
+}
+
+/// Remembers every filed-document report and every retraction, in order.
+#[derive(Default)]
+struct RecordingFiling {
+    filed: Mutex<Vec<FiledDocument>>,
+    unfiled: Mutex<Vec<PathBuf>>,
+}
+
+impl FilingSink for RecordingFiling {
+    fn filed(&self, document: &FiledDocument) {
+        self.filed.lock().unwrap().push(document.clone());
+    }
+    fn unfiled(&self, destination: &Path) {
+        self.unfiled.lock().unwrap().push(destination.to_path_buf());
+    }
 }
 
 impl PipelineEventSink for RecordingEvents {
@@ -1005,6 +1021,7 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
             ..AppSettings::default()
         })
         .unwrap();
+    let filing = Arc::new(RecordingFiling::default());
     let pipeline = Pipeline::with_local_files(
         temp.path().join("real-queue.sqlite3"),
         worker,
@@ -1012,22 +1029,76 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
         Arc::new(RecordingEvents::default()),
         settings,
     )
-    .unwrap();
+    .unwrap()
+    .with_filing_sink(filing.clone());
     pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+    assert!(
+        pipeline.filed_documents().unwrap().is_empty(),
+        "nothing is filed before the queue runs"
+    );
 
     pipeline.run_until_idle().unwrap();
 
     let completed = pipeline.list().unwrap().pop().unwrap();
     assert_eq!(completed.status, QueueStatus::Completed);
-    let receipt = completed.receipt.unwrap();
+    let receipt = completed.receipt.clone().unwrap();
     assert!(!receipt.source.exists());
     assert!(receipt.destination.exists());
+
+    // The filing sink hears about the rename once it is complete, with the
+    // destination the applier actually chose and the sentence that was applied.
+    let filed = filing.filed.lock().unwrap().clone();
+    assert_eq!(filed.len(), 1, "{filed:?}");
+    assert_eq!(filed[0].item_id, completed.id);
+    assert_eq!(filed[0].source_path, path);
+    assert_eq!(filed[0].destination, receipt.destination);
+    assert_eq!(
+        filed[0].description,
+        completed.proposal.as_ref().unwrap().description
+    );
+    assert_eq!(
+        filed[0].proposal.document_date.as_deref(),
+        Some("2024-04-12")
+    );
+    assert!(filed[0].filed_at > 0);
+    // The same report is available on demand, for a records keeper that is
+    // switched on after the fact.
+    let replay = pipeline.filed_documents().unwrap();
+    assert_eq!(replay.len(), 1);
+    assert_eq!(replay[0].destination, receipt.destination);
+    assert_eq!(replay[0].description, filed[0].description);
+
+    // The original path no longer exists, and still finds its item; the
+    // renamed path was never enqueued and finds nothing.
+    let by_path = pipeline.find_by_source_path(&path).unwrap().unwrap();
+    assert_eq!(by_path.id, completed.id);
+    assert_eq!(by_path.status, QueueStatus::Completed);
+    assert!(by_path.receipt.is_some());
+    assert!(
+        pipeline
+            .find_by_source_path(&receipt.destination)
+            .unwrap()
+            .is_none()
+    );
 
     pipeline.undo(completed.id).unwrap();
 
     assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
     assert!(path.exists());
     assert!(!receipt.destination.exists());
+    assert_eq!(
+        filing.unfiled.lock().unwrap().clone(),
+        vec![receipt.destination.clone()],
+        "an undo retracts the report for the destination it vacated"
+    );
+    assert!(
+        pipeline.filed_documents().unwrap().is_empty(),
+        "an undone rename is no longer a filed document"
+    );
+    assert_eq!(
+        pipeline.find_by_source_path(&path).unwrap().unwrap().status,
+        QueueStatus::Ready
+    );
 }
 
 #[test]

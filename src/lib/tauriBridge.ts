@@ -1,8 +1,9 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import type { AppSettings, CloudLocation, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, IntakeStatus, QueueItem, SetupState } from '../types';
 import { GUIDE_URL } from './bridge';
 import type {
+  DescriptionsEventSource,
   DesktopBridge,
   ExistingModelFiles,
   FileSelection,
@@ -71,6 +72,7 @@ interface HistoryEntryDto {
   stage: HistoryEntry['stage'];
   originalPath: string;
   newPath: string;
+  description?: string | null;
 }
 
 interface ChangedPayload { paused?: boolean }
@@ -92,7 +94,7 @@ export interface TauriSelectionBoundary extends SelectionBoundary {
   subscribeDrops(listener: (selection: SelectionResult) => void): Promise<() => void>;
 }
 
-export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventSource, IntakeEventSource {
+export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventSource, IntakeEventSource, DescriptionsEventSource {
   constructor(private readonly transport: TauriTransport = defaultTransport) {}
 
   async listItems(): Promise<QueueItem[]> {
@@ -139,10 +141,11 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
 
   async historyList(): Promise<HistoryEntry[]> {
     const entries = await this.transport.invoke<HistoryEntryDto[]>('history_list');
-    return entries.map((entry) => ({
+    return entries.map(({ description, ...entry }) => ({
       ...entry,
       receiptId: String(entry.receiptId),
       queueItemId: String(entry.queueItemId),
+      ...(typeof description === 'string' && description.trim() ? { description } : {}),
     }));
   }
 
@@ -159,6 +162,31 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
     // The DTO is camelCase end to end; only guard against an absent value so
     // callers can rely on `null` rather than `undefined`.
     return await this.transport.invoke<CloudLocation | null | undefined>('folder_classify', { path }) ?? null;
+  }
+
+  async cloudRoots(): Promise<CloudRoot[]> {
+    return await this.transport.invoke<CloudRoot[] | null | undefined>('cloud_roots') ?? [];
+  }
+
+  descriptionsStatus(): Promise<DescriptionsStatus> { return this.transport.invoke('descriptions_status'); }
+  descriptionsBackfill(): Promise<BackfillResult> { return this.transport.invoke('descriptions_backfill'); }
+
+  // Same shape as subscribeIntake: synchronous unsubscribe over an async
+  // listen, dropping events until the listener is registered.
+  subscribeDescriptions(handler: (status: DescriptionsStatus) => void): () => void {
+    let active = true;
+    let stop: (() => void) | undefined;
+    void this.transport.listen<DescriptionsStatus>('descriptions://changed', ({ payload }) => {
+      if (active) handler(payload);
+    }).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    }).catch(() => { /* No event stream in this runtime; callers fall back to asking. */ });
+    return () => {
+      if (!active) return;
+      active = false;
+      stop?.();
+    };
   }
 
   /**

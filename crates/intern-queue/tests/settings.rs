@@ -27,6 +27,7 @@ fn settings_saved_before_the_intake_fields_existed_load_with_defaults() {
             machine_label: String::new(),
             run_in_background: false,
             start_at_login: false,
+            record_descriptions: false,
         }
     );
 }
@@ -48,6 +49,7 @@ fn save_replaces_existing_content_atomically_and_round_trips_the_intake_fields()
         machine_label: "study desk".into(),
         run_in_background: true,
         start_at_login: true,
+        record_descriptions: true,
     };
     store.save(&settings).unwrap();
 
@@ -61,6 +63,7 @@ fn save_replaces_existing_content_atomically_and_round_trips_the_intake_fields()
         "machineLabel",
         "runInBackground",
         "startAtLogin",
+        "recordDescriptions",
     ] {
         assert!(written.contains(key), "missing camelCase key {key}");
     }

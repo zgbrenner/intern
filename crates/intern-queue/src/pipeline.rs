@@ -8,10 +8,12 @@ use std::{
 };
 
 use intern_core::{
-    ErrorCode, FileApplier, InternError, OperationReceipt, QueueItem, QueueStatus, QueueStore,
-    StdFileSystem, source_path_key,
+    ErrorCode, FileApplier, InternError, OperationDirection, OperationReceipt, OperationStage,
+    QueueItem, QueueStatus, QueueStore, StdFileSystem, source_path_key,
 };
-use intern_engine::{DocumentAnalysis, DocumentSource, ExtractProgress, ProposalStatus};
+use intern_engine::{
+    DocumentAnalysis, DocumentSource, ExtractProgress, ProposalStatus, ValidatedProposal,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
@@ -329,6 +331,42 @@ pub trait PipelineEventSink: Send + Sync {
     fn progress(&self, progress: PipelineProgress);
 }
 
+/// A document the queue has just filed, as reported to whoever keeps records
+/// beside filed documents (the description ledger, in the desktop app).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FiledDocument {
+    pub item_id: i64,
+    /// Where the document was before the rename.
+    pub source_path: PathBuf,
+    /// Where it is now - the receipt's destination, suffix and all.
+    pub destination: PathBuf,
+    /// The sentence that was applied: the model's, or the reviewer's edit.
+    pub description: String,
+    /// The validated facts behind the name.
+    pub proposal: ValidatedProposal,
+    /// Unix seconds when the apply completed.
+    pub filed_at: i64,
+}
+
+/// Where the queue reports filed documents to.
+///
+/// Filing has already succeeded when `filed` is called and cannot be undone
+/// by it: an implementation that fails records its own failure and says so
+/// elsewhere, and the rename stands. `unfiled` is the mirror image, called
+/// after an undo has put the document back.
+pub trait FilingSink: Send + Sync {
+    fn filed(&self, document: &FiledDocument);
+    fn unfiled(&self, destination: &Path);
+}
+
+/// The default: nobody is listening.
+struct NoFilingSink;
+
+impl FilingSink for NoFilingSink {
+    fn filed(&self, _document: &FiledDocument) {}
+    fn unfiled(&self, _destination: &Path) {}
+}
+
 /// What the queue stores about one proposal.
 ///
 /// `analysis` is exactly what the engine produced and never changes; `filename`
@@ -370,6 +408,7 @@ pub struct Pipeline {
     model: Arc<dyn AnalyzerBoundary>,
     files: Arc<dyn FileActions>,
     events: Arc<dyn PipelineEventSink>,
+    filing: Arc<dyn FilingSink>,
     settings: SettingsStore,
     paused: AtomicBool,
     active_item: AtomicI64,
@@ -404,6 +443,7 @@ impl Pipeline {
             model,
             files,
             events,
+            filing: Arc::new(NoFilingSink),
             settings,
             paused: AtomicBool::new(false),
             active_item: AtomicI64::new(0),
@@ -432,6 +472,7 @@ impl Pipeline {
             model,
             files,
             events,
+            filing: Arc::new(NoFilingSink),
             settings,
             paused: AtomicBool::new(false),
             active_item: AtomicI64::new(0),
@@ -440,6 +481,13 @@ impl Pipeline {
             lease_renewal_interval: LEASE_RENEWAL_INTERVAL,
             run_lock: Mutex::new(()),
         })
+    }
+
+    /// Reports every completed rename (and every undo of one) to `sink`.
+    #[must_use]
+    pub fn with_filing_sink(mut self, sink: Arc<dyn FilingSink>) -> Self {
+        self.filing = sink;
+        self
     }
 
     #[doc(hidden)]
@@ -498,43 +546,80 @@ impl Pipeline {
         self.store
             .list()?
             .into_iter()
-            .map(|item| {
-                let proposal = self.repository.load_proposal(item.id)?;
-                let receipt = self.store.load_receipt(item.id)?;
-                let duplicate_of = if item.status == QueueStatus::NeedsReview
-                    && item.error_code == Some(ErrorCode::Duplicate)
-                {
-                    self.store
-                        .find_completed_duplicate(
-                            &item.source_hash,
-                            &source_path_key(&item.source_path),
-                        )?
-                        .map(|duplicate| {
-                            duplicate.filed_as.unwrap_or_else(|| {
-                                duplicate
-                                    .source_path
-                                    .file_name()
-                                    .unwrap_or(duplicate.source_path.as_os_str())
-                                    .to_string_lossy()
-                                    .into_owned()
-                            })
-                        })
-                } else {
-                    None
-                };
-                Ok(PipelineItem {
-                    id: item.id,
-                    source_path: item.source_path,
-                    source_hash: item.source_hash,
-                    status: item.status,
-                    processing_failures: item.processing_failures,
-                    error_code: item.error_code,
-                    proposal,
-                    receipt,
-                    duplicate_of,
-                })
-            })
+            .map(|item| self.pipeline_item(item))
             .collect()
+    }
+
+    /// The newest item enqueued from `path` - as given, or as it
+    /// canonicalizes now - with its proposal and receipt, or `None` when the
+    /// queue has never seen the path.
+    ///
+    /// A path that no longer canonicalizes (the apply already renamed it away)
+    /// still matches as given, which is what lets a finished intake document
+    /// report its fate instead of `Unknown`.
+    pub fn find_by_source_path(&self, path: &Path) -> PipelineResult<Option<PipelineItem>> {
+        let canonical = fs::canonicalize(path).ok();
+        let mut candidates = vec![path];
+        if let Some(canonical) = canonical.as_deref()
+            && canonical != path
+        {
+            candidates.push(canonical);
+        }
+        self.store
+            .find_newest_by_source_path(&candidates)?
+            .map(|item| self.pipeline_item(item))
+            .transpose()
+    }
+
+    fn pipeline_item(&self, item: QueueItem) -> PipelineResult<PipelineItem> {
+        let proposal = self.repository.load_proposal(item.id)?;
+        let receipt = self.store.load_receipt(item.id)?;
+        let duplicate_of = if item.status == QueueStatus::NeedsReview
+            && item.error_code == Some(ErrorCode::Duplicate)
+        {
+            self.store
+                .find_completed_duplicate(&item.source_hash, &source_path_key(&item.source_path))?
+                .map(|duplicate| {
+                    duplicate.filed_as.unwrap_or_else(|| {
+                        duplicate
+                            .source_path
+                            .file_name()
+                            .unwrap_or(duplicate.source_path.as_os_str())
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+                })
+        } else {
+            None
+        };
+        Ok(PipelineItem {
+            id: item.id,
+            source_path: item.source_path,
+            source_hash: item.source_hash,
+            status: item.status,
+            processing_failures: item.processing_failures,
+            error_code: item.error_code,
+            proposal,
+            receipt,
+            duplicate_of,
+        })
+    }
+
+    /// Every document the queue has filed and not undone: completed items
+    /// whose latest receipt is a finished apply, with the sentence and facts
+    /// that were applied. What a records keeper replays when it is switched
+    /// on after documents were already filed.
+    pub fn filed_documents(&self) -> PipelineResult<Vec<FiledDocument>> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .filter(|item| item.status == QueueStatus::Completed)
+            .filter_map(|item| {
+                let receipt = item.receipt?;
+                let proposal = item.proposal?;
+                filed_document(item.id, &receipt, &proposal, receipt_time(&receipt))
+            })
+            .collect())
     }
 
     pub fn run_until_idle(&self) -> PipelineResult<()> {
@@ -901,8 +986,25 @@ impl Pipeline {
             self.events.queue_changed();
             return Err(error);
         }
+        self.report_filed(item.id);
         self.events.queue_changed();
         Ok(())
+    }
+
+    /// Tells the filing sink about a rename that just completed. Read back
+    /// from the store rather than assumed: the receipt carries the destination
+    /// the applier actually chose, suffix and all, and the proposal carries
+    /// the sentence a reviewer may have edited.
+    fn report_filed(&self, item_id: i64) {
+        let Ok(Some(receipt)) = self.store.load_receipt(item_id) else {
+            return;
+        };
+        let Ok(Some(proposal)) = self.repository.load_proposal(item_id) else {
+            return;
+        };
+        if let Some(document) = filed_document(item_id, &receipt, &proposal, unix_now()) {
+            self.filing.filed(&document);
+        }
     }
 
     pub fn pause(&self) {
@@ -1123,6 +1225,7 @@ impl Pipeline {
             )
         })?;
         self.files.undo(&item, &receipt)?;
+        self.filing.unfiled(&receipt.destination);
         self.events.queue_changed();
         Ok(())
     }
@@ -1428,6 +1531,42 @@ impl PipelineRepository {
             )
         })
     }
+}
+
+/// The filed-document report for a completed apply receipt, or `None` when
+/// the receipt is not one (an undo, or an apply that never completed).
+fn filed_document(
+    item_id: i64,
+    receipt: &OperationReceipt,
+    proposal: &ProposalRecord,
+    filed_at: i64,
+) -> Option<FiledDocument> {
+    (receipt.direction == OperationDirection::Apply && receipt.stage == OperationStage::Complete)
+        .then(|| FiledDocument {
+            item_id,
+            source_path: receipt.source.clone(),
+            destination: receipt.destination.clone(),
+            description: proposal.description.clone(),
+            proposal: proposal.analysis.proposal.clone(),
+            filed_at,
+        })
+}
+
+/// When a completed rename happened, as best the receipt can say: the
+/// destination's modification time is the rename itself on most filesystems,
+/// and a missing file (deleted since) falls back to now.
+fn receipt_time(receipt: &OperationReceipt) -> i64 {
+    fs::metadata(&receipt.destination)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or_else(unix_now, |duration| duration.as_secs() as i64)
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs() as i64)
 }
 
 fn model_error_code(error: &ModelFailure) -> ErrorCode {

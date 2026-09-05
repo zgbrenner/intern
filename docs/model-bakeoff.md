@@ -246,12 +246,17 @@ fitting a prompt to it is not the same as being right:
   effectively every real document, still cost exactly one OCR pass.
 * Those OCR measurements come from UB-Mannheim Tesseract 5.4.0, not the pinned
   vcpkg 5.5.2 that ships; treat the exact confidences as indicative.
-* Repeated boilerplate still consumes digest budget. Near-duplicate blocks are
-  dropped by comparing a digit-masked prefix, so `25. Assignment.` and
-  `41. Assignment.` collapse to one - but only when the repeats begin the same
-  way. In the 14-page statement of work, the same assignment and force-majeure
-  clauses reappear several times because some copies start with the numbered
-  heading and some start mid-clause, and the prefixes therefore differ. It costs
-  budget rather than accuracy: the identifying content and every date still
-  survive, and date accuracy on that document is correct. Worth tightening only
-  with a measurement showing it buys something.
+* Repeated boilerplate used to consume digest budget. Near-duplicate blocks
+  were dropped by comparing a digit-masked prefix, so `25. Assignment.` and
+  `41. Assignment.` collapsed to one - but only when the repeats began the same
+  way, and never when the block was mandatory. In the 14-page statement of
+  work the same assignment and force-majeure clauses reappeared several times:
+  some copies started with the numbered heading, some mid-clause, and every
+  copy named the parties and the type, which made every copy mandatory. Two
+  changes since: a block whose text is identical to one already kept (clause
+  number aside) is dropped whether or not it is mandatory, and a
+  non-mandatory body block that ends on the same 80 characters as one already
+  kept is dropped too. Blocks that differ only in their digits are still both
+  kept, because the digits may be the date. This is verified on synthetic
+  documents in the distillation tests; the corpus has not been re-scored
+  against it, and the release evaluation will say what it buys.

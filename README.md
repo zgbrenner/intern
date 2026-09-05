@@ -114,6 +114,31 @@ work queue, with a courtesy delay so the uploader's own machine gets first
 claim. The design, its guarantees, and its failure behavior are documented in
 [`docs/shared-intake.md`](docs/shared-intake.md).
 
+Settings lists the **synced locations** the sync client keeps on the machine
+— each SharePoint library and OneDrive account, with its local folder — so
+the folder a library syncs to (`C:\Users\pat\Contoso\Legal - Documents`, a
+name nobody chose) is one click away instead of a hunt through a folder
+dialog. A folder on a **network share** — a UNC path or a mapped drive — is
+recognised and labelled too, and the same `.intern/` claim files coordinate
+machines watching a share. A subfolder the account cannot read is counted and
+skipped rather than stopping the scan.
+
+### The description in a SharePoint column
+
+Alongside the filename, Intern writes one sentence saying what the document
+concerns. With **Write a description record for each filed document** turned
+on, every rename into the destination folder also writes a small JSON record
+under `<destination>\.intern\descriptions\` — the filename, its path in the
+library, the sentence, and the date, type, and parties behind the name; never
+document text. The sync client uploads the record like any other file, and a
+Power Automate flow (the recipe is in
+[`docs/sharepoint-descriptions.md`](docs/sharepoint-descriptions.md)) copies
+the sentence into a **Description** column of the library. Intern still makes
+no network request for this; the flow runs under the SharePoint account of
+whoever creates it. Records for documents filed before the setting was turned
+on can be written from Settings, and the rename history's CSV export carries
+the same sentence in its last column for anyone who would rather paste.
+
 ## How a document becomes a filename
 
 ```text

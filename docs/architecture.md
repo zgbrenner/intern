@@ -86,7 +86,10 @@ Distillation instead reads the whole document:
 4. **Select.** Mandatory blocks first (the opening, anything carrying a date with
    a stated role, anything naming parties and a type, subject lines, signature
    blocks), then the highest-scoring remainder, until the budget is spent.
-   Near-duplicate blocks never compete for budget with text that appears once.
+   A block whose text repeats one already kept (clause number aside) is never
+   kept twice, and near-duplicate blocks — the same opening or, for long body
+   text, the same closing 80 characters with digits masked — never compete
+   for budget with text that appears once.
 5. **Emit.** Kept blocks are written back **in document order**, with `[Page N]`
    markers, `[...]` where text was removed, a `SECTIONS:` outline of every
    heading found anywhere in the document, and an index of every sentence that
@@ -179,10 +182,10 @@ The goal is calibration, not timidity. A proposal goes to review only when a
 
 | Fact | Accepted when |
 | --- | --- |
-| Date | it is a real calendar date **and** is written, in some ordinary human form, in the document |
+| Date | it is a real calendar date **and** is written, in some ordinary human form, in the document — `April 1, 2026`, `1st April 2026`, `01/04/2026`, `01.04.2026`, `4/1/26`, and their relatives, matched as whole tokens so `12/1/2026` never supports February 1 |
 | Type | at least 60% of its significant words appear in the document |
-| Party | the name appears verbatim in the document |
-| Description | one sentence, 6–42 words, and every number and capitalised name in it appears in the document |
+| Party | the name appears in the document, verbatim or with punctuation disregarded (`Vistage Worldwide Inc` for a document that writes `Vistage Worldwide, Inc.`); the words themselves are never loosened |
+| Description | one sentence, 6–42 words, and every number and capitalised name in it appears in the document, allowing a possessive, a thousands separator, or a hyphen the sentence added |
 
 The date rule is deliberately about the *date*, not about the model's quoted
 line. Small models paraphrase their own quotes — answering
@@ -303,8 +306,14 @@ of them can change how documents are understood. Adding a new host means
 adding a caller, not touching the engine.
 
 The watched intake folder — including shared OneDrive/SharePoint intake
-folders and the multi-machine claim protocol behind them — lives in
-`intern-intake` and is documented in [`shared-intake.md`](shared-intake.md).
-It sits entirely on the queue side of this boundary: it decides *which*
-documents enter the local queue and records what happened to them, and knows
-nothing about models.
+folders, network shares, and the multi-machine claim protocol behind them —
+lives in `intern-intake` and is documented in
+[`shared-intake.md`](shared-intake.md). It sits entirely on the queue side of
+this boundary: it decides *which* documents enter the local queue and records
+what happened to them, and knows nothing about models.
+
+The queue reports every completed rename to a *filing sink*, and the desktop
+app's sink writes the description records that let a SharePoint column carry
+the sentence — see [`sharepoint-descriptions.md`](sharepoint-descriptions.md).
+The sink hears about a rename only after it has succeeded and cannot undo it;
+a record that fails to write is reported in Settings, and the rename stands.
