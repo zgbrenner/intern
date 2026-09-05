@@ -12,6 +12,7 @@ const SENTENCES: Record<string, string> = {
   DATE_UNSUPPORTED: 'The proposed date does not appear verbatim in the document.',
   TYPE_MISSING: 'No specific document type was identified.',
   TYPE_UNSUPPORTED: 'The proposed document type does not appear verbatim in the document.',
+  TYPE_INFERRED: 'The model gave no document type, so the document\'s own title was used; check that it names the document.',
   PARTY_UNSUPPORTED: 'A proposed party could not be found in the document.',
   DESCRIPTION_UNSUPPORTED: 'The description asserts something the document does not contain.',
   DESCRIPTION_INVALID: 'The description was not a single usable sentence.',
@@ -25,6 +26,10 @@ const SENTENCES: Record<string, string> = {
   SOURCE_DELETE_FAILED: 'The renamed copy is safe, but the original file could not be removed.',
   PROPOSAL_MISSING: 'Analysis finished without a usable proposal.',
   IO_ERROR: 'A file operation failed.',
+  // Raised before analysis when the content was filed before; the name it was
+  // filed under is normally given instead, as "Duplicate of ...". The bare code
+  // only reaches here once the record of that filing is gone.
+  DUPLICATE: 'This document\'s content was filed once already. Retry to process it anyway, or remove it.',
 };
 
 /**

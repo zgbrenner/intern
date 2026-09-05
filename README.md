@@ -79,12 +79,23 @@ until you approve it, either one item at a time or with **Apply all ready**,
 and a rename can be undone. A document whose content Intern has already filed
 is flagged as a duplicate of the filed name instead of being renamed into a
 second copy, and the **History** view in Completed lists every rename and undo
-Intern has ever applied, exportable as CSV.
+Intern has ever applied, exportable as CSV. A long queue has a filter box
+above it that narrows the rows by original name, proposed name, or a word
+from the description.
+
+Filed documents can be **arranged into subfolders** of the destination —
+by year, by year and document type, by type, or by first party — with
+**Arrange filed documents** in Settings. Folders are created as documents
+arrive and removed again when an undo empties them, and a document missing
+the fact a layout keys on goes into `Undated` or `Unsorted` rather than the
+root, so what still needs a hand stays visible.
 
 Intern can also **run in the background**: with the setting on, closing the
 window keeps Intern in the system tray — watched folders keep working — and
 **Start Intern when you sign in** makes it a quiet always-on service. Both are
-off by default.
+off by default. The tray icon's tooltip says how many documents need review
+or are ready to rename, so a glance answers whether the window is worth
+opening.
 
 ## Watched intake folders, OneDrive, and SharePoint
 
@@ -111,8 +122,12 @@ is taken over after its lease lapses, and nothing needs a server. By default
 each machine only processes documents uploaded from that machine; enabling
 **"Also process documents uploaded by others"** turns the folder into a shared
 work queue, with a courtesy delay so the uploader's own machine gets first
-claim. The design, its guarantees, and its failure behavior are documented in
-[`docs/shared-intake.md`](docs/shared-intake.md).
+claim. The same directory keeps a **filed index**: a marker, named by the
+document's content hash, for every document any machine filed out of the
+folder, so a teammate who re-uploads last month's agreement under a new name
+sees it flagged as a duplicate of the filed name — and which machine filed it —
+rather than filed a second time. The design, its guarantees, and its failure
+behavior are documented in [`docs/shared-intake.md`](docs/shared-intake.md).
 
 Settings lists the **synced locations** the sync client keeps on the machine
 — each SharePoint library and OneDrive account, with its local folder — so
@@ -176,7 +191,12 @@ easiest one to find: an agreement's effective date, a notice's notice date, an
 invoice's invoice date, an amendment's own date rather than the date of the
 agreement it amends. Payment due dates, renewal deadlines, and response
 deadlines are never used. If no defining date can be established, the document
-goes to review rather than getting an invented one.
+goes to review rather than getting an invented one. What *kind* of date it is
+is read from the document's own wording around it (`Effective Date:`,
+`Invoice date`, `Notice is hereby given ... on`) rather than taken from the
+model's habit, and a document the model could not type but whose title names
+a type (`MUTUAL NON-DISCLOSURE AGREEMENT`, `Board Meeting Minutes`) is named
+from the title and sent to review with the reason shown.
 
 Names are sanitised for Windows, keep the original extension, shed the least
 identifying detail first when they would be too long to scan, and get a numeric

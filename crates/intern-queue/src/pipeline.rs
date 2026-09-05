@@ -13,11 +13,12 @@ use intern_core::{
 };
 use intern_engine::{
     DocumentAnalysis, DocumentSource, ExtractProgress, ProposalStatus, ValidatedProposal,
+    compose_filename, sanitize_folder_name,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{AppSettings, SettingsStore};
+use crate::settings::{AppSettings, DestinationLayout, SettingsStore};
 
 const LEASE_RENEWAL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
 const LEASE_RENEWAL_ATTEMPTS: usize = 3;
@@ -332,12 +333,16 @@ pub trait PipelineEventSink: Send + Sync {
 }
 
 /// A document the queue has just filed, as reported to whoever keeps records
-/// beside filed documents (the description ledger, in the desktop app).
+/// beside filed documents (the description ledger and the shared filed index,
+/// in the desktop app).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FiledDocument {
     pub item_id: i64,
     /// Where the document was before the rename.
     pub source_path: PathBuf,
+    /// The SHA-256 of the document's bytes, lowercase hex - the fingerprint
+    /// the rename was verified against.
+    pub source_hash: String,
     /// Where it is now - the receipt's destination, suffix and all.
     pub destination: PathBuf,
     /// The sentence that was applied: the model's, or the reviewer's edit.
@@ -348,6 +353,16 @@ pub struct FiledDocument {
     pub filed_at: i64,
 }
 
+/// A filing the queue has just undone: the document is back at
+/// `source_path`, and `destination` is empty again.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnfiledDocument {
+    pub item_id: i64,
+    pub source_path: PathBuf,
+    pub source_hash: String,
+    pub destination: PathBuf,
+}
+
 /// Where the queue reports filed documents to.
 ///
 /// Filing has already succeeded when `filed` is called and cannot be undone
@@ -356,7 +371,7 @@ pub struct FiledDocument {
 /// after an undo has put the document back.
 pub trait FilingSink: Send + Sync {
     fn filed(&self, document: &FiledDocument);
-    fn unfiled(&self, destination: &Path);
+    fn unfiled(&self, document: &UnfiledDocument);
 }
 
 /// The default: nobody is listening.
@@ -364,7 +379,63 @@ struct NoFilingSink;
 
 impl FilingSink for NoFilingSink {
     fn filed(&self, _document: &FiledDocument) {}
-    fn unfiled(&self, _destination: &Path) {}
+    fn unfiled(&self, _document: &UnfiledDocument) {}
+}
+
+/// Several listeners behind one sink, told in order. A sink cannot fail, so
+/// none of them can keep the others from hearing.
+pub struct FilingSinks(pub Vec<Arc<dyn FilingSink>>);
+
+impl FilingSink for FilingSinks {
+    fn filed(&self, document: &FiledDocument) {
+        for sink in &self.0 {
+            sink.filed(document);
+        }
+    }
+
+    fn unfiled(&self, document: &UnfiledDocument) {
+        for sink in &self.0 {
+            sink.unfiled(document);
+        }
+    }
+}
+
+/// A filing the queue has no record of: one made by another machine sharing
+/// an intake folder, or one this machine made before its history was cleared.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KnownFiling {
+    /// The name the content was filed under.
+    pub filename: String,
+    /// The machine that filed it, when it was not this one.
+    pub filed_by: Option<String>,
+}
+
+impl KnownFiling {
+    /// How the queue names the filing to a person: the filename, and the
+    /// machine when there is one to name.
+    pub fn describe(&self) -> String {
+        match &self.filed_by {
+            Some(machine) => format!("{} (filed from {machine})", self.filename),
+            None => self.filename.clone(),
+        }
+    }
+}
+
+/// Where the queue asks whether a document's content has already been filed
+/// somewhere its own history cannot see. Asked once per enqueued document,
+/// before any analysis; a positive answer routes the document to review as
+/// a duplicate, where "process anyway" is one click.
+pub trait DuplicateOracle: Send + Sync {
+    fn filed_elsewhere(&self, source_hash: &str, source_path: &Path) -> Option<KnownFiling>;
+}
+
+/// The default: the queue's own history is all there is.
+struct NoDuplicateOracle;
+
+impl DuplicateOracle for NoDuplicateOracle {
+    fn filed_elsewhere(&self, _source_hash: &str, _source_path: &Path) -> Option<KnownFiling> {
+        None
+    }
 }
 
 /// What the queue stores about one proposal.
@@ -409,6 +480,7 @@ pub struct Pipeline {
     files: Arc<dyn FileActions>,
     events: Arc<dyn PipelineEventSink>,
     filing: Arc<dyn FilingSink>,
+    duplicates: Arc<dyn DuplicateOracle>,
     settings: SettingsStore,
     paused: AtomicBool,
     active_item: AtomicI64,
@@ -444,6 +516,7 @@ impl Pipeline {
             files,
             events,
             filing: Arc::new(NoFilingSink),
+            duplicates: Arc::new(NoDuplicateOracle),
             settings,
             paused: AtomicBool::new(false),
             active_item: AtomicI64::new(0),
@@ -473,6 +546,7 @@ impl Pipeline {
             files,
             events,
             filing: Arc::new(NoFilingSink),
+            duplicates: Arc::new(NoDuplicateOracle),
             settings,
             paused: AtomicBool::new(false),
             active_item: AtomicI64::new(0),
@@ -487,6 +561,14 @@ impl Pipeline {
     #[must_use]
     pub fn with_filing_sink(mut self, sink: Arc<dyn FilingSink>) -> Self {
         self.filing = sink;
+        self
+    }
+
+    /// Asks `oracle` about every enqueued document whose content the queue's
+    /// own history has not already filed.
+    #[must_use]
+    pub fn with_duplicate_oracle(mut self, oracle: Arc<dyn DuplicateOracle>) -> Self {
+        self.duplicates = oracle;
         self
     }
 
@@ -510,6 +592,9 @@ impl Pipeline {
             if item.status == QueueStatus::Queued {
                 item = self.flag_if_completed_duplicate(item)?;
             }
+            if item.status == QueueStatus::Queued {
+                item = self.flag_if_filed_elsewhere(item)?;
+            }
             queued.push(item);
         }
         if !queued.is_empty() {
@@ -530,6 +615,24 @@ impl Pipeline {
         if duplicate.is_none() {
             return Ok(item);
         }
+        self.flag_duplicate(item)
+    }
+
+    /// Flags a just-queued item whose content the duplicate oracle knows to be
+    /// filed already - by a teammate, typically. Same compare-and-swap as the
+    /// local check.
+    fn flag_if_filed_elsewhere(&self, item: QueueItem) -> PipelineResult<QueueItem> {
+        if self
+            .duplicates
+            .filed_elsewhere(&item.source_hash, &item.source_path)
+            .is_none()
+        {
+            return Ok(item);
+        }
+        self.flag_duplicate(item)
+    }
+
+    fn flag_duplicate(&self, item: QueueItem) -> PipelineResult<QueueItem> {
         match self.store.transition(
             item.id,
             QueueStatus::Queued,
@@ -589,6 +692,11 @@ impl Pipeline {
                             .into_owned()
                     })
                 })
+                .or_else(|| {
+                    self.duplicates
+                        .filed_elsewhere(&item.source_hash, &item.source_path)
+                        .map(|known| known.describe())
+                })
         } else {
             None
         };
@@ -617,7 +725,13 @@ impl Pipeline {
             .filter_map(|item| {
                 let receipt = item.receipt?;
                 let proposal = item.proposal?;
-                filed_document(item.id, &receipt, &proposal, receipt_time(&receipt))
+                filed_document(
+                    item.id,
+                    &item.source_hash,
+                    &receipt,
+                    &proposal,
+                    receipt_time(&receipt),
+                )
             })
             .collect())
     }
@@ -797,9 +911,27 @@ impl Pipeline {
             }
         };
         self.ensure_lease(&lease)?;
+        // The engine composed its name against the source folder, which is
+        // the only folder it knows. The name that will actually be applied
+        // must not collide in the folder the document is going to.
+        let filename = match self.settings.load() {
+            Ok(settings) => {
+                let target = target_folder(&settings, &item.source_path, &analysis.proposal);
+                compose_filename(
+                    &analysis.proposal,
+                    &extension,
+                    &existing_names(&target)
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                )
+                .value
+            }
+            Err(_) => analysis.filename.clone(),
+        };
         let record = ProposalRecord {
             status: analysis.status,
-            filename: analysis.filename.clone(),
+            filename,
             description: analysis.description.clone(),
             reasons: analysis
                 .review_reasons
@@ -963,15 +1095,24 @@ impl Pipeline {
             self.events.queue_changed();
             return Ok(());
         }
-        let destination_root = if settings.destination.trim().is_empty() {
-            item.source_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf()
-        } else {
-            PathBuf::from(&settings.destination)
+        let proposal = self.repository.load_proposal(item.id)?;
+        let target = match proposal.as_ref() {
+            Some(record) => target_folder(settings, &item.source_path, &record.analysis.proposal),
+            None => destination_root(settings, &item.source_path),
         };
-        if let Err(error) = self.files.apply(item, &destination_root.join(filename)) {
+        // A layout subfolder exists only once a document is filed into it; a
+        // folder that cannot be created is the same failure a missing
+        // destination would be, and is reported the same way.
+        if let Err(error) = fs::create_dir_all(&target) {
+            let failure = PipelineError::new(
+                "DESTINATION_UNAVAILABLE",
+                format!("the destination folder could not be created ({error})"),
+            );
+            self.repository.mark_needs_review(item.id, &failure.code)?;
+            self.events.queue_changed();
+            return Err(failure);
+        }
+        if let Err(error) = self.files.apply(item, &target.join(filename)) {
             // Core file operations journal ambiguous failures in Applying. Try to settle
             // them now; the scheduler also retries reconciliation periodically.
             let _ = self.files.reconcile(item);
@@ -986,7 +1127,7 @@ impl Pipeline {
             self.events.queue_changed();
             return Err(error);
         }
-        self.report_filed(item.id);
+        self.report_filed(item);
         self.events.queue_changed();
         Ok(())
     }
@@ -995,14 +1136,16 @@ impl Pipeline {
     /// from the store rather than assumed: the receipt carries the destination
     /// the applier actually chose, suffix and all, and the proposal carries
     /// the sentence a reviewer may have edited.
-    fn report_filed(&self, item_id: i64) {
-        let Ok(Some(receipt)) = self.store.load_receipt(item_id) else {
+    fn report_filed(&self, item: &QueueItem) {
+        let Ok(Some(receipt)) = self.store.load_receipt(item.id) else {
             return;
         };
-        let Ok(Some(proposal)) = self.repository.load_proposal(item_id) else {
+        let Ok(Some(proposal)) = self.repository.load_proposal(item.id) else {
             return;
         };
-        if let Some(document) = filed_document(item_id, &receipt, &proposal, unix_now()) {
+        if let Some(document) =
+            filed_document(item.id, &item.source_hash, &receipt, &proposal, unix_now())
+        {
             self.filing.filed(&document);
         }
     }
@@ -1225,7 +1368,18 @@ impl Pipeline {
             )
         })?;
         self.files.undo(&item, &receipt)?;
-        self.filing.unfiled(&receipt.destination);
+        self.filing.unfiled(&UnfiledDocument {
+            item_id: item.id,
+            source_path: item.source_path.clone(),
+            source_hash: item.source_hash.clone(),
+            destination: receipt.destination.clone(),
+        });
+        if let Ok(settings) = self.settings.load() {
+            prune_empty_layout_folders(
+                &destination_root(&settings, &item.source_path),
+                &receipt.destination,
+            );
+        }
         self.events.queue_changed();
         Ok(())
     }
@@ -1533,10 +1687,94 @@ impl PipelineRepository {
     }
 }
 
+/// The folder a document is filed into: the destination (or, with none set,
+/// the document's own folder) plus the layout's subfolder for its facts.
+pub fn target_folder(
+    settings: &AppSettings,
+    source_path: &Path,
+    proposal: &ValidatedProposal,
+) -> PathBuf {
+    let root = destination_root(settings, source_path);
+    match layout_subfolder(settings.destination_layout, proposal) {
+        Some(subfolder) => root.join(subfolder),
+        None => root,
+    }
+}
+
+fn destination_root(settings: &AppSettings, source_path: &Path) -> PathBuf {
+    if settings.destination.trim().is_empty() {
+        source_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    } else {
+        PathBuf::from(settings.destination.trim())
+    }
+}
+
+/// The subfolder a layout puts a document in, relative to the destination.
+///
+/// A document missing the fact a layout keys on goes in a named catch-all
+/// ("Undated", "Unsorted") rather than the root, so the root stays a set of
+/// folders and a person can see what still needs a hand.
+pub fn layout_subfolder(
+    layout: DestinationLayout,
+    proposal: &ValidatedProposal,
+) -> Option<PathBuf> {
+    let year = || {
+        proposal
+            .document_date
+            .as_deref()
+            .and_then(|date| date.get(..4))
+            .filter(|year| year.bytes().all(|byte| byte.is_ascii_digit()))
+            .map(str::to_owned)
+            .unwrap_or_else(|| "Undated".to_owned())
+    };
+    let kind = || {
+        proposal
+            .document_type
+            .as_deref()
+            .and_then(sanitize_folder_name)
+            .unwrap_or_else(|| "Unsorted".to_owned())
+    };
+    match layout {
+        DestinationLayout::Flat => None,
+        DestinationLayout::Year => Some(PathBuf::from(year())),
+        DestinationLayout::YearType => Some(PathBuf::from(year()).join(kind())),
+        DestinationLayout::Type => Some(PathBuf::from(kind())),
+        DestinationLayout::Party => Some(PathBuf::from(
+            proposal
+                .parties
+                .first()
+                .and_then(|party| sanitize_folder_name(party))
+                .unwrap_or_else(|| "Unsorted".to_owned()),
+        )),
+    }
+}
+
+/// After an undo, removes the layout folders the vacated document was alone
+/// in, walking up from its folder to (but never including) the destination
+/// root. A folder holding anything else is left where it is; so is a folder
+/// outside the root.
+fn prune_empty_layout_folders(root: &Path, vacated: &Path) {
+    let mut folder = vacated.parent();
+    while let Some(current) = folder {
+        if current == root || !current.starts_with(root) {
+            break;
+        }
+        let empty = fs::read_dir(current).is_ok_and(|mut entries| entries.next().is_none());
+        if !empty || fs::remove_dir(current).is_err() {
+            break;
+        }
+        folder = current.parent();
+    }
+}
+
 /// The filed-document report for a completed apply receipt, or `None` when
 /// the receipt is not one (an undo, or an apply that never completed).
 fn filed_document(
     item_id: i64,
+    source_hash: &str,
     receipt: &OperationReceipt,
     proposal: &ProposalRecord,
     filed_at: i64,
@@ -1545,6 +1783,7 @@ fn filed_document(
         .then(|| FiledDocument {
             item_id,
             source_path: receipt.source.clone(),
+            source_hash: source_hash.to_owned(),
             destination: receipt.destination.clone(),
             description: proposal.description.clone(),
             proposal: proposal.analysis.proposal.clone(),
@@ -1606,6 +1845,214 @@ fn existing_names(directory: &Path) -> Vec<String> {
         .filter_map(Result::ok)
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect()
+}
+
+#[cfg(test)]
+mod sink_tests {
+    use std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
+
+    use intern_engine::{Evidence, PartyRelation, ValidatedProposal};
+
+    use super::{FiledDocument, FilingSink, FilingSinks, KnownFiling, UnfiledDocument};
+
+    #[derive(Default)]
+    struct Heard(Mutex<Vec<String>>);
+
+    impl FilingSink for Heard {
+        fn filed(&self, document: &FiledDocument) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("filed {}", document.item_id));
+        }
+        fn unfiled(&self, document: &UnfiledDocument) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("unfiled {}", document.item_id));
+        }
+    }
+
+    #[test]
+    fn every_sink_behind_the_fan_out_hears_every_report_in_order() {
+        let first = Arc::new(Heard::default());
+        let second = Arc::new(Heard::default());
+        let sinks = FilingSinks(vec![first.clone(), second.clone()]);
+        sinks.filed(&FiledDocument {
+            item_id: 4,
+            source_path: PathBuf::from("/in/a.pdf"),
+            source_hash: "hash".into(),
+            destination: PathBuf::from("/out/a.pdf"),
+            description: "A sentence.".into(),
+            proposal: ValidatedProposal {
+                document_type: None,
+                document_date: None,
+                date_role: None,
+                parties: Vec::new(),
+                party_relation: PartyRelation::Between,
+                description: "A sentence.".into(),
+                confidence: 0.5,
+                evidence: Evidence::default(),
+            },
+            filed_at: 1,
+        });
+        sinks.unfiled(&UnfiledDocument {
+            item_id: 4,
+            source_path: PathBuf::from("/in/a.pdf"),
+            source_hash: "hash".into(),
+            destination: PathBuf::from("/out/a.pdf"),
+        });
+        for sink in [&first, &second] {
+            assert_eq!(
+                *sink.0.lock().unwrap(),
+                vec!["filed 4".to_string(), "unfiled 4".to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn a_known_filing_names_the_machine_only_when_there_is_one_to_name() {
+        let teammate = KnownFiling {
+            filename: "2026-03-02 Agreement.pdf".into(),
+            filed_by: Some("Front desk".into()),
+        };
+        assert_eq!(
+            teammate.describe(),
+            "2026-03-02 Agreement.pdf (filed from Front desk)"
+        );
+        let own = KnownFiling {
+            filename: "2026-03-02 Agreement.pdf".into(),
+            filed_by: None,
+        };
+        assert_eq!(own.describe(), "2026-03-02 Agreement.pdf");
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use std::path::{Path, PathBuf};
+
+    use intern_engine::{DateRole, Evidence, PartyRelation, ValidatedProposal};
+
+    use super::{layout_subfolder, prune_empty_layout_folders, target_folder};
+    use crate::settings::{AppSettings, DestinationLayout};
+
+    fn proposal(date: Option<&str>, kind: Option<&str>, parties: &[&str]) -> ValidatedProposal {
+        ValidatedProposal {
+            document_type: kind.map(str::to_owned),
+            document_date: date.map(str::to_owned),
+            date_role: date.map(|_| DateRole::Effective),
+            parties: parties.iter().map(|party| (*party).to_owned()).collect(),
+            party_relation: PartyRelation::Between,
+            description: "A description.".into(),
+            confidence: 0.9,
+            evidence: Evidence::default(),
+        }
+    }
+
+    #[test]
+    fn each_layout_derives_its_folder_from_the_documents_facts() {
+        let full = proposal(
+            Some("2026-04-01"),
+            Some("Statement of Work"),
+            &["Ridgeline Cartography LLC", "Vistage Worldwide, Inc."],
+        );
+        assert_eq!(layout_subfolder(DestinationLayout::Flat, &full), None);
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Year, &full),
+            Some(PathBuf::from("2026"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::YearType, &full),
+            Some(PathBuf::from("2026").join("Statement of Work"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Type, &full),
+            Some(PathBuf::from("Statement of Work"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Party, &full),
+            Some(PathBuf::from("Ridgeline Cartography LLC"))
+        );
+    }
+
+    #[test]
+    fn a_missing_fact_goes_to_a_named_catch_all_never_the_root() {
+        let bare = proposal(None, None, &[]);
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Year, &bare),
+            Some(PathBuf::from("Undated"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::YearType, &bare),
+            Some(PathBuf::from("Undated").join("Unsorted"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Party, &bare),
+            Some(PathBuf::from("Unsorted"))
+        );
+        // Hostile characters in a fact never reach a folder name.
+        let hostile = proposal(Some("2026-04-01"), Some("Invoice: 3/4 <draft>"), &["CON"]);
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Type, &hostile),
+            Some(PathBuf::from("Invoice 34 draft"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Party, &hostile),
+            Some(PathBuf::from("_CON"))
+        );
+    }
+
+    #[test]
+    fn the_target_folder_falls_back_to_the_documents_own_folder_without_a_destination() {
+        let mut settings = AppSettings {
+            destination_layout: DestinationLayout::Year,
+            ..AppSettings::default()
+        };
+        let source = Path::new("/inbox/scan.pdf");
+        let proposal = proposal(Some("2026-04-01"), None, &[]);
+        assert_eq!(
+            target_folder(&settings, source, &proposal),
+            PathBuf::from("/inbox").join("2026")
+        );
+        settings.destination = "/filed".into();
+        assert_eq!(
+            target_folder(&settings, source, &proposal),
+            PathBuf::from("/filed").join("2026")
+        );
+    }
+
+    #[test]
+    fn pruning_stops_at_the_root_and_at_the_first_folder_with_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("filed");
+        let vacated = root.join("2026").join("Invoice").join("a.pdf");
+        std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
+        prune_empty_layout_folders(&root, &vacated);
+        assert!(!root.join("2026").exists());
+        assert!(root.exists());
+
+        let sibling = root.join("2025").join("Invoice").join("b.pdf");
+        std::fs::create_dir_all(sibling.parent().unwrap()).unwrap();
+        std::fs::write(&sibling, b"x").unwrap();
+        let vacated = root.join("2025").join("Notice").join("c.pdf");
+        std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
+        prune_empty_layout_folders(&root, &vacated);
+        assert!(!root.join("2025").join("Notice").exists());
+        assert!(
+            root.join("2025").join("Invoice").exists(),
+            "a year folder with another document in it stays"
+        );
+
+        // A path outside the root is never touched.
+        let elsewhere = temp.path().join("elsewhere").join("d.pdf");
+        std::fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
+        prune_empty_layout_folders(&root, &elsewhere);
+        assert!(elsewhere.parent().unwrap().exists());
+    }
 }
 
 fn validate_leaf_filename(value: &str) -> PipelineResult<String> {

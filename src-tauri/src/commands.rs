@@ -28,8 +28,8 @@ use intern_engine::setup::{
 };
 use intern_intake::{IntakeConfig, IntakeWatcher, MachineIdentity};
 use intern_queue::{
-    AnalyzerBoundary, AppSettings, ModelFailure, Pipeline, PipelineError, PipelineEventSink,
-    PipelineItem, PipelineProgress, SettingsStore,
+    AnalyzerBoundary, AppSettings, FilingSink, FilingSinks, ModelFailure, Pipeline, PipelineError,
+    PipelineEventSink, PipelineItem, PipelineProgress, SettingsStore,
     paths::{
         SUPPORTED_EXTENSIONS, canonical_file, canonical_folder, canonical_model_file,
         collect_supported_files, display_path, parse_item_id,
@@ -38,7 +38,7 @@ use intern_queue::{
 
 use crate::intake::{
     CloudLocationDto, CloudRootDto, DescriptionsStatusDto, IntakeStatusDto, LedgerSink,
-    PipelineIntakeHost, classify_folder, list_cloud_roots, now_unix, status_dto,
+    PipelineIntakeHost, SharedFiledIndex, classify_folder, list_cloud_roots, now_unix, status_dto,
 };
 
 #[derive(Clone, Debug, Deserialize)]
@@ -633,6 +633,10 @@ pub struct AppState {
     /// Writes description records beside filed documents when the setting
     /// asks for them; the pipeline reports every completed rename to it.
     ledger: Arc<LedgerSink>,
+    /// Leaves a marker in the watched intake folder for every document filed
+    /// out of it, and reads the markers teammates left, so the same content
+    /// is never filed twice across machines.
+    filed_index: Arc<SharedFiledIndex>,
 }
 
 impl AppState {
@@ -687,6 +691,7 @@ impl AppState {
         })?;
         let ledger = Arc::new(LedgerSink::new(settings.clone(), data.clone()));
         ledger.attach(app.clone());
+        let filed_index = Arc::new(SharedFiledIndex::new(settings.clone(), data.clone()));
         let pipeline = Arc::new(
             Pipeline::with_local_files(
                 data.join("queue.sqlite3"),
@@ -698,7 +703,11 @@ impl AppState {
                 Arc::new(TauriPipelineEvents { app: app.clone() }),
                 settings.clone(),
             )?
-            .with_filing_sink(ledger.clone()),
+            .with_filing_sink(Arc::new(FilingSinks(vec![
+                ledger.clone() as Arc<dyn FilingSink>,
+                filed_index.clone(),
+            ])))
+            .with_duplicate_oracle(filed_index.clone()),
         );
         pipeline.recover()?;
         // Opened after the pipeline so the pipeline's own store has already
@@ -734,6 +743,7 @@ impl AppState {
             intake_error: Mutex::new(None),
             history,
             ledger,
+            filed_index,
         };
         if matches!(state.setup.get()?.state, SetupStatus::Ready) {
             state.schedule()?;
@@ -792,6 +802,7 @@ impl AppState {
                         Arc::clone(&self.setup.model_ready),
                         self.app.clone(),
                         identity.clone(),
+                        Arc::clone(&self.filed_index),
                     ));
                     watcher = Some(IntakeWatcher::start(config, identity, host));
                 }
@@ -825,7 +836,8 @@ impl AppState {
             .intake_error
             .lock()
             .map_err(|_| intake_state_conflict())?
-            .clone();
+            .clone()
+            .or_else(|| self.filed_index.last_error());
         Ok(status_dto(
             settings.intake_enabled,
             &identity,
@@ -881,12 +893,20 @@ fn intake_state_conflict() -> CommandError {
 
 #[tauri::command]
 pub fn queue_list(state: State<'_, AppState>) -> Result<Vec<QueueItemDto>, CommandError> {
-    state
-        .pipeline
-        .list()?
-        .into_iter()
-        .map(queue_item_dto)
-        .collect()
+    let items = state.pipeline.list()?;
+    // The window asks for the list on every queue change, which makes this
+    // the one place that always knows the current counts - so the tray's
+    // tooltip is kept here rather than on a second event path.
+    let (needs_review, ready) = attention_counts(&items);
+    crate::tray::update_tooltip(&state.app, needs_review, ready);
+    items.into_iter().map(queue_item_dto).collect()
+}
+
+/// How many items wait on a person: those needing review, and those ready
+/// to rename but not applied automatically.
+fn attention_counts(items: &[PipelineItem]) -> (usize, usize) {
+    let count = |status: QueueStatus| items.iter().filter(|item| item.status == status).count();
+    (count(QueueStatus::NeedsReview), count(QueueStatus::Ready))
 }
 
 #[tauri::command]
@@ -1025,6 +1045,14 @@ pub fn settings_save(
     state.settings.save(&settings)?;
     if previous.run_in_background != settings.run_in_background {
         crate::tray::sync_tray(&state.app, settings.run_in_background);
+        // A tray that was just created starts with the bare tooltip; give it
+        // the current counts rather than waiting for the next queue change.
+        if settings.run_in_background
+            && let Ok(items) = state.pipeline.list()
+        {
+            let (needs_review, ready) = attention_counts(&items);
+            crate::tray::update_tooltip(&state.app, needs_review, ready);
+        }
     }
     if previous.intake_folder != settings.intake_folder
         || previous.intake_enabled != settings.intake_enabled

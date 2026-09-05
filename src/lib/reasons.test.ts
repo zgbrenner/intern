@@ -19,6 +19,10 @@ describe('humanizeReason', () => {
     expect(humanizeReason('date_unsupported')).toContain('verbatim');
   });
 
+  it('explains a bare duplicate flag once the filed name it referred to is gone', () => {
+    expect(humanizeReason('DUPLICATE')).toBe('This document\'s content was filed once already. Retry to process it anyway, or remove it.');
+  });
+
   it('keeps unknown codes and free text verbatim', () => {
     expect(humanizeReason('SOMETHING_NEW')).toBe('SOMETHING_NEW');
     expect(humanizeReason('Duplicate of 2026-01-05 Invoice.pdf')).toBe('Duplicate of 2026-01-05 Invoice.pdf');

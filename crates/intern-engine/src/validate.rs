@@ -14,6 +14,7 @@ use crate::evidence::{
     date_match_positions, digest_contains, digest_contains_date, digest_contains_loosely,
     extract_stated_dates, is_valid_iso_date, normalize,
 };
+use crate::infer::{infer_date_role, infer_document_type, repair_issued_relation};
 
 /// Below this self-reported confidence a proposal goes to review even when
 /// every literal check passed.
@@ -33,12 +34,22 @@ const GENERIC_CAPITALS: &[&str] = &[
 pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> ValidationOutcome {
     let mut reasons = Vec::new();
 
-    let (document_type, type_supported) = validate_document_type(&candidate, digest);
+    let (mut document_type, type_supported) = validate_document_type(&candidate, digest);
     if !type_supported {
         push(&mut reasons, ReviewReason::TypeUnsupported);
     }
-    if document_type.is_none() && type_supported {
-        push(&mut reasons, ReviewReason::TypeMissing);
+    if document_type.is_none() {
+        // A document with a title has a type. When the model gave none - or
+        // invented one the document does not contain - the title is the
+        // best-grounded answer available, and a person is asked to confirm it.
+        match infer_document_type(digest) {
+            Some(inferred) => {
+                document_type = Some(inferred);
+                push(&mut reasons, ReviewReason::TypeInferred);
+            }
+            None if type_supported => push(&mut reasons, ReviewReason::TypeMissing),
+            None => {}
+        }
     }
 
     let (document_date, date_role, date_supported, date_evidence_override) =
@@ -49,6 +60,13 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
     if document_date.is_none() && date_supported {
         push(&mut reasons, ReviewReason::DateMissing);
     }
+    // The wording around the date says what kind of date it is more reliably
+    // than the model's label; the model's answer stands only where the
+    // document says nothing.
+    let date_role = document_date
+        .as_deref()
+        .and_then(|date| infer_date_role(digest, date, document_type.as_deref()))
+        .or(date_role);
 
     let (parties, parties_supported) = validate_parties(&candidate, digest);
     if !parties_supported {
@@ -62,6 +80,8 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
     } else {
         candidate.party_relation
     };
+    let (parties, party_relation) =
+        repair_issued_relation(document_type.as_deref(), parties, party_relation, digest);
 
     let description = validate_description(&candidate.description, digest, &mut reasons);
 
@@ -236,7 +256,7 @@ fn validate_date(
 /// "dated" directly before the occurrence is the referencing construction -
 /// "the Master Services Agreement dated June 2, 2023" - unless the naming
 /// phrase begins with "this", which is how a document dates itself.
-fn reference_introduced(normalized: &str, position: usize) -> bool {
+pub(crate) fn reference_introduced(normalized: &str, position: usize) -> bool {
     const NEAR: usize = 12;
     const WIDE: usize = 48;
     fn window(normalized: &str, position: usize, span: usize) -> &str {
@@ -699,14 +719,34 @@ Countersigned June 2, 2023.
         );
     }
 
+    /// An invented type is rejected, and the document's own title stands in
+    /// for it so the reviewer is shown the right name rather than "Document".
     #[test]
-    fn an_invented_document_type_is_rejected() {
+    fn an_invented_document_type_is_rejected_and_the_title_offered_instead() {
         let mut candidate = proposal();
         candidate.document_type = Some("Settlement Agreement".into());
         candidate.evidence.document_type = Some("STATEMENT OF WORK".into());
         let outcome = validate(candidate, &digest_of(DOCUMENT));
+        assert_eq!(
+            outcome.proposal.document_type.as_deref(),
+            Some("Statement of Work")
+        );
+        assert!(outcome.reasons.contains(&ReviewReason::TypeUnsupported));
+        assert!(outcome.reasons.contains(&ReviewReason::TypeInferred));
+        assert_eq!(outcome.status, ProposalStatus::NeedsReview);
+
+        // With no usable title either, the type stays empty.
+        let mut candidate = proposal();
+        candidate.document_type = Some("Settlement Agreement".into());
+        let outcome = validate(
+            candidate,
+            &digest_of(
+                "Some notes.\n\nThis Statement of Work is effective as of April 1, 2026, by and between Acme Corporation and Vistage Worldwide, Inc.\n",
+            ),
+        );
         assert!(outcome.proposal.document_type.is_none());
         assert!(outcome.reasons.contains(&ReviewReason::TypeUnsupported));
+        assert!(!outcome.reasons.contains(&ReviewReason::TypeInferred));
     }
 
     #[test]
@@ -730,6 +770,77 @@ Countersigned June 2, 2023.
             !outcome
                 .reasons
                 .contains(&ReviewReason::DescriptionUnsupported)
+        );
+    }
+
+    /// The corpus minutes and journal fixtures got no type from the model and
+    /// were named "<date> Document". Their titles name what they are.
+    #[test]
+    fn a_missing_type_is_taken_from_the_title_and_flagged_for_a_person() {
+        let document = "# Quarterly Operations Review\n\n**Date:** May 7, 2025\n\nThe Fictional Meridian Committee reviewed inventory, safety, and the next quarterly plan.\n";
+        let candidate = ModelProposal {
+            document_type: None,
+            document_date: Some("2025-05-07".into()),
+            date_role: Some(DateRole::Effective),
+            parties: Vec::new(),
+            party_relation: PartyRelation::None,
+            description: "Quarterly operations review minutes covering inventory, safety, and the next quarterly plan for the committee.".into(),
+            confidence: 0.85,
+            needs_review: false,
+            evidence: Evidence {
+                date: Some("**Date:** May 7, 2025".into()),
+                document_type: None,
+                parties: Vec::new(),
+            },
+        };
+        let outcome = validate(candidate, &digest_of(document));
+        assert_eq!(
+            outcome.proposal.document_type.as_deref(),
+            Some("Quarterly Operations Review")
+        );
+        assert_eq!(outcome.status, ProposalStatus::NeedsReview);
+        assert!(outcome.reasons.contains(&ReviewReason::TypeInferred));
+        assert!(!outcome.reasons.contains(&ReviewReason::TypeMissing));
+        // The bare "Date:" label says nothing; a review is something issued.
+        assert_eq!(outcome.proposal.date_role, Some(DateRole::Issuance));
+    }
+
+    #[test]
+    fn the_date_role_follows_the_documents_wording_not_the_models_habit() {
+        let document = "INVOICE\n\nAcme Corporation\nInvoice Number: INV-7741\nInvoice Date: January 5, 2026\nPayment Due Date: February 4, 2026\nBill To: Vistage Worldwide, Inc.\nAnnual platform subscription for the 2026 term, $42,000.\n";
+        let candidate = ModelProposal {
+            document_type: Some("Invoice".into()),
+            document_date: Some("2026-01-05".into()),
+            // The corpus habit: everything is "effective".
+            date_role: Some(DateRole::Effective),
+            parties: vec![
+                "Vistage Worldwide, Inc.".into(),
+                "Acme Corporation".into(),
+            ],
+            party_relation: PartyRelation::Between,
+            description: "Invoice INV-7741 from Acme Corporation to Vistage Worldwide, Inc. for the 2026 annual platform subscription of $42,000.".into(),
+            confidence: 0.9,
+            needs_review: false,
+            evidence: Evidence {
+                date: Some("Invoice Date: January 5, 2026".into()),
+                document_type: Some("INVOICE".into()),
+                parties: vec!["Bill To: Vistage Worldwide, Inc.".into()],
+            },
+        };
+        let outcome = validate(candidate, &digest_of(document));
+        assert_eq!(outcome.proposal.date_role, Some(DateRole::Invoice));
+        // Two parties and "between" on an invoice: the bill-to line names the
+        // customer, so the issuer stands alone as "from".
+        assert_eq!(
+            outcome.proposal.parties,
+            vec!["Acme Corporation".to_owned()]
+        );
+        assert_eq!(outcome.proposal.party_relation, PartyRelation::From);
+        assert_eq!(
+            outcome.status,
+            ProposalStatus::Ready,
+            "{:?}",
+            outcome.reasons
         );
     }
 

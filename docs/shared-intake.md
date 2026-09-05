@@ -102,8 +102,8 @@ When more than one machine watches the same synced folder, they coordinate
 through a `.intern/` directory inside it — small JSON files the sync client
 replicates like anything else. No server, no shared database: SQLite's
 journaling is not safe over a sync engine, so each machine keeps its own queue
-and the shared folder carries only **claims**, **origin markers**, and
-**machine presence**.
+and the shared folder carries only **claims**, **origin markers**, **machine
+presence**, and **filed markers**.
 
 ### Claims
 
@@ -131,6 +131,31 @@ document's content hash and the destination is created atomically, so the
 worst a lost race produces is one machine finding the file already moved and
 routing to review, never a corrupted or overwritten document.
 
+### The same document twice
+
+A claim identifies an *upload* — a path, a size, a modification time — so the
+done tombstone stops a lagging machine from processing that upload again. It
+says nothing about the same *content* arriving again: a teammate re-sends
+last month's agreement under a new name, and every machine's local queue has
+only its own history to check it against. Each machine already refuses to
+file content it has filed before; the shared folder extends that memory to
+the team.
+
+When a machine files a document out of the intake folder it leaves a **filed
+marker** under `.intern/filed/`, named by the document's content hash — the
+same SHA-256 the queue verifies every rename against — and carrying the
+filename it was filed under, where it was in the folder, and which machine
+filed it. A machine that later enqueues the same bytes, under any name and
+from any uploader, finds the marker and routes the document to review as a
+duplicate: *Duplicate of `2026-03-02 Master Services Agreement between Acme
+and Globex.pdf` (filed from Front desk)*. Nothing is analysed and nothing is
+renamed unless a person chooses **Retry** to process it anyway. Undoing a
+filing removes the marker it left, and only that one — a marker another
+machine wrote records a filing this machine did not undo. Markers live for a
+year, long enough to outlast the annual re-send of a recurring document, and
+only documents that came from the intake folder get one: a document filed
+from anywhere else on a machine is nobody else's business.
+
 ### Whose documents are they?
 
 Each machine records an **origin marker** for files that first appear locally
@@ -149,9 +174,12 @@ first claim wins, leases keep it fair, takeover keeps it live.
 ### What the shared folder learns about you
 
 The `.intern/` metadata is visible to everyone who can see the folder. It
-contains filenames, file sizes, machine names, and usernames — never document
-content, text, or model output. If a filename is itself sensitive, the folder
-you are sharing already reveals it; Intern adds nothing beyond that.
+contains filenames — including the names documents were filed under, which
+carry a date, a type, and the parties — file sizes, content hashes, machine
+names, and usernames — never document content, text, or model output. If a
+filename is itself sensitive, the folder you are sharing already reveals it;
+Intern adds the filed name, which the done tombstone carried already, and
+nothing beyond that.
 
 The destination folder can carry a second kind of `.intern/` metadata, opt-in:
 **description records**, one small JSON file per filed document with the
@@ -181,5 +209,7 @@ describes the record and the flow that consumes it.
   with the reason shown, but the claim is held rather than tombstoned; it is
   released for a fresh attempt once the content arrives.
 - **Sync conflict copy appears**: skipped and counted, never filed.
+- **Same content uploaded again**: flagged as a duplicate of the filed name
+  before analysis, on whichever machine picks it up; retry processes it anyway.
 - **Settings misconfiguration**: refused at save time with a specific error,
   not discovered at run time.

@@ -1,6 +1,6 @@
 import { ExternalLink, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, IntakeStatus } from '../types';
+import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, DestinationLayout, IntakeStatus } from '../types';
 import { GUIDE_URL } from '../lib/bridge';
 import type { DescriptionsEventSource, DesktopBridge, IntakeEventSource, SelectionBoundary, UpdateStatus } from '../lib/bridge';
 import { Icon } from './Icon';
@@ -102,6 +102,22 @@ function useCloudBadge(classify: (path: string) => Promise<CloudLocation | null>
     return () => { active = false; window.clearTimeout(timer); };
   }, [classify, path]);
   return cloud;
+}
+
+/**
+ * The layouts, in the order they are offered. The example is what a statement
+ * of work would land under, so the choice is concrete rather than abstract.
+ */
+const LAYOUTS: Array<{ value: DestinationLayout; label: string; example: string }> = [
+  { value: 'flat', label: 'No subfolders', example: 'Everything directly in the destination folder' },
+  { value: 'year', label: 'By year', example: '2026\\' },
+  { value: 'year_type', label: 'By year, then document type', example: '2026\\Statement of Work\\' },
+  { value: 'type', label: 'By document type', example: 'Statement of Work\\' },
+  { value: 'party', label: 'By first party', example: 'Ridgeline Cartography LLC\\' },
+];
+
+function isLayout(value: string): value is DestinationLayout {
+  return LAYOUTS.some((layout) => layout.value === value);
 }
 
 function formatScanTime(lastScanAt: number | null): string {
@@ -262,6 +278,15 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
           {selection && <button type="button" aria-label="Browse for destination folder" onClick={() => void browse((path) => setNext((current) => ({ ...current, destination: path })))}>Browse…</button>}
         </div>
         {destinationCloud && <p className="cloud-badge">{cloudBadgeText(destinationCloud)}</p>}
+        {/*
+          A year of contracts in one folder is a thousand files nobody can
+          scan. Each layout names its folders from facts the filename already
+          carries, so nothing is filed anywhere the name does not explain.
+        */}
+        <label>Arrange filed documents<select value={next.destinationLayout} onChange={(event) => { const value = event.target.value; if (isLayout(value)) setNext({ ...next, destinationLayout: value }); }}>
+          {LAYOUTS.map((layout) => <option key={layout.value} value={layout.value}>{layout.label}</option>)}
+        </select></label>
+        <p className="check-hint">{LAYOUTS.find((layout) => layout.value === next.destinationLayout)?.example}{next.destinationLayout === 'flat' ? '.' : ' — a document missing that fact goes in an “Undated” or “Unsorted” folder, never loose in the root. Undo removes a folder it empties.'}</p>
         <label className="check-label"><input type="checkbox" checked={Boolean(next.automaticRename)} onChange={(event) => setNext({ ...next, automaticRename: event.target.checked })} />Automatically rename high-confidence files</label>
         <p className="check-hint">Anything Intern is less sure about still waits for you in Needs Review.</p>
       </section>

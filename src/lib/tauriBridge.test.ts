@@ -30,7 +30,7 @@ describe('TauriBridge', () => {
   it('maps the exact narrow command names and JSON-safe payloads', async () => {
     const fake = fakeTransport({
       queue_list: [],
-      settings_get: { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false },
+      settings_get: { destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false },
       setup_get: { state: 'required', downloadedBytes: 0, totalBytes: 3278329184 },
       intake_status: {
         enabled: false, watching: false, folder: '', machineId: 'm-1', machineName: 'Reception',
@@ -58,7 +58,7 @@ describe('TauriBridge', () => {
     await bridge.keepOriginal('7');
     await bridge.undo('7');
     await bridge.getSettings();
-    await bridge.saveSettings({ destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true, recordDescriptions: true });
+    await bridge.saveSettings({ destination: 'C:\\Output', destinationLayout: 'year_type', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true, recordDescriptions: true });
     await bridge.getSetup();
     await bridge.startModelDownload();
     await bridge.setupCancel();
@@ -86,7 +86,7 @@ describe('TauriBridge', () => {
       { command: 'proposal_keep_original', args: { id: '7' } },
       { command: 'operation_undo', args: { id: '7' } },
       { command: 'settings_get', args: undefined },
-      { command: 'settings_save', args: { settings: { destination: 'C:\\Output', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true, recordDescriptions: true } } },
+      { command: 'settings_save', args: { settings: { destination: 'C:\\Output', destinationLayout: 'year_type', startMinimized: false, automaticRename: true, intakeFolder: 'C:\\OneDrive\\Scans', intakeEnabled: true, processOthersUploads: true, machineLabel: 'Reception', runInBackground: true, startAtLogin: true, recordDescriptions: true } } },
       { command: 'setup_get', args: undefined },
       { command: 'setup_start', args: undefined },
       { command: 'setup_cancel', args: undefined },

@@ -202,6 +202,21 @@ describe('review actions', () => {
     expect(await screen.findByText('Synced with OneDrive – Contoso')).toBeVisible();
   });
 
+  it('saves the destination layout and explains where a document will land', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(base.saveSettings);
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    const layout = await screen.findByLabelText('Arrange filed documents');
+    expect(layout).toHaveValue('flat');
+    fireEvent.change(layout, { target: { value: 'year_type' } });
+    expect(screen.getByText(/2026\\Statement of Work\\/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ destinationLayout: 'year_type' })));
+  });
+
   it('offers the synced locations the sync client keeps and fills the folders from them', async () => {
     const base = createInMemoryBridge();
     const saveSettings = vi.fn(base.saveSettings);
@@ -254,7 +269,7 @@ describe('review actions', () => {
 
   it('writes records for documents already filed once the setting is saved on', async () => {
     const bridge = createInMemoryBridge();
-    await bridge.saveSettings({ destination: 'C:\\Filed', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: true });
+    await bridge.saveSettings({ destination: 'C:\\Filed', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: true });
     render(<App bridge={bridge} />);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
 
@@ -283,7 +298,7 @@ describe('review actions', () => {
 
   it('renders the live intake status with the held-for-others count', async () => {
     const bridge = createInMemoryBridge();
-    await bridge.saveSettings({ destination: 'C:\\Filed', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false });
+    await bridge.saveSettings({ destination: 'C:\\Filed', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false });
     render(<App bridge={bridge} />);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
 
