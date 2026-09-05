@@ -33,6 +33,7 @@ const GENERIC_CAPITALS: &[&str] = &[
 
 pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> ValidationOutcome {
     let mut reasons = Vec::new();
+    let original = candidate.clone();
 
     let (mut document_type, type_supported) = validate_document_type(&candidate, digest);
     if !type_supported {
@@ -123,6 +124,7 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
         },
         status,
         reasons,
+        candidate: original,
     }
 }
 

@@ -33,6 +33,18 @@ button, neither carrying anything about your documents:
    manifest. There is no background poll and no timer. An update is installed
    only if it is signed by this project's key; anything else is refused.
 
+There is one optional exception, and it is a choice, never a default. Settings
+can point Intern at a **hosted model** — Anthropic's, OpenAI's, or any service
+that speaks the OpenAI chat-completions shape, including a local server such as
+Ollama or LM Studio — under your own API key. With that on, the condensed text
+of every document is sent to that service to be named. Nothing else changes:
+the same distillation goes out, the same evidence checks are applied to what
+comes back, and the file itself never leaves. The header badge stops saying
+*On this device* for as long as it is on, the key lives in the operating
+system's credential store rather than in any Intern file, and **Test
+connection** sends only Intern's own calibration document. If the promise
+above is why you use Intern, leave it off.
+
 Intern reads documents as text: native PDF text first, OCR when a page has none,
 and no vision model. The projector for this model is 668,227,264 bytes — 637 MiB,
 a second download larger than half the model itself, before anyone names a
@@ -65,8 +77,8 @@ attestation is the part that establishes where the file came from.
 
 On first launch Intern shows a setup screen and asks to download the one thing
 the installer deliberately leaves out: the pinned model file, 1.19 GiB. That
-download is resumable, it is the only network request Intern ever makes, and the
-file becomes active only after its exact length and SHA-256 match the manifest
+download is resumable, it is the only network request Intern makes on its own
+behalf, and the file becomes active only after its exact length and SHA-256 match the manifest
 built into the installer. If you already have the file, **Choose existing model
 files** points Intern at it and skips the download. Nothing else needs
 installing — PDF text extraction, OCR, and inference all ship inside the app.
@@ -82,6 +94,13 @@ second copy, and the **History** view in Completed lists every rename and undo
 Intern has ever applied, exportable as CSV. A long queue has a filter box
 above it that narrows the rows by original name, proposed name, or a word
 from the description.
+
+Every rename carries a date. A name that does not start with the document's
+date as `YYYY-MM-DD` is refused, in the inspector and again in the queue, so
+nothing undated is ever filed. When the model read a date that Intern could
+not find written in the document, review shows the date, says it is
+unverified, and accepts it in one click — into the name to edit, or straight
+through to the rename.
 
 Filed documents can be **arranged into subfolders** of the destination —
 by year, by year and document type, by type, or by first party — with
@@ -191,7 +210,9 @@ easiest one to find: an agreement's effective date, a notice's notice date, an
 invoice's invoice date, an amendment's own date rather than the date of the
 agreement it amends. Payment due dates, renewal deadlines, and response
 deadlines are never used. If no defining date can be established, the document
-goes to review rather than getting an invented one. What *kind* of date it is
+goes to review rather than getting an invented one — and it is renamed only
+once a person has given it one, typed or accepted from the model's unverified
+reading. What *kind* of date it is
 is read from the document's own wording around it (`Effective Date:`,
 `Invoice date`, `Notice is hereby given ... on`) rather than taken from the
 model's habit, and a document the model could not type but whose title names
@@ -235,12 +256,12 @@ cargo test --locked --workspace --all-targets
 
 | Crate | What it owns |
 | --- | --- |
-| `intern-engine` | Document understanding: distillation, prompt, local model client and server, evidence validation, filename composition, and model installation. |
+| `intern-engine` | Document understanding: distillation, prompt, local model client and server, the optional hosted-model client, evidence validation, filename composition, and model installation. |
 | `intern-intake` | Shared intake folders: the multi-machine claim protocol, cloud sync-root detection, and the polling watcher. |
 | `intern-queue` | The durable queue: ordering, leases, retries, and the review/apply workflow. |
 | `intern-core` | Crash-safe queue storage and journalled file operations. |
 | `intern-worker` | The out-of-process parser: PDFium, OCR, and Office extraction. |
-| `intern-app` | The Tauri desktop shell. |
+| `intern-app` | The Tauri desktop shell, including the switch between the local and hosted models and the credential store the hosted key lives in. |
 
 The engine is usable without the desktop app:
 

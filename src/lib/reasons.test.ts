@@ -23,6 +23,12 @@ describe('humanizeReason', () => {
     expect(humanizeReason('DUPLICATE')).toBe('This document\'s content was filed once already. Retry to process it anyway, or remove it.');
   });
 
+  it('names the date gate and the hosted-model failures in plain words', () => {
+    expect(humanizeReason('DATE_REQUIRED')).toContain('YYYY-MM-DD');
+    expect(humanizeReason('HOSTED_MODEL_UNAUTHORIZED')).toContain('rejected the API key');
+    expect(humanizeReason('MODEL_DECLINED')).toContain('declined');
+  });
+
   it('keeps unknown codes and free text verbatim', () => {
     expect(humanizeReason('SOMETHING_NEW')).toBe('SOMETHING_NEW');
     expect(humanizeReason('Duplicate of 2026-01-05 Invoice.pdf')).toBe('Duplicate of 2026-01-05 Invoice.pdf');

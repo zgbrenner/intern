@@ -30,7 +30,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const [selectedId, setSelectedId] = useState<string>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>({ destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false });
+  const [settings, setSettings] = useState<AppSettings>({ destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' });
   const [setup, setSetup] = useState<SetupState | undefined>(suppliedBridge ? undefined : { state: 'ready', downloadedBytes: 0, totalBytes: 0 });
   const [setupAction, setSetupAction] = useState<'start' | 'cancel' | 'choose'>();
   const [setupError, setSetupError] = useState('');
@@ -228,20 +228,26 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     if (!files) return false;
     await bridge.setupChooseExisting(files);
   });
-  if (!setup || setup.state !== 'ready') return <SetupScreen
-    setup={setup}
-    busy={setupAction !== undefined}
-    canChooseExisting={Boolean(selection)}
-    operationError={setupError || (setup?.state === 'failed' ? describeSetupError(setup.error) : undefined)}
-    onStart={() => void runSetupAction('start', () => bridge.startModelDownload())}
-    onCancel={() => void runSetupAction('cancel', () => bridge.setupCancel())}
-    onChooseExisting={chooseExistingModel}
-  />;
+  // A hosted model, once chosen and configured, stands in for the local one:
+  // the download can be skipped entirely, or finished later from Settings.
+  if (!setup || (setup.state !== 'ready' && !setup.hostedModelReady)) return <>
+    <SetupScreen
+      setup={setup}
+      busy={setupAction !== undefined}
+      canChooseExisting={Boolean(selection)}
+      operationError={setupError || (setup?.state === 'failed' ? describeSetupError(setup.error) : undefined)}
+      onStart={() => void runSetupAction('start', () => bridge.startModelDownload())}
+      onCancel={() => void runSetupAction('cancel', () => bridge.setupCancel())}
+      onChooseExisting={chooseExistingModel}
+      onUseHostedModel={() => setSettingsOpen(true)}
+    />
+    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={() => setSettingsOpen(false)} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); setSettingsOpen(false); setSetup(await bridge.getSetup()); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
+  </>;
   return <main className="app-shell" aria-label="Intern">
     <p className="sr-only" role="status" aria-label="Queue status" aria-live="polite" aria-atomic="true">{queueStatus}</p>
     <p className="sr-only" role="status" aria-label="Action status" aria-live="polite" aria-atomic="true">{actionMessage}</p>
     {actionError && <p className="operation-feedback" role="status" aria-label="Action error" aria-live="polite" aria-atomic="true">{actionError}</p>}
-    <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} onAddFiles={() => { void selection?.pickFiles().then((files) => applySelection({ files })); }} onAddFolder={() => { void selection?.pickFolder().then((folder) => { if (folder) applySelection({ folder }); }); }} onTogglePause={() => void (async () => { if (await runQueueAction(paused ? bridge.resumeQueue : bridge.pauseQueue, `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
+    <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} hosted={settings.modelSource === 'hosted'} onAddFiles={() => { void selection?.pickFiles().then((files) => applySelection({ files })); }} onAddFolder={() => { void selection?.pickFolder().then((folder) => { if (folder) applySelection({ folder }); }); }} onTogglePause={() => void (async () => { if (await runQueueAction(paused ? bridge.resumeQueue : bridge.pauseQueue, `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
     <Sidebar inert={drawerOpen} active={view} items={items} onChange={(next) => { focusRestoreVersion.current += 1; reviewTrigger.current = null; setView(next); setSelectedId(undefined); }} onSettings={openSettings} onHelp={() => void openGuide()} />
     <div className="workspace"><section className="queue-panel" aria-label="Queue items" inert={drawerOpen || undefined}>
       {/*

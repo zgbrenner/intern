@@ -651,6 +651,10 @@
             <p>It makes two kinds of network request, both only when you press a
             button: the one-time model download, and <strong>Check for
             updates</strong>. Neither carries anything about your documents.</p>
+            <p>The one exception is yours to make: Settings can send documents
+            to a <strong>hosted model</strong> under your own API key. It is off
+            unless you turn it on, and the header says so while it is
+            (<a href="#first-launch">section 03</a>).</p>
           </div>
         </div>
 
@@ -729,6 +733,13 @@
           <div>
             <dt>You can bring your own</dt>
             <dd><strong>Choose existing model files</strong> points Intern at a copy from another machine and skips the download. This is also how you install on a machine with no internet at all.</dd>
+          </div>
+          <div>
+            <dt>Or use a hosted model</dt>
+            <dd>
+              <p><strong>Set up a hosted model</strong> on the setup screen — or the <strong>Model</strong> section in Settings later — lets Intern use Anthropic, OpenAI, or any OpenAI-compatible service (including a local server such as Ollama or LM Studio) under your own API key, with no download.</p>
+              <p>Understand the trade: the text Intern reads from each document is sent to that service. The header badge changes from <em>Private · On this device</em> to <em>Hosted model · Text leaves this device</em> for as long as it is on. The key is kept in your operating system's credential manager under “Intern”, never in Intern's files, and <strong>Test connection</strong> sends only Intern's own calibration page.</p>
+            </dd>
           </div>
         </dl>
 
@@ -831,6 +842,10 @@
           <div>
             <dt>Approving in bulk</dt>
             <dd>Approve one document at a time, or use <strong>Apply all ready</strong>. Every rename can be undone from Completed.</dd>
+          </div>
+          <div>
+            <dt>Every name has a date</dt>
+            <dd>A rename is refused unless the name starts with the document's date as YYYY-MM-DD. When Intern could not verify the date the model read, review shows it, says so, and <strong>Use date &amp; rename</strong> accepts it in one click; <strong>Use this date</strong> puts it in the field to edit first.</dd>
           </div>
           <div>
             <dt>Duplicates</dt>
@@ -1123,8 +1138,38 @@
             <div class="answer">
               <p>
                 It is the only network call Intern makes besides the model
-                download, so check your connectivity. An update that is not signed
-                by this project's key is refused outright — that is deliberate.
+                download (and a hosted model, if you chose one), so check your
+                connectivity. An update that is not signed by this project's key
+                is refused outright — that is deliberate.
+              </p>
+            </div>
+          </details>
+        </div>
+
+        <h3 class="sym-group">NAMING AND THE HOSTED MODEL</h3>
+        <div class="symptoms">
+          <details>
+            <summary>Approve says every rename needs a date</summary>
+            <div class="answer">
+              <p>
+                Intern never files an undated document. Start the filename with
+                the document's date as YYYY-MM-DD — or, when the review panel
+                offers the date the model read, use <strong>Use date &amp;
+                rename</strong>. A document with no date anywhere can be kept
+                under its original name instead.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>The queue paused with a hosted-model error</summary>
+            <div class="answer">
+              <p>
+                A rejected key, an unreachable service, or a model name the
+                service does not know would fail every document in turn, so
+                Intern pauses instead. Open Settings, use <strong>Test
+                connection</strong> until it succeeds, then resume the queue.
+                A document the hosted model <em>declined</em> to read is not a
+                pause: it goes to review or fails on its own, and the rest carry on.
               </p>
             </div>
           </details>

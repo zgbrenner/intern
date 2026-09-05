@@ -4,6 +4,8 @@ use tauri::Manager;
 
 pub mod commands;
 pub mod intake;
+pub mod model;
+pub mod secrets;
 pub mod tray;
 
 pub fn run() {
@@ -23,7 +25,8 @@ pub fn run() {
                 .build(),
         )
         // The only network call Intern makes besides the one-off model
-        // download, and it happens only when someone presses the button in
+        // download and, only when a person chose one in Settings, the hosted
+        // model - and it happens only when someone presses the button in
         // Settings. There is no background poll and no timer: a document tool
         // that reaches out on its own is a document tool you have to take on
         // trust. Updates are verified against the public key in tauri.conf.json
@@ -90,6 +93,10 @@ pub fn run() {
             commands::cloud_roots,
             commands::descriptions_status,
             commands::descriptions_backfill,
+            commands::hosted_model_status,
+            commands::hosted_model_set_key,
+            commands::hosted_model_clear_key,
+            commands::hosted_model_test,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Intern");

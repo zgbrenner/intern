@@ -246,7 +246,12 @@ Lease Agreement with ORION GLASS STUDIO INC.pdf
 
 Those are outputs, not illustrations. The last one carries no date because the
 scan gave up no readable one, so it goes to review rather than borrowing a date
-from somewhere else in the page.
+from somewhere else in the page. Nor does it become a rename as it stands:
+every applied name must begin with a date (`DATE_REQUIRED`, refused at
+approval and again at the apply), so the reviewer types one or accepts the
+model's unverified reading. The analysis keeps the model's reply beside the
+validated facts for exactly that offer — a date the document never states
+verbatim is withheld from the name, not lost.
 
 The party clause is composed from a validated relation and validated names, not
 from free text, so every name in a filename has been found in the document.
@@ -291,6 +296,34 @@ said so. Both statements could not be true.
 Threads are half the logical processors on purpose. llama.cpp scales with
 physical cores rather than SMT threads, and taking every core makes the rest of
 Windows stutter — the product's premise is that it runs while you work.
+
+### A hosted model
+
+The inference is local by default and the local server is the product. The
+same position in the pipeline can be filled by a hosted model behind an API
+key: the engine's `Proposer` is the one seam, the local client and the hosted
+client both implement it, and the distillation, prompt, validation, and naming
+on either side do not know which answered.
+
+The hosted client speaks two wire formats — Anthropic's Messages API, and the
+chat-completions shape OpenAI defined and most providers and local servers
+copy — and sends only what every server understands: the model, the system
+instruction, the prompt, and (for Anthropic, where it is required) an output
+cap. No sampling knobs, because a parameter one provider rejects is a document
+that never gets filed. What goes out is the distilled digest of the document,
+condensed but verbatim; what comes back is read through the same JSON
+recovery and the same evidence checks as a local reply. A refusal from the
+model is reported as one and sends the document to review, never re-routed
+elsewhere; a rejected key or an unreachable service pauses the queue rather
+than failing the backlog one item at a time; a busy service earns one retry.
+
+The key is stored in the operating system's credential store under Intern's
+name, never in the settings file, and never travels anywhere but the address
+that was configured — redirects are refused. Plain HTTP is accepted only to
+this machine, so a local server can be used without a certificate and a
+remote one cannot be used without one. **Test connection** sends the same
+calibration document setup uses to check the local model, so a wrong key,
+model name, or address is found before a real document is sent.
 
 ## What it costs
 
@@ -340,7 +373,8 @@ review reasons, validated facts with evidence, and local timings.
 `intern-analyze` is that call as a command-line program. The desktop app, the
 CLI, and the watched intake folder are all callers of the same function; none
 of them can change how documents are understood. Adding a new host means
-adding a caller, not touching the engine.
+adding a caller, not touching the engine. Adding a model means implementing
+`Proposer`, which is what the hosted client is.
 
 The watched intake folder — including shared OneDrive/SharePoint intake
 folders, network shares, and the multi-machine claim protocol behind them —

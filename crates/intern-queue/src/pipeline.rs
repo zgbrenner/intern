@@ -13,7 +13,7 @@ use intern_core::{
 };
 use intern_engine::{
     DocumentAnalysis, DocumentSource, ExtractProgress, ProposalStatus, ValidatedProposal,
-    compose_filename, sanitize_folder_name,
+    compose_filename, evidence::is_valid_iso_date, sanitize_folder_name,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -897,12 +897,19 @@ impl Pipeline {
                 }
                 self.store
                     .record_processing_failure(item.id, model_error_code(&error))?;
+                // Failures that would repeat for every document - a model
+                // that cannot be reached, a key that was refused - pause the
+                // queue rather than fail the backlog one item at a time.
                 if matches!(
                     error.code.as_str(),
                     "MODEL_CANCEL_FAILED"
                         | "MODEL_RECOVERY_FAILED"
                         | "MODEL_REQUEST_FAILED"
                         | "MODEL_RESPONSE_INVALID"
+                        | "HOSTED_MODEL_MISCONFIGURED"
+                        | "HOSTED_MODEL_UNAUTHORIZED"
+                        | "HOSTED_MODEL_UNREACHABLE"
+                        | "HOSTED_MODEL_RATE_LIMITED"
                 ) {
                     self.paused.store(true, Ordering::SeqCst);
                 }
@@ -1095,6 +1102,11 @@ impl Pipeline {
             self.events.queue_changed();
             return Ok(());
         }
+        if leading_date(filename).is_none() {
+            self.repository.mark_needs_review(item.id, DATE_REQUIRED)?;
+            self.events.queue_changed();
+            return Ok(());
+        }
         let proposal = self.repository.load_proposal(item.id)?;
         let target = match proposal.as_ref() {
             Some(record) => target_folder(settings, &item.source_path, &record.analysis.proposal),
@@ -1277,6 +1289,12 @@ impl Pipeline {
 
     pub fn approve(&self, id: i64, filename: &str, description: &str) -> PipelineResult<()> {
         let filename = validate_leaf_filename(filename)?;
+        if leading_date(&filename).is_none() {
+            return Err(PipelineError::new(
+                DATE_REQUIRED,
+                "the filename must start with the document's date as YYYY-MM-DD",
+            ));
+        }
         let item = self
             .store
             .list()?
@@ -1809,11 +1827,33 @@ fn unix_now() -> i64 {
 }
 
 fn model_error_code(error: &ModelFailure) -> ErrorCode {
-    if error.code == "MODEL_RESPONSE_INVALID" {
-        ErrorCode::ModelOutputInvalid
-    } else {
-        ErrorCode::IoError
+    match error.code.as_str() {
+        "MODEL_RESPONSE_INVALID" => ErrorCode::ModelOutputInvalid,
+        "HOSTED_MODEL_REFUSED" => ErrorCode::ModelDeclined,
+        _ => ErrorCode::IoError,
     }
+}
+
+/// The review reason and error code for a rename that carries no date.
+pub const DATE_REQUIRED: &str = "DATE_REQUIRED";
+
+/// The date a filename begins with - `YYYY-MM-DD`, a real calendar date,
+/// standing on its own before whatever follows - or `None`.
+///
+/// Every rename must carry one. A name without a date sorts nowhere and
+/// says nothing about when, so the engine never proposes one as ready, and
+/// a person approving a name types the date in (or takes the one the model
+/// suggested) rather than filing an undated document.
+pub fn leading_date(filename: &str) -> Option<&str> {
+    let date = filename.get(..10)?;
+    if !is_valid_iso_date(date) {
+        return None;
+    }
+    let follows_cleanly = filename[10..]
+        .chars()
+        .next()
+        .is_none_or(|next| !next.is_alphanumeric());
+    follows_cleanly.then_some(date)
 }
 
 fn worker_error(error: WorkerFailure) -> PipelineError {
@@ -1845,6 +1885,36 @@ fn existing_names(directory: &Path) -> Vec<String> {
         .filter_map(Result::ok)
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect()
+}
+
+#[cfg(test)]
+mod date_gate_tests {
+    use super::leading_date;
+
+    #[test]
+    fn a_filename_carries_a_date_only_when_it_starts_with_a_real_one() {
+        assert_eq!(
+            leading_date("2026-03-02 Invoice from Acme.pdf"),
+            Some("2026-03-02")
+        );
+        assert_eq!(leading_date("2026-03-02.pdf"), Some("2026-03-02"));
+        assert_eq!(leading_date("2026-03-02-invoice.pdf"), Some("2026-03-02"));
+        assert_eq!(leading_date("2026-03-02"), Some("2026-03-02"));
+        assert_eq!(leading_date("Invoice from Acme.pdf"), None);
+        assert_eq!(leading_date("Invoice 2026-03-02 from Acme.pdf"), None);
+        assert_eq!(
+            leading_date("2026-02-30 Invoice.pdf"),
+            None,
+            "not a real day"
+        );
+        assert_eq!(
+            leading_date("2026-03-021 Invoice.pdf"),
+            None,
+            "digits run on"
+        );
+        assert_eq!(leading_date("2026-03-0"), None);
+        assert_eq!(leading_date(""), None);
+    }
 }
 
 #[cfg(test)]
