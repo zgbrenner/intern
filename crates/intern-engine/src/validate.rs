@@ -14,7 +14,9 @@ use crate::evidence::{
     date_match_positions, digest_contains, digest_contains_date, digest_contains_loosely,
     extract_stated_dates, is_valid_iso_date, normalize,
 };
-use crate::infer::{infer_date_role, infer_document_type, repair_issued_relation};
+use crate::infer::{
+    complete_type_from_title, infer_date_role, infer_document_type, repair_issued_relation,
+};
 
 /// Below this self-reported confidence a proposal goes to review even when
 /// every literal check passed.
@@ -38,6 +40,13 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
     let (mut document_type, type_supported) = validate_document_type(&candidate, digest);
     if !type_supported {
         push(&mut reasons, ReviewReason::TypeUnsupported);
+    }
+    // A supported type the title says more about is completed from the
+    // title: "Journal" on a "Project Journal" is the document's own words,
+    // whole, which is what the prompt asked for.
+    if type_supported {
+        document_type =
+            document_type.map(|value| complete_type_from_title(&value, digest, &candidate.parties));
     }
     if document_type.is_none() {
         // A document with a title has a type. When the model gave none - or

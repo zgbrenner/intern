@@ -11,11 +11,12 @@ use intern_core::{
     HISTORY_LIMIT, HistoryEntry, OperationDirection, OperationKind, OperationStage, QueueStatus,
     QueueStore,
 };
+use intern_engine::HouseRule;
 use intern_engine::{
     DocumentAnalysis, DocumentSource, Engine, LlamaServer, ModelClient, ModelManifest,
     ServerOptions, SupervisedWorker, prepare_worker_temp_root,
 };
-use intern_queue::ModelSource;
+use intern_queue::{LearnedRule, ModelSource};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -118,6 +119,55 @@ pub struct QueueItemDto {
     /// last resort for a document that states no date, labelled as such.
     #[serde(skip_serializing_if = "Option::is_none")]
     file_modified_date: Option<String>,
+    /// The reviewer's own spellings applied to the proposed name, so the
+    /// inspector can say why the name differs from the evidence under it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    house_rules: Vec<HouseRuleDto>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HouseRuleDto {
+    kind: String,
+    from: String,
+    to: String,
+}
+
+impl From<&HouseRule> for HouseRuleDto {
+    fn from(rule: &HouseRule) -> Self {
+        Self {
+            kind: rule.kind.as_str().to_owned(),
+            from: rule.from.clone(),
+            to: rule.to.clone(),
+        }
+    }
+}
+
+/// A spelling review has taught Intern, as Settings lists it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnedRuleDto {
+    id: String,
+    kind: String,
+    from: String,
+    to: String,
+    seen: u32,
+    active: bool,
+    learned_at: i64,
+}
+
+impl From<LearnedRule> for LearnedRuleDto {
+    fn from(rule: LearnedRule) -> Self {
+        Self {
+            id: rule.id.to_string(),
+            kind: rule.kind.as_str().to_owned(),
+            from: rule.from,
+            to: rule.to,
+            seen: rule.seen,
+            active: rule.active,
+            learned_at: rule.learned_at,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1071,6 +1121,32 @@ pub fn proposal_approve(
     Ok(())
 }
 
+/// The spellings review has taught Intern, newest first.
+#[tauri::command]
+pub fn house_rules_list(state: State<'_, AppState>) -> Result<Vec<LearnedRuleDto>, CommandError> {
+    Ok(state
+        .pipeline
+        .learned_rules()?
+        .into_iter()
+        .map(LearnedRuleDto::from)
+        .collect())
+}
+
+/// Stop applying a learned spelling; documents still waiting go back to
+/// the document's own words. Takes effect at once.
+#[tauri::command]
+pub fn house_rule_forget(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.pipeline.forget_rule(parse_item_id(&id)?)?;
+    Ok(())
+}
+
+/// Apply a learned spelling from now on without waiting for a second edit.
+#[tauri::command]
+pub fn house_rule_use(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.pipeline.use_rule(parse_item_id(&id)?)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn proposal_keep_original(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     state.pipeline.keep_original(parse_item_id(&id)?)?;
@@ -1645,6 +1721,9 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
         file_modified_date: matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready)
             .then(|| file_modified_date(&item.source_path))
             .flatten(),
+        house_rules: proposal
+            .map(|record| record.house_rules.iter().map(HouseRuleDto::from).collect())
+            .unwrap_or_default(),
     })
 }
 

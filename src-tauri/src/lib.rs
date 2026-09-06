@@ -97,6 +97,9 @@ pub fn run() {
             commands::hosted_model_set_key,
             commands::hosted_model_clear_key,
             commands::hosted_model_test,
+            commands::house_rules_list,
+            commands::house_rule_forget,
+            commands::house_rule_use,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Intern");

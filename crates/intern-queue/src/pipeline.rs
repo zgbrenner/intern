@@ -12,8 +12,9 @@ use intern_core::{
     QueueItem, QueueStatus, QueueStore, StdFileSystem, source_path_key,
 };
 use intern_engine::{
-    DocumentAnalysis, DocumentSource, ExtractProgress, ProposalStatus, ValidatedProposal,
-    compose_filename, evidence::is_valid_iso_date, sanitize_folder_name,
+    DocumentAnalysis, DocumentSource, ExtractProgress, HouseRule, HouseStyle, ProposalStatus,
+    RuleKind, ValidatedProposal, compose_filename, evidence::is_valid_iso_date, lesson_from_edit,
+    sanitize_folder_name,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -453,6 +454,48 @@ pub struct ProposalRecord {
     pub description: String,
     pub reasons: Vec<String>,
     pub revision: u64,
+    /// The reviewer's spellings applied when `filename` was composed. The
+    /// analysis keeps the document's own words; these say how the name
+    /// differs from them, and why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub house_rules: Vec<HouseRule>,
+}
+
+impl ProposalRecord {
+    /// The validated facts as the name carries them: the document's words,
+    /// respelled the way the reviewer has taught Intern to.
+    pub fn styled_proposal(&self) -> ValidatedProposal {
+        HouseStyle::new(self.house_rules.clone())
+            .apply(&self.analysis.proposal)
+            .0
+    }
+}
+
+/// How many times the same respelling must be made in review before Intern
+/// applies it on its own. One edit is a decision about one document; the
+/// second is a preference.
+pub const EDITS_TO_LEARN: u32 = 2;
+
+/// A spelling Intern has learned from review, and how settled it is.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnedRule {
+    pub id: i64,
+    pub kind: RuleKind,
+    pub from: String,
+    pub to: String,
+    /// How many times a reviewer has made exactly this change.
+    pub seen: u32,
+    /// Whether Intern applies it: made often enough, or told to use it now.
+    pub active: bool,
+    /// Unix seconds of the latest edit that taught it.
+    pub learned_at: i64,
+}
+
+impl LearnedRule {
+    pub fn rule(&self) -> HouseRule {
+        HouseRule::new(self.kind, self.from.clone(), self.to.clone())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -918,28 +961,11 @@ impl Pipeline {
             }
         };
         self.ensure_lease(&lease)?;
-        // The engine composed its name against the source folder, which is
-        // the only folder it knows. The name that will actually be applied
-        // must not collide in the folder the document is going to.
-        let filename = match self.settings.load() {
-            Ok(settings) => {
-                let target = target_folder(
-                    &settings,
-                    &item.source_path,
-                    &proposal_as_applied(&analysis.proposal, &analysis.filename),
-                );
-                compose_filename(
-                    &analysis.proposal,
-                    &extension,
-                    &existing_names(&target)
-                        .iter()
-                        .map(String::as_str)
-                        .collect::<Vec<_>>(),
-                )
-                .value
-            }
-            Err(_) => analysis.filename.clone(),
-        };
+        // The document's words, respelled the way review has taught Intern
+        // to. Applied here, after validation, so the evidence stayed the
+        // document's and only the name is the reviewer's.
+        let (styled, house_rules) = self.repository.active_style()?.apply(&analysis.proposal);
+        let filename = self.compose_for_target(&item.source_path, &styled, &extension, &existing);
         let record = ProposalRecord {
             status: analysis.status,
             filename,
@@ -951,6 +977,7 @@ impl Pipeline {
                 .collect(),
             analysis,
             revision: 1,
+            house_rules,
         };
         let next = match record.status {
             ProposalStatus::Ready => QueueStatus::Ready,
@@ -1038,6 +1065,136 @@ impl Pipeline {
         Ok(())
     }
 
+    /// The name a proposal will be applied under. The engine composed its
+    /// name against the source folder, which is the only folder it knows;
+    /// the name that is actually applied must not collide in the folder the
+    /// document is going to. Without readable settings the source folder's
+    /// names (`fallback`) stand in.
+    fn compose_for_target(
+        &self,
+        source_path: &Path,
+        proposal: &ValidatedProposal,
+        extension: &str,
+        fallback: &[String],
+    ) -> String {
+        let named = compose_filename(proposal, extension, &[]).value;
+        let existing = match self.settings.load() {
+            Ok(settings) => existing_names(&target_folder(
+                &settings,
+                source_path,
+                &proposal_as_applied(proposal, &named),
+            )),
+            Err(_) => fallback.to_vec(),
+        };
+        compose_filename(
+            proposal,
+            extension,
+            &existing.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .value
+    }
+
+    /// The spellings review has taught Intern, newest first.
+    pub fn learned_rules(&self) -> PipelineResult<Vec<LearnedRule>> {
+        self.repository.list_rules()
+    }
+
+    /// Stop applying a learned spelling. Names already applied keep it;
+    /// documents still waiting go back to the document's own words.
+    pub fn forget_rule(&self, id: i64) -> PipelineResult<()> {
+        if !self.repository.forget_rule(id)? {
+            return Err(PipelineError::new(
+                "RULE_NOT_FOUND",
+                "learned spelling does not exist",
+            ));
+        }
+        self.restyle_waiting()
+    }
+
+    /// Apply a learned spelling from now on without waiting for a second
+    /// edit, including to documents still waiting.
+    pub fn use_rule(&self, id: i64) -> PipelineResult<()> {
+        if !self.repository.use_rule(id)? {
+            return Err(PipelineError::new(
+                "RULE_NOT_FOUND",
+                "learned spelling does not exist",
+            ));
+        }
+        self.restyle_waiting()
+    }
+
+    /// Recomposes the proposed name of every document still waiting under
+    /// the spellings now in force, so a rule that just changed shows in the
+    /// queue at once rather than only on the next document.
+    fn restyle_waiting(&self) -> PipelineResult<()> {
+        let style = self.repository.active_style()?;
+        let mut changed = false;
+        for item in self.store.list()? {
+            if !matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready) {
+                continue;
+            }
+            let Some(mut record) = self.repository.load_proposal(item.id)? else {
+                continue;
+            };
+            let (styled, house_rules) = style.apply(&record.analysis.proposal);
+            if house_rules == record.house_rules {
+                continue;
+            }
+            let extension = item
+                .source_path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            let existing =
+                existing_names(item.source_path.parent().unwrap_or_else(|| Path::new(".")));
+            record.filename =
+                self.compose_for_target(&item.source_path, &styled, &extension, &existing);
+            record.house_rules = house_rules;
+            record.revision += 1;
+            self.repository.replace_proposal(item.id, &record)?;
+            changed = true;
+        }
+        if changed {
+            self.events.queue_changed();
+        }
+        Ok(())
+    }
+
+    /// What an approved edit teaches, if anything: a respelled party or
+    /// type, remembered, and applied on its own once the same change has
+    /// been made twice. A spelling Intern itself applied that the reviewer
+    /// changed again is a change of mind about the document's word, not
+    /// about Intern's; restoring the document's own spelling retracts the
+    /// rule.
+    fn learn_from_edit(
+        &self,
+        record: &ProposalRecord,
+        extension: &str,
+        approved: &str,
+    ) -> PipelineResult<()> {
+        let Some(lesson) = lesson_from_edit(
+            &record.styled_proposal(),
+            extension,
+            &record.filename,
+            approved,
+        ) else {
+            return Ok(());
+        };
+        let lesson = match record.house_rules.iter().find(|applied| {
+            applied.kind == lesson.kind && HouseRule::key(&applied.to) == lesson.from_key()
+        }) {
+            Some(applied) => HouseRule::new(lesson.kind, applied.from.clone(), lesson.to),
+            None => lesson,
+        };
+        if HouseRule::key(&lesson.to) == lesson.from_key() {
+            self.repository.forget_rule_for(lesson.kind, &lesson.from)?;
+        } else if lesson.is_meaningful() {
+            self.repository.learn(&lesson)?;
+        }
+        self.restyle_waiting()
+    }
+
     fn analyze_with_deadline(
         &self,
         source: &DocumentSource,
@@ -1116,7 +1273,7 @@ impl Pipeline {
             Some(record) => target_folder(
                 settings,
                 &item.source_path,
-                &proposal_as_applied(&record.analysis.proposal, filename),
+                &proposal_as_applied(&record.styled_proposal(), filename),
             ),
             None => destination_root(settings, &item.source_path),
         };
@@ -1337,8 +1494,14 @@ impl Pipeline {
                 "proposal is not reviewable",
             ));
         }
+        let proposed = self.repository.load_proposal(id)?;
         self.repository
             .approve_user_edit(id, item.status, &filename, description)?;
+        // A preference store, not a filing step: a lesson that cannot be
+        // written must not stop the rename that was just approved.
+        if let Some(record) = proposed.as_ref() {
+            let _ = self.learn_from_edit(record, source_extension, &filename);
+        }
         let ready = self
             .store
             .list()?
@@ -1497,7 +1660,20 @@ impl PipelineRepository {
             .busy_timeout(std::time::Duration::from_secs(5))
             .map_err(database_error)?;
         connection
-            .execute_batch("PRAGMA foreign_keys=ON;")
+            .execute_batch(
+                "PRAGMA foreign_keys=ON;
+                 CREATE TABLE IF NOT EXISTS house_rules (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   kind TEXT NOT NULL,
+                   from_key TEXT NOT NULL,
+                   from_value TEXT NOT NULL,
+                   to_value TEXT NOT NULL,
+                   seen INTEGER NOT NULL DEFAULT 1,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL,
+                   UNIQUE(kind, from_key)
+                 );",
+            )
             .map_err(database_error)?;
         let legacy_exists = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_proposals')",
@@ -1570,6 +1746,138 @@ impl PipelineRepository {
                 .map_err(|_| PipelineError::new("INVALID_DATA", "stored proposal is invalid"))
         })
         .transpose()
+    }
+
+    /// Stores a record over the one a queue item already has.
+    fn replace_proposal(&self, id: i64, record: &ProposalRecord) -> PipelineResult<()> {
+        let json = serde_json::to_string(record)
+            .map_err(|_| PipelineError::new("INVALID_DATA", "proposal could not be stored"))?;
+        let updated = self
+            .lock()?
+            .execute(
+                "UPDATE proposals SET proposal_json = ?1 WHERE queue_item_id = ?2",
+                params![json, id],
+            )
+            .map_err(database_error)?;
+        if updated != 1 {
+            return Err(PipelineError::new("INVALID_DATA", "proposal is missing"));
+        }
+        Ok(())
+    }
+
+    fn list_rules(&self) -> PipelineResult<Vec<LearnedRule>> {
+        let connection = self.lock()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, kind, from_value, to_value, seen, updated_at FROM house_rules
+                 ORDER BY updated_at DESC, id DESC",
+            )
+            .map_err(database_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u32>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })
+            .map_err(database_error)?;
+        let mut rules = Vec::new();
+        for row in rows {
+            let (id, kind, from, to, seen, learned_at) = row.map_err(database_error)?;
+            let Some(kind) = RuleKind::parse(&kind) else {
+                continue;
+            };
+            rules.push(LearnedRule {
+                id,
+                kind,
+                from,
+                to,
+                seen,
+                active: seen >= EDITS_TO_LEARN,
+                learned_at,
+            });
+        }
+        Ok(rules)
+    }
+
+    /// The rules in force: learned often enough, or told to be used.
+    fn active_style(&self) -> PipelineResult<HouseStyle> {
+        Ok(HouseStyle::new(
+            self.list_rules()?
+                .into_iter()
+                .filter(|rule| rule.active)
+                .map(|rule| rule.rule())
+                .collect(),
+        ))
+    }
+
+    /// Records one respelling. The same change again counts it up; a
+    /// different spelling for the same word starts the count over.
+    fn learn(&self, rule: &HouseRule) -> PipelineResult<LearnedRule> {
+        let connection = self.lock()?;
+        connection
+            .execute(
+                "INSERT INTO house_rules(kind, from_key, from_value, to_value, seen, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, unixepoch(), unixepoch())
+                 ON CONFLICT(kind, from_key) DO UPDATE SET
+                   seen = CASE WHEN to_value = excluded.to_value THEN seen + 1 ELSE 1 END,
+                   to_value = excluded.to_value,
+                   from_value = excluded.from_value,
+                   updated_at = unixepoch()",
+                params![rule.kind.as_str(), rule.from_key(), rule.from, rule.to],
+            )
+            .map_err(database_error)?;
+        connection
+            .query_row(
+                "SELECT id, from_value, to_value, seen, updated_at FROM house_rules
+                 WHERE kind = ?1 AND from_key = ?2",
+                params![rule.kind.as_str(), rule.from_key()],
+                |row| {
+                    Ok(LearnedRule {
+                        id: row.get(0)?,
+                        kind: rule.kind,
+                        from: row.get(1)?,
+                        to: row.get(2)?,
+                        seen: row.get(3)?,
+                        active: row.get::<_, u32>(3)? >= EDITS_TO_LEARN,
+                        learned_at: row.get(4)?,
+                    })
+                },
+            )
+            .map_err(database_error)
+    }
+
+    fn forget_rule_for(&self, kind: RuleKind, from: &str) -> PipelineResult<()> {
+        self.lock()?
+            .execute(
+                "DELETE FROM house_rules WHERE kind = ?1 AND from_key = ?2",
+                params![kind.as_str(), HouseRule::key(from)],
+            )
+            .map_err(database_error)?;
+        Ok(())
+    }
+
+    fn forget_rule(&self, id: i64) -> PipelineResult<bool> {
+        let removed = self
+            .lock()?
+            .execute("DELETE FROM house_rules WHERE id = ?1", params![id])
+            .map_err(database_error)?;
+        Ok(removed == 1)
+    }
+
+    fn use_rule(&self, id: i64) -> PipelineResult<bool> {
+        let changed = self
+            .lock()?
+            .execute(
+                "UPDATE house_rules SET seen = MAX(seen, ?2), updated_at = unixepoch() WHERE id = ?1",
+                params![id, EDITS_TO_LEARN],
+            )
+            .map_err(database_error)?;
+        Ok(changed == 1)
     }
 
     fn delete_proposal(&self, id: i64) -> PipelineResult<()> {
@@ -1813,7 +2121,7 @@ fn filed_document(
             destination: receipt.destination.clone(),
             description: proposal.description.clone(),
             proposal: proposal_as_applied(
-                &proposal.analysis.proposal,
+                &proposal.styled_proposal(),
                 &receipt
                     .destination
                     .file_name()

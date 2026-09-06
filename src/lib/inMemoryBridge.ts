@@ -1,6 +1,6 @@
 import { GUIDE_URL } from './bridge';
 import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult, UpdateStatus } from './bridge';
-import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, LearnedRule, QueueItem, SetupState } from '../types';
 import { leadingDate } from './filenames';
 
 /** Exact size of the single pinned model file this build downloads. */
@@ -39,6 +39,8 @@ export interface InMemoryBridgeOptions {
   setup?: Partial<SetupState>;
   /** A hosted-model key already in the (fake) credential store. */
   hostedKey?: string;
+  /** Spellings already learned from review. */
+  learnedRules?: LearnedRule[];
   downloadStepBytes?: number;
   downloadIntervalMs?: number;
   update?: UpdateStatus;
@@ -73,6 +75,9 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
   // The hosted model's key, as the desktop backend keeps it: out of the
   // settings, reported only as stored-or-not with a hint.
   let hostedKey: string | undefined = options.hostedKey;
+  // What review has taught, as the backend keeps it. Learning itself lives
+  // in the queue, so approving here teaches nothing; the list is fixed.
+  let learnedRules: LearnedRule[] = (options.learnedRules ?? []).map((rule) => ({ ...rule }));
   const providerDefaults = [
     { provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com/v1', model: 'claude-opus-5' },
     { provider: 'openai_compatible' as const, baseUrl: 'https://api.openai.com/v1', model: '' },
@@ -284,6 +289,15 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
       if (hostedKey.startsWith('bad-')) throw { code: 'HOSTED_MODEL_UNAUTHORIZED', message: 'the hosted service rejected the API key' };
       const defaults = providerDefaults.find((entry) => entry.provider === draft.hostedProvider)!;
       return { model: draft.hostedModel.trim() || defaults.model, endpoint, filename: '2024-01-02 Notice of Calibration - Northstar Calibration Holdings LLC.pdf', inferenceMillis: 1840 };
+    },
+    houseRulesList: async () => learnedRules.map((rule) => ({ ...rule })),
+    houseRuleForget: async (id) => {
+      if (!learnedRules.some((rule) => rule.id === id)) throw { code: 'RULE_NOT_FOUND', message: 'learned spelling does not exist' };
+      learnedRules = learnedRules.filter((rule) => rule.id !== id);
+    },
+    houseRuleUse: async (id) => {
+      if (!learnedRules.some((rule) => rule.id === id)) throw { code: 'RULE_NOT_FOUND', message: 'learned spelling does not exist' };
+      learnedRules = learnedRules.map((rule) => rule.id === id ? { ...rule, seen: Math.max(rule.seen, 2), active: true } : rule);
     },
   };
 }

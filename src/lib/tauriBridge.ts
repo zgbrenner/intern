@@ -1,6 +1,6 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, HouseRule, IntakeStatus, LearnedRule, QueueItem, SetupState } from '../types';
 import { GUIDE_URL } from './bridge';
 import type {
   DescriptionsEventSource,
@@ -63,6 +63,7 @@ interface QueueItemDto {
   proposalRevision?: string | number;
   suggestedDate?: string;
   datesInDocument?: string[];
+  houseRules?: HouseRule[];
   fileModifiedDate?: string;
 }
 
@@ -177,6 +178,9 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
   hostedModelSetKey(key: string): Promise<void> { return this.transport.invoke('hosted_model_set_key', { key }); }
   hostedModelClearKey(): Promise<void> { return this.transport.invoke('hosted_model_clear_key'); }
   hostedModelTest(settings: AppSettings): Promise<HostedModelTestResult> { return this.transport.invoke('hosted_model_test', { settings }); }
+  houseRulesList(): Promise<LearnedRule[]> { return this.transport.invoke('house_rules_list'); }
+  houseRuleForget(id: string): Promise<void> { return this.transport.invoke('house_rule_forget', { id }); }
+  houseRuleUse(id: string): Promise<void> { return this.transport.invoke('house_rule_use', { id }); }
 
   // Same shape as subscribeIntake: synchronous unsubscribe over an async
   // listen, dropping events until the listener is registered.
@@ -363,6 +367,7 @@ function normalizeItem(item: QueueItemDto): QueueItem {
     ...(item.proposalRevision === undefined ? {} : { proposalRevision: String(item.proposalRevision) }),
     ...(item.suggestedDate === undefined ? {} : { suggestedDate: item.suggestedDate }),
     ...(item.datesInDocument?.length ? { datesInDocument: [...item.datesInDocument] } : {}),
+    ...(item.houseRules?.length ? { houseRules: item.houseRules.map((rule) => ({ ...rule })) } : {}),
     ...(item.fileModifiedDate === undefined ? {} : { fileModifiedDate: item.fileModifiedDate }),
   };
 }

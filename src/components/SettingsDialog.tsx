@@ -1,6 +1,6 @@
 import { ExternalLink, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, DestinationLayout, HostedModelStatus, HostedProvider, IntakeStatus } from '../types';
+import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, DestinationLayout, HostedModelStatus, HostedProvider, IntakeStatus, LearnedRule } from '../types';
 import { GUIDE_URL } from '../lib/bridge';
 import type { DescriptionsEventSource, DesktopBridge, IntakeEventSource, SelectionBoundary, UpdateStatus } from '../lib/bridge';
 import { Icon } from './Icon';
@@ -16,6 +16,14 @@ function updateFailure(error: unknown): string {
   if (/signature|verify|pubkey/i.test(message)) return `That update was not signed by this project's key, so Intern refused it. (${message})`;
   if (!message.trim()) return 'Could not reach GitHub to check for updates.';
   return `Could not check for updates: ${message}`;
+}
+
+/** Why a learned spelling could not be used or forgotten, in a sentence. */
+function ruleFailure(error: unknown): string {
+  const code = typeof error === 'object' && error && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+  if (code === 'RULE_NOT_FOUND') return 'That spelling is no longer in the list; it may have been forgotten already. (RULE_NOT_FOUND)';
+  const message = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error && typeof error.message === 'string' ? error.message : '';
+  return message.trim() ? `The spelling could not be changed: ${message.trim()}${code ? ` (${code})` : ''}` : 'The spelling could not be changed.';
 }
 
 /**
@@ -179,6 +187,8 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
   const [testing, setTesting] = useState(false);
   const [testMessage, setTestMessage] = useState('');
   const [testError, setTestError] = useState('');
+  const [rules, setRules] = useState<LearnedRule[]>();
+  const [rulesError, setRulesError] = useState('');
   const busy = checking || installing;
   const dialog = useRef<HTMLElement>(null);
   const destination = useRef<HTMLInputElement>(null);
@@ -214,8 +224,18 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
     void Promise.resolve().then(() => bridge.hostedModelStatus())
       .then((current) => { if (active) setHostedStatus(current); })
       .catch(() => { /* An older bridge without the hosted model leaves the section quiet. */ });
+    void Promise.resolve().then(() => bridge.houseRulesList())
+      .then((current) => { if (active) setRules(current); })
+      .catch(() => { /* A bridge that has learned nothing leaves the section quiet. */ });
     return () => { active = false; };
   }, [bridge]);
+  // Forgetting or using a spelling takes effect at once, like removing a
+  // stored key: it is a fact about the queue, not a draft of the settings.
+  const changeRule = async (operation: Promise<void>) => {
+    setRulesError('');
+    try { await operation; setRules(await bridge.houseRulesList()); }
+    catch (error) { setRulesError(ruleFailure(error)); }
+  };
   const browse = async (apply: (path: string) => void) => {
     const folder = await selection?.pickFolder();
     if (folder) apply(folder.path);
@@ -361,6 +381,29 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
         <p className="check-hint">{LAYOUTS.find((layout) => layout.value === next.destinationLayout)?.example}{next.destinationLayout === 'flat' ? '.' : ' — a document missing that fact goes in an “Undated” or “Unsorted” folder, never loose in the root. Undo removes a folder it empties.'}</p>
         <label className="check-label"><input type="checkbox" checked={Boolean(next.automaticRename)} onChange={(event) => setNext({ ...next, automaticRename: event.target.checked })} />Automatically rename high-confidence files</label>
         <p className="check-hint">Anything Intern is less sure about still waits for you in Needs Review.</p>
+      </section>
+      <section className="settings-group">
+        <h3>Spellings Intern has learned</h3>
+        {/*
+          Learned from edits, never from the model, and never on the first
+          edit: one change is a decision about one document. The list is the
+          whole memory, so anything it learned wrong can be seen and undone
+          here rather than discovered in a folder listing.
+        */}
+        <p className="section-lead">When you respell a party or a document type in review, Intern remembers it. The second time you make the same change it becomes the spelling Intern uses; until then it waits here. Names already applied never change.</p>
+        {rules !== undefined && rules.length === 0 && <p className="check-hint">Nothing yet. Change a party's name or a document type in review and it will appear here.</p>}
+        {rules !== undefined && rules.length > 0 && <ul className="learned-rules" aria-label="Learned spellings">
+          {rules.map((rule) => <li key={rule.id}>
+            <span className="rule-kind">{rule.kind === 'party' ? 'Party' : 'Type'}</span>
+            <span className="rule-change"><q>{rule.from}</q> written as <strong>{rule.to}</strong></span>
+            <span className="rule-state">{rule.active ? 'In use' : 'Seen once · in use after one more edit'}</span>
+            <span className="rule-actions">
+              {!rule.active && <button type="button" aria-label={`Use now: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(bridge.houseRuleUse(rule.id))}>Use now</button>}
+              <button type="button" aria-label={`Forget: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(bridge.houseRuleForget(rule.id))}>Forget</button>
+            </span>
+          </li>)}
+        </ul>}
+        {rulesError && <p className="form-error" role="alert">{rulesError}</p>}
       </section>
       <section className="settings-group">
         <h3>Model</h3>

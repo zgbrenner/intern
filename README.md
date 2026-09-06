@@ -226,6 +226,19 @@ Names are sanitised for Windows, keep the original extension, shed the least
 identifying detail first when they would be too long to scan, and get a numeric
 suffix on collision.
 
+### Spellings Intern learns from you
+
+The document says "Vistage Worldwide, Inc."; you call it "Vistage". Respell a
+party or a document type in review and Intern remembers it. The second time
+you make the same change it becomes the spelling Intern uses, in the name, the
+layout folder, and the description record, for every later document that
+names the same thing. One edit is a decision about one document; two are a
+preference. Settings lists everything learned, with "Use now" for a spelling
+you want at once and "Forget" for one you do not, and the review panel says
+"Uses your spelling" whenever a name differs from the evidence under it. The
+evidence itself always keeps the document's own words: a learned spelling
+changes what Intern calls a thing, never what it found.
+
 ## Development
 
 ```sh
@@ -255,13 +268,27 @@ Run Rust tests with:
 cargo test --locked --workspace --all-targets
 ```
 
+Accuracy is a number, not a feeling. The corpus is scored on every push from a
+committed recording of what the parser read and what the model replied, and
+CI fails when a reviewed answer that used to be right is now wrong:
+
+```sh
+cargo run --locked -p intern-engine --bin intern-evaluate -- \
+  --fixtures fixtures/generated --expected fixtures/expected.json \
+  --replay fixtures/corpus-recording.json --baseline fixtures/corpus-baseline.json
+```
+
+A prompt change makes the recording stale and needs a live re-record;
+[`docs/evaluation.md`](docs/evaluation.md) has the workflow, and
+[`docs/model-bakeoff.md`](docs/model-bakeoff.md) the numbers.
+
 ### Crates
 
 | Crate | What it owns |
 | --- | --- |
-| `intern-engine` | Document understanding: distillation, prompt, local model client and server, the optional hosted-model client, evidence validation, filename composition, and model installation. |
+| `intern-engine` | Document understanding: distillation, prompt, local model client and server, the optional hosted-model client, evidence validation, house style learned from review, filename composition, model installation, and the corpus evaluator with its record-and-replay mode. |
 | `intern-intake` | Shared intake folders: the multi-machine claim protocol, cloud sync-root detection, and the polling watcher. |
-| `intern-queue` | The durable queue: ordering, leases, retries, and the review/apply workflow. |
+| `intern-queue` | The durable queue: ordering, leases, retries, the review/apply workflow, and the spellings it learns from approvals. |
 | `intern-core` | Crash-safe queue storage and journalled file operations. |
 | `intern-worker` | The out-of-process parser: PDFium, OCR, and Office extraction. |
 | `intern-app` | The Tauri desktop shell, including the switch between the local and hosted models and the credential store the hosted key lives in. |
