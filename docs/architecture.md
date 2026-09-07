@@ -209,18 +209,29 @@ labelling them consistently:
   of`, `Invoice date`, `Notice is hereby given ... on`, `signed on`. A bare
   `Date:` label defers to the document type (an invoice's bare date is its
   invoice date; an amendment's is its own date). The model's stated role is
-  used only when the document's wording says nothing.
-* **A missing type.** When the model offers no document type, or one the
-  document does not support, the document's own title - the first outline
-  heading, at most eight words, containing a type noun (`agreement`,
-  `invoice`, `minutes`, `NDA` ...) - becomes the type, and the document is
-  routed to review with `TYPE_INFERRED` so a person confirms the title names
-  the document. A document with no such title still gets no type.
-* **Who issued an invoice.** An invoice, receipt, statement, or quote is
-  *from* whoever issued it, not *between* its two sides. When the model says
-  `between` for one of those types and the document's own layout names a
-  customer (`Bill to`, `Sold to`, `Attn`) or an issuer (`Remit to`, `From:`),
-  the relation is repaired to `from` the issuing party.
+  used only when the document's wording says nothing. The wording is read
+  across a PDF's line wraps - "is dated" on one line and "as of September
+  14, 2025" on the next are one sentence - but a line that ended a sentence
+  or a label keeps its cue to itself, so a header's `Date of this Notice:`
+  never lends `notice` to the sentence under it.
+* **A missing type, or a partial one.** When the model offers no document
+  type, or one the document does not support, the document's own title - the
+  first outline heading, at most eight words, containing a type noun
+  (`agreement`, `invoice`, `minutes`, `NDA` ...) - becomes the type, and the
+  document is routed to review with `TYPE_INFERRED` so a person confirms the
+  title names the document. A document with no such title still gets no
+  type. A supported type the title merely completes - `Journal` under
+  "MOONLIT ARCHIVE PROJECT JOURNAL" - is completed from the title, whole,
+  without a review flag, provided the extra words are plain: not an exhibit
+  label, not a party's name, not the `No` a stripped number leaves behind.
+* **Who issued an invoice.** An invoice, receipt, account statement, or
+  quote is *from* whoever issued it, not *between* its two sides. When the
+  model says `between` for one of those types and the document's own layout
+  names a customer (`Bill to`, `Sold to`, `Attn`) or an issuer (`Remit to`,
+  `From:`), the relation is repaired to `from` the issuing party. Every cue
+  nominates an issuer; one nominee settles it, however many cues agree, and
+  two leave the model's answer alone. A statement *of work* is an agreement,
+  not a statement, and is never repaired this way.
 
 Each is deterministic, unit-tested against the corpus's own date lines and
 titles, and never invents a fact: a role, a type, or a relation is inferred
@@ -276,6 +287,43 @@ layout needs but the document lacks sends it to `Undated` or `Unsorted`, never
 the root. Folders are created on first use and removed by the undo that
 empties them; the destination itself is never removed.
 
+### House style
+
+The document's words are not always the words a person files under.
+"Vistage Worldwide, Inc." is "Vistage" to everyone at Vistage, and a
+reviewer who fixes that in every name is teaching something the model cannot
+learn and validation must not: validation checks that a name is *in* the
+document, and "Vistage" alone would pass that check for the wrong reason.
+
+So house style is a separate, deterministic stage that runs after validation
+and before naming. A rule maps a spelling as the document writes it (matched
+with case, punctuation, and spacing disregarded, words never loosened) to the
+spelling the reviewer wrote, for one party or for the document type. The
+queue applies the rules in force to the validated proposal, composes the name
+from the result, and records which rules fired beside the proposal. The
+engine's analysis is untouched: the evidence panel still shows the document's
+words, and the description record and the layout folder follow the styled
+proposal, so the name, the folder, and the record agree.
+
+Rules are learned only from edits, and only from edits that respell exactly
+one field. The approved name is read with the grammar that composed the
+proposed one - type, connecting word, party, `and`, party - after stripping
+the extension, the date, and any collision suffix, so a reviewer who typed a
+date and shortened a party in one go still teaches the party. An edit that
+touches two fields, the connecting word, or a name the engine did not compose
+teaches nothing: it is a decision about that document. Reading the grammar
+rather than diffing matters, because the smallest edit lies: "Acme and
+Vistage" becomes "Acme Corp and Vistage Inc" by inserting text one character
+into the connector, and a diff would credit it all to one party.
+
+A rule takes effect on the second identical edit (`EDITS_TO_LEARN`), or at
+once when a person says "Use now" in Settings, and every document still
+waiting is recomposed under it so the queue shows the change immediately.
+Respelling a spelling Intern applied maps back to the document's word - the
+person changed their mind about the word, not about Intern - and restoring
+the document's own spelling retracts the rule. The whole memory is the list
+in Settings; nothing is learned that cannot be seen and forgotten there.
+
 ## Model and runtime
 
 | | |
@@ -329,6 +377,19 @@ this machine, so a local server can be used without a certificate and a
 remote one cannot be used without one. **Test connection** sends the same
 calibration document setup uses to check the local model, so a wrong key,
 model name, or address is found before a real document is sent.
+
+## Measuring it
+
+Every stage after the model is deterministic, which is what makes accuracy
+measurable without the model. `intern-evaluate` records a live run - the text
+the worker extracted from each fixture and the reply the model gave, keyed by
+the hash of the prompt - and replays it in seconds: distillation, validation,
+inference of roles and types, house style, and naming run for real over the
+recorded reply, and the corpus is scored against `fixtures/expected.json`. A
+committed baseline turns that into a gate: CI replays on every push and fails
+when a reviewed answer that was right is now wrong, and a prompt change makes
+the recording stale rather than silently scoring replies to a question the
+engine no longer asks. [`evaluation.md`](evaluation.md) has the workflow.
 
 ## What it costs
 

@@ -155,8 +155,8 @@ pub fn infer_date_role(
     let mut found: Vec<DateRole> = Vec::new();
     let mut generic = false;
     for segment in &digest.segments {
-        for line in segment.lines() {
-            let normalized = normalize(line);
+        for line in wrapped_lines(segment) {
+            let normalized = normalize(&line);
             for position in date_match_positions(date, &normalized) {
                 if crate::validate::reference_introduced(&normalized, position) {
                     continue;
@@ -193,6 +193,66 @@ pub fn infer_date_role(
         (None, kind) if generic => kind.default_role(),
         (None, _) => None,
     }
+}
+
+/// A segment's lines with wrapped sentences rejoined. A PDF breaks "is
+/// dated" from "as of September 14, 2025" wherever the margin falls, and the
+/// wording that names a date's role must be read across that break. A line
+/// is joined to the one before it only when the one before did not end a
+/// sentence, a label, or a clause, and it itself carries a sentence on - it
+/// starts in lower case, with a number, or with a month - so a header
+/// block's "To:" and "From:" lines stay apart, and "Date of this Notice:
+/// December 29, 2026" does not lend its cue to the sentence under it.
+fn wrapped_lines(segment: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for line in segment.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        match lines.last_mut() {
+            Some(previous)
+                if !previous.ends_with(['.', ':', ';', '!', '?']) && continues_sentence(line) =>
+            {
+                previous.push(' ');
+                previous.push_str(line);
+            }
+            _ => lines.push(line.to_owned()),
+        }
+    }
+    lines
+}
+
+const MONTHS: &[&str] = &[
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+];
+
+fn continues_sentence(line: &str) -> bool {
+    let Some(first) = line.chars().next() else {
+        return false;
+    };
+    if first.is_lowercase() || first.is_ascii_digit() {
+        return true;
+    }
+    let first_word = line
+        .split(|character: char| !character.is_alphabetic())
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
+    MONTHS.iter().any(|month| {
+        *month == first_word || (first_word.len() >= 3 && month.starts_with(&first_word))
+    })
 }
 
 /// Whether the wording before a date merely labels it as the date: "Date:",
@@ -326,6 +386,59 @@ impl TypeKind {
             Self::Agreement => Some(DateRole::Effective),
             Self::Unknown => None,
         }
+    }
+}
+
+/// The document's own title completing the model's type. "Journal" on a
+/// document headed "Moonlit Archive Project Journal" is that title, whole:
+/// the prompt asks for the document's words for its type, and the title is
+/// where they are. Completed only when the title ends with the type and adds
+/// a few plain words to it - not an exhibit label, not a party's name, not a
+/// leftover "No." from a stripped number - so a completion is always the
+/// document's title and never a guess.
+pub fn complete_type_from_title(
+    document_type: &str,
+    digest: &DocumentDigest,
+    parties: &[String],
+) -> String {
+    let Some(title) = infer_document_type(digest) else {
+        return document_type.to_owned();
+    };
+    let title_words = normalize(&title)
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let type_words = normalize(document_type)
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if type_words.is_empty()
+        || title_words.len() <= type_words.len()
+        || !title_words.ends_with(&type_words)
+    {
+        return document_type.to_owned();
+    }
+    let extra = &title_words[..title_words.len() - type_words.len()];
+    let party_words = parties
+        .iter()
+        .flat_map(|party| {
+            normalize(party)
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let plain = extra.len() <= 3
+        && extra.iter().all(|word| {
+            word.chars().count() > 1
+                && word.chars().all(char::is_alphabetic)
+                && !NOT_A_TITLE.contains(&word.as_str())
+                && !party_words.contains(word)
+        });
+    if plain {
+        title
+    } else {
+        document_type.to_owned()
     }
 }
 
@@ -579,11 +692,19 @@ fn capitalize(word: &str) -> String {
 }
 
 /// Document types that have one party - the one that issued them.
+///
+/// "statement" on its own is an account statement; it is matched whole,
+/// because "Statement of Work" contains the word and is an agreement between
+/// two parties, and the corpus showed the second party of one being dropped
+/// as if it were a customer on a bill.
 const ISSUED_TYPES: &[&str] = &[
     "invoice",
     "receipt",
     "bill",
-    "statement",
+    "statement of account",
+    "account statement",
+    "bank statement",
+    "billing statement",
     "packing slip",
     "purchase order",
     "work order",
@@ -635,7 +756,7 @@ pub fn repair_issued_relation(
 ) -> (Vec<String>, PartyRelation) {
     let issued_type = document_type.is_some_and(|value| {
         let lowered = value.to_lowercase();
-        ISSUED_TYPES.iter().any(|kind| lowered.contains(kind))
+        lowered.trim() == "statement" || ISSUED_TYPES.iter().any(|kind| lowered.contains(kind))
     });
     if !issued_type || parties.len() != 2 || relation != PartyRelation::Between {
         return (parties, relation);
@@ -661,11 +782,26 @@ pub fn repair_issued_relation(
         .iter()
         .map(|party| on_line_with(party, ISSUER_CUES))
         .collect();
-    let issuer = match (customers[0], customers[1], issuers[0], issuers[1]) {
-        (true, false, _, false) => Some(1),
-        (false, true, false, _) => Some(0),
-        (false, false, true, false) => Some(0),
-        (false, false, false, true) => Some(1),
+    // Every cue nominates an issuer: an issuer line nominates its own party,
+    // a customer line nominates the other one. One nominee, however many
+    // cues agree on it, settles the question; two nominees is a document
+    // that contradicts itself, and the model's answer stands. (An earlier
+    // version wanted exactly one cue, and an invoice with both a "Bill To"
+    // and a "Remit To" line - the clearest case there is - was left as
+    // "between".)
+    let mut nominees = Vec::new();
+    for index in 0..2 {
+        if issuers[index] {
+            nominees.push(index);
+        }
+        if customers[index] {
+            nominees.push(1 - index);
+        }
+    }
+    nominees.sort_unstable();
+    nominees.dedup();
+    let issuer = match nominees.as_slice() {
+        [only] => Some(*only),
         _ => None,
     };
     match issuer {
@@ -681,6 +817,146 @@ mod tests {
 
     fn digest_of(text: &str) -> DocumentDigest {
         distill(&source_from_text(text), DigestBudget::default())
+    }
+
+    /// Replay of the recorded corpus: the model read the statement of work as
+    /// "between" its two parties, and the issued-document repair, matching
+    /// "statement", dropped the client as if it were the bill-to on an
+    /// invoice.
+    #[test]
+    fn a_statement_of_work_is_not_an_issued_document() {
+        let digest = digest_of(
+            "STATEMENT OF WORK NO. 4\nThis Statement of Work is entered into by and between \
+             Ridgeline Cartography LLC (\"Provider\") and Vistage Worldwide, Inc. (\"Client\").",
+        );
+        let parties = vec![
+            "Ridgeline Cartography LLC".to_owned(),
+            "Vistage Worldwide, Inc.".to_owned(),
+        ];
+        let (kept, relation) = repair_issued_relation(
+            Some("Statement of Work"),
+            parties.clone(),
+            PartyRelation::Between,
+            &digest,
+        );
+        assert_eq!(kept, parties);
+        assert_eq!(relation, PartyRelation::Between);
+
+        let statement = digest_of("STATEMENT\nCustomer: Acme Corporation\nRemit to: First Bank");
+        let (kept, relation) = repair_issued_relation(
+            Some("Statement"),
+            vec!["First Bank".to_owned(), "Acme Corporation".to_owned()],
+            PartyRelation::Between,
+            &statement,
+        );
+        assert_eq!(kept, vec!["First Bank"]);
+        assert_eq!(relation, PartyRelation::From);
+    }
+
+    /// Replay of the recorded corpus: the vendor invoice names its customer
+    /// on a "Bill To" line and itself on a "Remit To" line, and the repair
+    /// refused to choose because two cues spoke instead of one.
+    #[test]
+    fn cues_that_agree_on_the_issuer_settle_it() {
+        let digest = digest_of(
+            "INVOICE\nAcme Corporation, 500 Foundry Road\nBill To: Vistage Worldwide, Inc., Accounts Payable\n\
+             Remit To: Acme Corporation, Account 4471-9920",
+        );
+        let (kept, relation) = repair_issued_relation(
+            Some("Invoice"),
+            vec![
+                "Acme Corporation".to_owned(),
+                "Vistage Worldwide, Inc.".to_owned(),
+            ],
+            PartyRelation::Between,
+            &digest,
+        );
+        assert_eq!(kept, vec!["Acme Corporation"]);
+        assert_eq!(relation, PartyRelation::From);
+
+        // Cues that name both parties as the issuer leave the model's answer.
+        let contradictory =
+            digest_of("INVOICE\nBill To: Acme Corporation\nBill To: Vistage Worldwide, Inc.");
+        let (kept, _) = repair_issued_relation(
+            Some("Invoice"),
+            vec![
+                "Acme Corporation".to_owned(),
+                "Vistage Worldwide, Inc.".to_owned(),
+            ],
+            PartyRelation::Between,
+            &contradictory,
+        );
+        assert_eq!(kept.len(), 2);
+    }
+
+    /// Replay of the recorded corpus: the amendment's PDF wraps "is dated"
+    /// and "as of September 14, 2025" onto different lines, and the role was
+    /// read from the second line alone.
+    #[test]
+    fn the_role_is_read_across_a_wrapped_line() {
+        let digest = digest_of(
+            "FIRST AMENDMENT TO CONSULTING AGREEMENT\nThis First Amendment to Consulting Agreement (this \"Amendment\") is dated\n\
+             as of September 14, 2025, and amends the Consulting Agreement dated\nJanuary 12, 2023.",
+        );
+        assert_eq!(
+            infer_date_role(
+                &digest,
+                "2025-09-14",
+                Some("First Amendment to Consulting Agreement")
+            ),
+            Some(DateRole::Amendment)
+        );
+        // A line that ends a sentence, or one that starts a new one, is not
+        // joined to its neighbour: the notice date's label keeps its cue.
+        assert_eq!(
+            wrapped_lines(
+                "Date of this Notice: December 29, 2026\nYour employment will end effective\nJanuary 31, 2027.\nTo: John Smith\nFrom: Harriet Voss"
+            ),
+            vec![
+                "Date of this Notice: December 29, 2026".to_owned(),
+                "Your employment will end effective January 31, 2027.".to_owned(),
+                "To: John Smith".to_owned(),
+                "From: Harriet Voss".to_owned(),
+            ]
+        );
+    }
+
+    /// Replay of the recorded corpus: the 100-page journal is headed
+    /// "MOONLIT ARCHIVE PROJECT JOURNAL" and the model said "Journal".
+    #[test]
+    fn the_title_completes_a_type_it_ends_with_and_nothing_else() {
+        let journal =
+            digest_of("MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 1\nJournal date: July 1, 2025");
+        assert_eq!(
+            complete_type_from_title("Journal", &journal, &[]),
+            "Moonlit Archive Project Journal"
+        );
+        assert_eq!(
+            complete_type_from_title("Project Journal", &journal, &[]),
+            "Moonlit Archive Project Journal"
+        );
+        assert_eq!(
+            complete_type_from_title("Minutes", &journal, &[]),
+            "Minutes"
+        );
+
+        // A stripped number leaves "No", which is not part of any type.
+        let numbered = digest_of("STATEMENT OF WORK NO. 4\nEffective April 1, 2026.");
+        assert_eq!(
+            complete_type_from_title("Statement of Work", &numbered, &[]),
+            "Statement of Work"
+        );
+        // An exhibit label is not a type, and neither is a party's name.
+        let exhibit = digest_of("EXHIBIT A STATEMENT OF WORK\nEffective April 1, 2026.");
+        assert_eq!(
+            complete_type_from_title("Statement of Work", &exhibit, &[]),
+            "Statement of Work"
+        );
+        let branded = digest_of("ACME CORPORATION INVOICE\nInvoice date: May 1, 2025");
+        assert_eq!(
+            complete_type_from_title("Invoice", &branded, &["Acme Corporation".to_owned()]),
+            "Invoice"
+        );
     }
 
     /// Each line is the shape one corpus fixture states its date in, with the

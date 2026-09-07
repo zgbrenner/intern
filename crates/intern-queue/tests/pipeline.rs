@@ -1839,3 +1839,310 @@ fn flagged_duplicates_support_keep_original_remove_and_cleared_history() {
     assert_eq!(requeued.status, QueueStatus::Queued);
     assert_eq!(requeued.error_code, None);
 }
+
+/// A proposal whose date the text states, so the item comes out Ready.
+fn dated_proposal(iso: &str, written: &str) -> ModelProposal {
+    ModelProposal {
+        document_date: Some(iso.into()),
+        evidence: Evidence {
+            date: Some(format!("signed {written}")),
+            ..proposal(0.94, false).evidence
+        },
+        ..proposal(0.94, false)
+    }
+}
+
+fn dated_text(written: &str) -> DocumentSource {
+    parsed(&format!(
+        "Employment Agreement signed {written} by John Smith and Acme Corporation."
+    ))
+}
+
+fn learning_pipeline(temp: &Path, dates: &[(&str, &str)]) -> (Pipeline, Arc<RecordingFiling>) {
+    let filed = temp.join("filed");
+    std::fs::create_dir_all(&filed).unwrap();
+    let worker = Arc::new(FakeWorker::new(
+        dates
+            .iter()
+            .map(|(_, written)| Ok(dated_text(written)))
+            .collect(),
+    ));
+    let model = Arc::new(FakeModel::new(
+        dates
+            .iter()
+            .map(|(iso, written)| Ok(dated_proposal(iso, written)))
+            .collect(),
+    ));
+    let settings = SettingsStore::new(temp.join("settings.json"));
+    settings
+        .save(&AppSettings {
+            destination: filed.to_string_lossy().into_owned(),
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let filing = Arc::new(RecordingFiling::default());
+    let pipeline = Pipeline::with_local_files(
+        temp.join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap()
+    .with_filing_sink(filing.clone());
+    (pipeline, filing)
+}
+
+fn record_of(pipeline: &Pipeline, id: i64) -> intern_queue::ProposalRecord {
+    pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == id)
+        .unwrap()
+        .proposal
+        .unwrap()
+}
+
+/// Four documents naming the same counterparty. The reviewer shortens it
+/// once - a decision about one document - and the next proposal still uses
+/// the document's words. Shortening it a second time makes it a spelling:
+/// the document still waiting is renamed in the queue, the one processed
+/// afterwards is proposed with it, and what is filed under it reports the
+/// reviewer's word while the analysis keeps the document's.
+#[test]
+fn a_respelling_made_twice_in_review_becomes_interns_own_spelling() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let (pipeline, filing) = learning_pipeline(
+        temp.path(),
+        &[
+            ("2024-04-12", "April 12, 2024"),
+            ("2024-05-03", "May 3, 2024"),
+            ("2024-06-07", "June 7, 2024"),
+            ("2024-07-01", "July 1, 2024"),
+        ],
+    );
+    let first = source(&inbox, "a.pdf");
+    let second = source(&inbox, "b.pdf");
+    let third = source(&inbox, "c.pdf");
+    let queued = pipeline
+        .enqueue_files(&[first, second, third])
+        .unwrap()
+        .into_iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    pipeline.run_until_idle().unwrap();
+    assert_eq!(
+        record_of(&pipeline, queued[1]).filename,
+        "2024-05-03 Employment Agreement between John Smith and Acme Corporation.pdf"
+    );
+
+    pipeline
+        .approve(
+            queued[0],
+            "2024-04-12 Employment Agreement between John Smith and Acme.pdf",
+            "Employment agreement between John Smith and Acme Corporation.",
+        )
+        .unwrap();
+    let rules = pipeline.learned_rules().unwrap();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(
+        (rules[0].from.as_str(), rules[0].to.as_str()),
+        ("Acme Corporation", "Acme")
+    );
+    assert_eq!((rules[0].seen, rules[0].active), (1, false));
+    assert_eq!(
+        record_of(&pipeline, queued[1]).filename,
+        "2024-05-03 Employment Agreement between John Smith and Acme Corporation.pdf",
+        "one edit is a decision about one document"
+    );
+
+    pipeline
+        .approve(
+            queued[1],
+            "2024-05-03 Employment Agreement between John Smith and Acme.pdf",
+            "Employment agreement between John Smith and Acme Corporation.",
+        )
+        .unwrap();
+    let rules = pipeline.learned_rules().unwrap();
+    assert_eq!((rules[0].seen, rules[0].active), (2, true));
+    let waiting = record_of(&pipeline, queued[2]);
+    assert_eq!(
+        waiting.filename, "2024-06-07 Employment Agreement between John Smith and Acme.pdf",
+        "the document still waiting is renamed in the queue"
+    );
+    assert_eq!(waiting.revision, 2);
+    assert_eq!(waiting.house_rules.len(), 1);
+    assert_eq!(
+        waiting.analysis.proposal.parties,
+        vec!["John Smith", "Acme Corporation"],
+        "the analysis keeps the document's own words"
+    );
+
+    let fourth = source(&inbox, "d.pdf");
+    let later = pipeline.enqueue_files(&[fourth]).unwrap()[0].id;
+    pipeline.run_until_idle().unwrap();
+    let proposed = record_of(&pipeline, later);
+    assert_eq!(
+        proposed.filename,
+        "2024-07-01 Employment Agreement between John Smith and Acme.pdf"
+    );
+    assert_eq!(proposed.house_rules[0].to, "Acme");
+
+    pipeline
+        .approve(
+            queued[2],
+            &waiting.filename,
+            "Employment agreement between John Smith and Acme Corporation.",
+        )
+        .unwrap();
+    let heard = filing.filed.lock().unwrap();
+    assert_eq!(heard.len(), 3);
+    assert_eq!(heard[2].proposal.parties, vec!["John Smith", "Acme"]);
+    drop(heard);
+    let replay = pipeline.filed_documents().unwrap();
+    assert!(
+        replay
+            .iter()
+            .any(|document| document.proposal.parties == vec!["John Smith", "Acme"])
+    );
+    assert_eq!(
+        pipeline.learned_rules().unwrap()[0].seen,
+        2,
+        "approving the spelling Intern applied teaches nothing new"
+    );
+}
+
+#[test]
+fn a_spelling_can_be_used_at_once_and_forgotten_again() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let (pipeline, _) = learning_pipeline(
+        temp.path(),
+        &[
+            ("2024-04-12", "April 12, 2024"),
+            ("2024-05-03", "May 3, 2024"),
+        ],
+    );
+    let first = source(&inbox, "a.pdf");
+    let second = source(&inbox, "b.pdf");
+    let queued = pipeline
+        .enqueue_files(&[first, second])
+        .unwrap()
+        .into_iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    pipeline.run_until_idle().unwrap();
+    pipeline
+        .approve(
+            queued[0],
+            "2024-04-12 Employment Agreement between John Smith and Acme.pdf",
+            "A sentence about the agreement.",
+        )
+        .unwrap();
+    let rule = pipeline.learned_rules().unwrap().remove(0);
+    assert!(!rule.active);
+
+    pipeline.use_rule(rule.id).unwrap();
+    assert!(pipeline.learned_rules().unwrap()[0].active);
+    assert_eq!(
+        record_of(&pipeline, queued[1]).filename,
+        "2024-05-03 Employment Agreement between John Smith and Acme.pdf"
+    );
+
+    pipeline.forget_rule(rule.id).unwrap();
+    assert!(pipeline.learned_rules().unwrap().is_empty());
+    let restored = record_of(&pipeline, queued[1]);
+    assert_eq!(
+        restored.filename,
+        "2024-05-03 Employment Agreement between John Smith and Acme Corporation.pdf"
+    );
+    assert!(restored.house_rules.is_empty());
+    assert_eq!(
+        pipeline.forget_rule(rule.id).unwrap_err().code,
+        "RULE_NOT_FOUND"
+    );
+}
+
+/// A spelling Intern applied that the reviewer undoes is retracted; one the
+/// reviewer changes to a third form starts over from the document's word.
+#[test]
+fn respelling_interns_own_spelling_in_review_changes_the_rule_not_the_document() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let (pipeline, _) = learning_pipeline(
+        temp.path(),
+        &[
+            ("2024-04-12", "April 12, 2024"),
+            ("2024-05-03", "May 3, 2024"),
+            ("2024-06-07", "June 7, 2024"),
+        ],
+    );
+    let first = source(&inbox, "a.pdf");
+    let second = source(&inbox, "b.pdf");
+    let third = source(&inbox, "c.pdf");
+    let queued = pipeline
+        .enqueue_files(&[first, second, third])
+        .unwrap()
+        .into_iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    pipeline.run_until_idle().unwrap();
+    pipeline
+        .approve(
+            queued[0],
+            "2024-04-12 Employment Agreement between John Smith and Acme.pdf",
+            "A sentence about the agreement.",
+        )
+        .unwrap();
+    let rule = pipeline.learned_rules().unwrap().remove(0);
+    pipeline.use_rule(rule.id).unwrap();
+    assert!(
+        record_of(&pipeline, queued[1])
+            .filename
+            .ends_with("and Acme.pdf")
+    );
+
+    // A third spelling: the rule now maps the document's word to it, and
+    // has to be earned again.
+    pipeline
+        .approve(
+            queued[1],
+            "2024-05-03 Employment Agreement between John Smith and Acme Corp.pdf",
+            "A sentence about the agreement.",
+        )
+        .unwrap();
+    let rules = pipeline.learned_rules().unwrap();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(
+        (rules[0].from.as_str(), rules[0].to.as_str()),
+        ("Acme Corporation", "Acme Corp")
+    );
+    assert_eq!((rules[0].seen, rules[0].active), (1, false));
+    assert!(
+        record_of(&pipeline, queued[2])
+            .filename
+            .ends_with("and Acme Corporation.pdf"),
+        "an unearned rule is not applied"
+    );
+
+    // The document's own word restored retracts the rule outright.
+    pipeline.use_rule(rules[0].id).unwrap();
+    assert!(
+        record_of(&pipeline, queued[2])
+            .filename
+            .ends_with("and Acme Corp.pdf")
+    );
+    pipeline
+        .approve(
+            queued[2],
+            "2024-06-07 Employment Agreement between John Smith and Acme Corporation.pdf",
+            "A sentence about the agreement.",
+        )
+        .unwrap();
+    assert!(pipeline.learned_rules().unwrap().is_empty());
+}

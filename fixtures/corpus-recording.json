@@ -1,0 +1,1521 @@
+{
+  "schema_version": 1,
+  "model_id": "intern-local",
+  "budget_characters": 12000,
+  "recorded_at_unix": 1788737589,
+  "note": "Qwen3.5-2B-Q4_K_M.gguf (manifest sha256 aaf42c8b), llama.cpp b10361 CPU build, 4 threads, 8192 context; worker built on Linux with pdfium chromium/7881 and tesseract 5.3.4 over the pinned tessdata_fast files",
+  "fixtures": [
+    {
+      "file": "employment-agreement.pdf",
+      "sha256": "0159c7f13f3630776b37f56edb4066da97d17f770d90ef4a6e33687a975ddd3d",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "EMPLOYMENT AGREEMENT\r\nEffective date: February 14, 2025\r\nEmployer: Northstar Lantern Works LLC\r\nEmployee: Mira Vale\r\nWork location: 18 Lantern Way, Fictional Harbor, WA 98000",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "dd26274f3c762e644ab1254778526761b6f2eb18e43322e30c317aaa3cac6ba9",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Employment Agreement",
+          "document_date": "2025-02-14",
+          "date_role": "effective",
+          "parties": [
+            "Northstar Lantern Works LLC",
+            "Mira Vale"
+          ],
+          "party_relation": "between",
+          "description": "An employment agreement between Northstar Lantern Works LLC and Mira Vale regarding work at 18 Lantern Way, Fictional Harbor, WA.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "Effective date: February 14, 2025",
+            "document_type": "Employment Agreement",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "scanned-lease.pdf",
+      "sha256": "00279cc6f51d27778190cd00f33bcef8f6595cf49172c5d3745c6d3717763821",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "LEASE AGREEMENT EFFECTIWE SEPTEMBER 1 24h24 PROPERTY 4° JUNIPER LOOP LEDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC",
+              "origin": "ocr",
+              "ocr_confidence": 80
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "d62016de202d5488f2134627b97604091c4b389b01b32fdd428de85c4088ad39",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Lease Agreement",
+          "document_date": "2024-09-01",
+          "date_role": "effective",
+          "parties": [
+            "LENDAR FINCH PROPERTIES LLC",
+            "ORION GLASS STUDIO INC"
+          ],
+          "party_relation": "between",
+          "description": "A lease agreement effective September 1, 2024, between Finch Properties LLC and Orion Glass Studio Inc.",
+          "confidence": 0.9,
+          "needs_review": false,
+          "evidence": {
+            "date": "LEASE AGREEMENT EFFECTIVE SEPTEMBER 1 24h24 PROPERTY 4° JUNIPER LOOP LEDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC",
+            "document_type": "LEASE AGREEMENT EFFECTIVE SEPTEMBER 1 24h24 PROPERTY 4° JUNIPER LOOP LEDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "mixed-signature.pdf",
+      "sha256": "26c140134a8496f5baba2a629b72444124f9dcbcefd566c704ee0dca14f760f0",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "SERVICES AGREEMENT\r\nDated January 8, 2025\r\nLumen Kite Cooperative and Solstice Index LLC\r\nProject: Aurora Catalog Project",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 2,
+              "text": "SIGHATURE PAGE LUMEN KITE COOPERATIVE SOLSTICE INDEs LLC JANUARY & 2e25",
+              "origin": "ocr",
+              "ocr_confidence": 62
+            }
+          ],
+          "parser_warnings": [
+            {
+              "code": "LOW_OCR_CONFIDENCE",
+              "field_affecting": true
+            }
+          ],
+          "page_image": {
+            "page_number": 2,
+            "media_type": "image/png",
+            "bytes": []
+          }
+        }
+      },
+      "prompt_sha256": "1d174f7c8fe6a50fa0f98ab42fb43f1cb84b508b75620d4134bfc4354d05f8b4",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Services Agreement",
+          "document_date": "2025-01-08",
+          "date_role": "effective",
+          "parties": [
+            "Lumen Kite Cooperative",
+            "Solstice Index LLC"
+          ],
+          "party_relation": "between",
+          "description": "Services Agreement dated January 8, 2025, between Lumen Kite Cooperative and Solstice Index LLC for the Aurora Catalog Project.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "Dated January 8, 2025",
+            "document_type": "Services Agreement",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "nda.docx",
+      "sha256": "a531fd8df1f303d6d6faabbb35931d748f58b4a887e46515b50f6a40574a3569",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "# Mutual Non-Disclosure Agreement\n\nEffective March 3, 2025 between Fable Harbor Labs LLC and Copper Wren Design Inc.\n\nConfidential purpose: Project Marigold.[^1]\n\n|  |  |\n| --- | --- |\n| Disclosing party | Either party |\n\n[^1]: No real confidential information is included.\n",
+              "origin": "office",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "aed28ddfa744c175c2d591958951d2c51f7b24d4d142cc7d2a572da1bf5425b2",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Mutual Non-Disclosure Agreement",
+          "document_date": "2025-03-03",
+          "date_role": "effective",
+          "parties": [
+            "Fable Harbor Labs LLC",
+            "Copper Wren Design Inc."
+          ],
+          "party_relation": "between",
+          "description": "A Mutual Non-Disclosure Agreement effective March 3, 2025 between Fable Harbor Labs LLC and Copper Wren Design Inc. for Project Marigold.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "Effective March 3, 2025",
+            "document_type": "Mutual Non-Disclosure Agreement",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "multi-date-invoice.pdf",
+      "sha256": "7fcf505d8caee6801e6c307a4c807144b5f62e05c22bc878ea6fdcced935530a",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "INVOICE INV-2048\r\nInvoice date: April 30, 2025\r\nDue date: May 30, 2025\r\nNimbus Orchard Supply Co.\r\nBill to Atlas Threadworks LLC\r\nTotal: $1,248.00",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "1577574d585305088d2ef08ef02af51ffe3feffcfb6f413368e1b756c7ad0c84",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Invoice",
+          "document_date": "2025-04-30",
+          "date_role": "invoice",
+          "parties": [
+            "Nimbus Orchard Supply Co.",
+            "Atlas Threadworks LLC"
+          ],
+          "party_relation": "between",
+          "description": "An invoice for $1,248.00 from Nimbus Orchard Supply Co. to Atlas Threadworks LLC.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "Invoice date: April 30, 2025",
+            "document_type": "Invoice INV-2048",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "meeting-minutes.md",
+      "sha256": "1537b6cfae1f0cf9ac537f0f1254f8bf009ad38d1e655350633d12928286a72f",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "# Quarterly Operations Review\n\n**Date:** May 7, 2025\n\nThe Fictional Meridian Committee reviewed inventory, safety, and the next quarterly plan.\n",
+              "origin": "plain_text",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "bbb4e787eebd6538f51e874d433fcdc01239c4807be943ad8338aacb108b1783",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Quarterly Operations Review",
+          "document_date": "2025-05-07",
+          "date_role": "effective",
+          "parties": [],
+          "party_relation": "none",
+          "description": "The Fictional Meridian Committee reviewed inventory, safety, and the next quarterly plan.",
+          "confidence": 0.9,
+          "needs_review": false,
+          "evidence": {
+            "date": "May 7, 2025",
+            "document_type": "Quarterly Operations Review",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "rotated-low-resolution-scan.png",
+      "sha256": "27ef06096a9b8ad47288fd7f05f073e21976c594a10cc6507fdbd89e4da50f4f",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "DELIVERY RECEIPT OR-?F71 JUNE 12 2a25 PINE ECHO COURTERS LLC VIOLET CARTOGRAPHY STUDIO",
+              "origin": "ocr",
+              "ocr_confidence": 78
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": {
+            "page_number": 1,
+            "media_type": "image/png",
+            "bytes": []
+          }
+        }
+      },
+      "prompt_sha256": "0e8c04d2f79cf5fca396bc7ea66b6cfba438227c9e2b02ea1efeb2c712c466fd",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Delivery Receipt",
+          "document_date": "2025-06-12",
+          "date_role": "issuance",
+          "parties": [
+            "Pine Echo Courters LLC",
+            "Violet Cartography Studio"
+          ],
+          "party_relation": "between",
+          "description": "A delivery receipt issued to Violet Cartography Studio by Pine Echo Courters LLC on June 12, 2025.",
+          "confidence": 0.9,
+          "needs_review": false,
+          "evidence": {
+            "date": "DELIVERY RECEIPT OR-?F71 JUNE 12 2a25",
+            "document_type": "DELIVERY RECEIPT OR-?F71 JUNE 12 2a25 PINE ECHO COURTERS LLC VIOLET CARTOGRAPHY STUDIO",
+            "parties": [
+              "Pine Echo Courters LLC",
+              "Violet Cartography Studio"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "file": "encrypted.pdf",
+      "sha256": "5268313932f5977e852bb93fcab20ed4d47a7f4bd8d3e78b18419d1cd9e5a621",
+      "extraction": {
+        "outcome": "failed",
+        "code": "PARSE_FAILED"
+      },
+      "prompt_sha256": null,
+      "reply": null
+    },
+    {
+      "file": "malformed.pdf",
+      "sha256": "4c031cd4d7870d6f18d9db38d80aaf5ce8b9b364b0a973b3baf5c73fc8dc9dc3",
+      "extraction": {
+        "outcome": "failed",
+        "code": "PARSE_FAILED"
+      },
+      "prompt_sha256": null,
+      "reply": null
+    },
+    {
+      "file": "long-document-100-pages.pdf",
+      "sha256": "def79bae674c0889a38722cb837f0e8f68f5d7214f099d95ba79209bb0f3a295",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 1\r\nJournal date: July 1, 2025\r\nFictional observation 001",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 2,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 2\r\nJournal date: July 1, 2025\r\nFictional observation 002",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 3,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 3\r\nJournal date: July 1, 2025\r\nFictional observation 003",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 4,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 4\r\nJournal date: July 1, 2025\r\nFictional observation 004",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 5,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 5\r\nJournal date: July 1, 2025\r\nFictional observation 005",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 6,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 6\r\nJournal date: July 1, 2025\r\nFictional observation 006",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 7,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 7\r\nJournal date: July 1, 2025\r\nFictional observation 007",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 8,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 8\r\nJournal date: July 1, 2025\r\nFictional observation 008",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 9,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 9\r\nJournal date: July 1, 2025\r\nFictional observation 009",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 10,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 10\r\nJournal date: July 1, 2025\r\nFictional observation 010",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 11,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 11\r\nJournal date: July 1, 2025\r\nFictional observation 011",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 12,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 12\r\nJournal date: July 1, 2025\r\nFictional observation 012",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 13,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 13\r\nJournal date: July 1, 2025\r\nFictional observation 013",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 14,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 14\r\nJournal date: July 1, 2025\r\nFictional observation 014",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 15,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 15\r\nJournal date: July 1, 2025\r\nFictional observation 015",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 16,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 16\r\nJournal date: July 1, 2025\r\nFictional observation 016",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 17,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 17\r\nJournal date: July 1, 2025\r\nFictional observation 017",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 18,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 18\r\nJournal date: July 1, 2025\r\nFictional observation 018",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 19,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 19\r\nJournal date: July 1, 2025\r\nFictional observation 019",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 20,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 20\r\nJournal date: July 1, 2025\r\nFictional observation 020",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 21,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 21\r\nJournal date: July 1, 2025\r\nFictional observation 021",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 22,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 22\r\nJournal date: July 1, 2025\r\nFictional observation 022",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 23,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 23\r\nJournal date: July 1, 2025\r\nFictional observation 023",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 24,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 24\r\nJournal date: July 1, 2025\r\nFictional observation 024",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 25,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 25\r\nJournal date: July 1, 2025\r\nFictional observation 025",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 26,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 26\r\nJournal date: July 1, 2025\r\nFictional observation 026",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 27,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 27\r\nJournal date: July 1, 2025\r\nFictional observation 027",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 28,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 28\r\nJournal date: July 1, 2025\r\nFictional observation 028",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 29,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 29\r\nJournal date: July 1, 2025\r\nFictional observation 029",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 30,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 30\r\nJournal date: July 1, 2025\r\nFictional observation 030",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 31,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 31\r\nJournal date: July 1, 2025\r\nFictional observation 031",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 32,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 32\r\nJournal date: July 1, 2025\r\nFictional observation 032",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 33,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 33\r\nJournal date: July 1, 2025\r\nFictional observation 033",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 34,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 34\r\nJournal date: July 1, 2025\r\nFictional observation 034",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 35,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 35\r\nJournal date: July 1, 2025\r\nFictional observation 035",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 36,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 36\r\nJournal date: July 1, 2025\r\nFictional observation 036",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 37,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 37\r\nJournal date: July 1, 2025\r\nFictional observation 037",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 38,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 38\r\nJournal date: July 1, 2025\r\nFictional observation 038",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 39,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 39\r\nJournal date: July 1, 2025\r\nFictional observation 039",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 40,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 40\r\nJournal date: July 1, 2025\r\nFictional observation 040",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 41,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 41\r\nJournal date: July 1, 2025\r\nFictional observation 041",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 42,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 42\r\nJournal date: July 1, 2025\r\nFictional observation 042",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 43,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 43\r\nJournal date: July 1, 2025\r\nFictional observation 043",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 44,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 44\r\nJournal date: July 1, 2025\r\nFictional observation 044",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 45,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 45\r\nJournal date: July 1, 2025\r\nFictional observation 045",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 46,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 46\r\nJournal date: July 1, 2025\r\nFictional observation 046",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 47,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 47\r\nJournal date: July 1, 2025\r\nFictional observation 047",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 48,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 48\r\nJournal date: July 1, 2025\r\nFictional observation 048",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 49,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 49\r\nJournal date: July 1, 2025\r\nFictional observation 049",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 50,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 50\r\nJournal date: July 1, 2025\r\nFictional observation 050",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 51,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 51\r\nJournal date: July 1, 2025\r\nFictional observation 051",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 52,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 52\r\nJournal date: July 1, 2025\r\nFictional observation 052",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 53,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 53\r\nJournal date: July 1, 2025\r\nFictional observation 053",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 54,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 54\r\nJournal date: July 1, 2025\r\nFictional observation 054",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 55,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 55\r\nJournal date: July 1, 2025\r\nFictional observation 055",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 56,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 56\r\nJournal date: July 1, 2025\r\nFictional observation 056",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 57,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 57\r\nJournal date: July 1, 2025\r\nFictional observation 057",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 58,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 58\r\nJournal date: July 1, 2025\r\nFictional observation 058",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 59,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 59\r\nJournal date: July 1, 2025\r\nFictional observation 059",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 60,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 60\r\nJournal date: July 1, 2025\r\nFictional observation 060",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 61,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 61\r\nJournal date: July 1, 2025\r\nFictional observation 061",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 62,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 62\r\nJournal date: July 1, 2025\r\nFictional observation 062",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 63,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 63\r\nJournal date: July 1, 2025\r\nFictional observation 063",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 64,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 64\r\nJournal date: July 1, 2025\r\nFictional observation 064",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 65,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 65\r\nJournal date: July 1, 2025\r\nFictional observation 065",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 66,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 66\r\nJournal date: July 1, 2025\r\nFictional observation 066",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 67,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 67\r\nJournal date: July 1, 2025\r\nFictional observation 067",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 68,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 68\r\nJournal date: July 1, 2025\r\nFictional observation 068",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 69,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 69\r\nJournal date: July 1, 2025\r\nFictional observation 069",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 70,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 70\r\nJournal date: July 1, 2025\r\nFictional observation 070",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 71,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 71\r\nJournal date: July 1, 2025\r\nFictional observation 071",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 72,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 72\r\nJournal date: July 1, 2025\r\nFictional observation 072",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 73,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 73\r\nJournal date: July 1, 2025\r\nFictional observation 073",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 74,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 74\r\nJournal date: July 1, 2025\r\nFictional observation 074",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 75,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 75\r\nJournal date: July 1, 2025\r\nFictional observation 075",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 76,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 76\r\nJournal date: July 1, 2025\r\nFictional observation 076",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 77,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 77\r\nJournal date: July 1, 2025\r\nFictional observation 077",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 78,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 78\r\nJournal date: July 1, 2025\r\nFictional observation 078",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 79,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 79\r\nJournal date: July 1, 2025\r\nFictional observation 079",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 80,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 80\r\nJournal date: July 1, 2025\r\nFictional observation 080",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 81,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 81\r\nJournal date: July 1, 2025\r\nFictional observation 081",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 82,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 82\r\nJournal date: July 1, 2025\r\nFictional observation 082",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 83,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 83\r\nJournal date: July 1, 2025\r\nFictional observation 083",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 84,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 84\r\nJournal date: July 1, 2025\r\nFictional observation 084",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 85,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 85\r\nJournal date: July 1, 2025\r\nFictional observation 085",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 86,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 86\r\nJournal date: July 1, 2025\r\nFictional observation 086",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 87,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 87\r\nJournal date: July 1, 2025\r\nFictional observation 087",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 88,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 88\r\nJournal date: July 1, 2025\r\nFictional observation 088",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 89,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 89\r\nJournal date: July 1, 2025\r\nFictional observation 089",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 90,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 90\r\nJournal date: July 1, 2025\r\nFictional observation 090",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 91,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 91\r\nJournal date: July 1, 2025\r\nFictional observation 091",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 92,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 92\r\nJournal date: July 1, 2025\r\nFictional observation 092",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 93,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 93\r\nJournal date: July 1, 2025\r\nFictional observation 093",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 94,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 94\r\nJournal date: July 1, 2025\r\nFictional observation 094",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 95,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 95\r\nJournal date: July 1, 2025\r\nFictional observation 095",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 96,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 96\r\nJournal date: July 1, 2025\r\nFictional observation 096",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 97,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 97\r\nJournal date: July 1, 2025\r\nFictional observation 097",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 98,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 98\r\nJournal date: July 1, 2025\r\nFictional observation 098",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 99,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 99\r\nJournal date: July 1, 2025\r\nFictional observation 099",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 100,
+              "text": "MOONLIT ARCHIVE PROJECT JOURNAL - PAGE 100\r\nJournal date: July 1, 2025\r\nFictional observation 100",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "5e0971e455d85c1b5de1612c90514eaf35c362c7f3ca3bbff3fd50dc793e4add",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Journal",
+          "document_date": "2025-07-01",
+          "date_role": "issuance",
+          "parties": [],
+          "party_relation": "none",
+          "description": "A fictional observation journal dated July 1, 2025.",
+          "confidence": 0.5,
+          "needs_review": true,
+          "evidence": {
+            "date": "July 1, 2025",
+            "document_type": "Journal date: July 1, 2025",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "document-image.png",
+      "sha256": "3581da8a5018524713b74353a7866b413fc177e8c36b1302ea67c2880e07b900",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "PURCHASE ORDER FPO-Sie DATE JULY 14 2625 EMBER POST MANUFACTURING LLC",
+              "origin": "ocr",
+              "ocr_confidence": 75
+            }
+          ],
+          "parser_warnings": [
+            {
+              "code": "LOW_OCR_CONFIDENCE",
+              "field_affecting": true
+            }
+          ],
+          "page_image": {
+            "page_number": 1,
+            "media_type": "image/png",
+            "bytes": []
+          }
+        }
+      },
+      "prompt_sha256": "7d718abe0ec8bc2cc6890ebd2292d0b1ad8d925bdb0104019eb750fc63acd968",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Purchase Order",
+          "document_date": "2025-07-14",
+          "date_role": "issuance",
+          "parties": [
+            "FPO-Sie",
+            "Postman Manufacturing LLC"
+          ],
+          "party_relation": "none",
+          "description": "A purchase order dated July 14, 2025, issued to FPO-Sie by Postman Manufacturing LLC.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "DATE JULY 14 2625",
+            "document_type": "PURCHASE ORDER",
+            "parties": [
+              "PURCHASE ORDER FPO-Sie DATE JULY 14 2625 EMBER POST MANUFACTURING LLC"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "file": "document-image.jpg",
+      "sha256": "72fb556d97f4496ba416fc4659d5d2ec3134addb3626dcbcb1b029b51c3b1a59",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "PACKING SLIP PS-311 DATE JULY 15 2025 QUARTZ MEADOW RETAIL LLC",
+              "origin": "ocr",
+              "ocr_confidence": 95
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": {
+            "page_number": 1,
+            "media_type": "image/png",
+            "bytes": []
+          }
+        }
+      },
+      "prompt_sha256": "590192b6e15e4bc69aa28afb46902c913efe2311c9058f88229296f05a093854",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Invoice",
+          "document_date": "2025-07-15",
+          "date_role": "invoice",
+          "parties": [
+            "Quartz Meadow Retail LLC"
+          ],
+          "party_relation": "from",
+          "description": "A packing slip for Quartz Meadow Retail LLC dated July 15, 2025.",
+          "confidence": 0.9,
+          "needs_review": false,
+          "evidence": {
+            "date": "DATE JULY 15 2025",
+            "document_type": "PACKING SLIP PS-311",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "document-image.tiff",
+      "sha256": "0d092e8da079b04807700b8881b5ae120b3a13294012b46d91f8c80b9b30d53b",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "WORK ORDER WO-312 DATE JULY 16 26275 HARBOR COMET REPAIRS LLC",
+              "origin": "ocr",
+              "ocr_confidence": 79
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": {
+            "page_number": 1,
+            "media_type": "image/png",
+            "bytes": []
+          }
+        }
+      },
+      "prompt_sha256": "c66d61d2a9017e7d81677072929158880daa8fb07fc55581cd75fb125535bc2e",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Work Order",
+          "document_date": "2026-07-16",
+          "date_role": "issuance",
+          "parties": [
+            "HARBOR COMET REPAIRS LLC"
+          ],
+          "party_relation": "none",
+          "description": "A work order dated July 16, 2026 for Harbor Comet Repairs LLC,",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "DATE JULY 16 26275",
+            "document_type": "WORK ORDER WO-312",
+            "parties": [
+              "WORK ORDER WO-312 DATE JULY 16 26275 HARBOR COMET REPAIRS LLC"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "file": "statement-of-work.pdf",
+      "sha256": "109f3ab85ab020e706502a1cef4eb2d861bb1c956886b544d3d2812c0d6d75cb",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "STATEMENT OF WORK NO. 4\r\nIssued under the Master Services Agreement dated June 2, 2023\r\nThis Statement of Work (\"SOW\") is entered into by and between Ridgeline\r\nCartography LLC, a Delaware limited liability company (\"Provider\"), and\r\nVistage Worldwide, Inc., a California corporation (\"Client\").\r\nCapitalized terms used but not defined in this SOW have the meanings\r\ngiven to them in the Master Services Agreement dated June 2, 2023\r\nbetween the same parties.\r\nProvider engagement director: Dana Ruiz\r\nClient program sponsor: Priya Nandakumar, Director of Revenue Operations\r\nProvider billing contact: accounts@ridgeline-cartography.example\r\nReference: SOW-2026-004\r\n1. Purpose.\r\nProvider will implement and configure the Client customer relationship\r\nmanagement platform, migrate historical records from the legacy system,\r\nand deliver enablement training to the Client revenue operations team.\r\n2. Deliverables.\r\nProvider will deliver a solution design document, a configured\r\nproduction environment, a validated data migration of no fewer than four\r\nhundred thousand historical records, four enablement workshops, and\r\nthirty days of hypercare support after go-live.\r\n3. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n4. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n5. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n6. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 2,
+              "text": "7. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n8. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n9. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n10. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n11. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n12. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n13. Survival.\r\nThe provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n14. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n15. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n16. Headings.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 3,
+              "text": "Section headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n17. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n18. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n19. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n20. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n21. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n22. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n23. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n24. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n25. Assignment.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 4,
+              "text": "Neither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n26. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n27. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n28. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n29. Survival.\r\nThe provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n30. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n31. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n32. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n33. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n34. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 5,
+              "text": "and each party bears its own costs of that escalation process.\r\n35. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n36. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n37. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n38. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n39. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n40. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n41. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n42. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n43. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 6,
+              "text": "consequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n44. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n45. Survival.\r\nThe provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n46. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n47. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n48. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n49. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n50. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n51. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n52. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 7,
+              "text": "provisions continue in full force and effect.\r\n53. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n54. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n55. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n56. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n57. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n58. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n59. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n60. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n61. Survival.\r\nThe provisions of this Agreement that by their nature should survive",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 8,
+              "text": "termination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n62. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n63. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n64. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n65. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n66. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n67. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n4. TERM.\r\n4.1 Effective Date.\r\nThis Statement of Work is effective as of April 1, 2026 and continues\r\nthrough March 31, 2027 unless terminated earlier in accordance with\r\nSection 11 of the Master Services Agreement. The parties may extend the\r\nterm only by a written amendment signed by both of them.\r\n4.2 Milestones.\r\nSolution design is due May 15, 2026. Data migration validation is due\r\nAugust 31, 2026. Go-live is scheduled for October 1, 2026. Hypercare\r\nends thirty days after go-live.\r\n5. FEES.\r\nClient will pay Provider a fixed fee of $248,000 for the services\r\ndescribed in this Statement of Work, invoiced in four equal installments\r\non the first business day of each calendar quarter during the term.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 9,
+              "text": "Invoices are payable within thirty days of receipt.\r\n68. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n69. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n70. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n71. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n72. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n73. Survival.\r\nThe provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n74. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n75. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n76. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 10,
+              "text": "77. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n78. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n79. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n80. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n81. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n82. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n83. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n84. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n85. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 11,
+              "text": "attempted assignment is void.\r\n86. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n87. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n88. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n89. Survival.\r\nThe provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n90. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n91. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n92. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n93. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n94. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n95. Governing Law.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 12,
+              "text": "This Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n96. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n97. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n98. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n99. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n100. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n101. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n102. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n103. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 13,
+              "text": "104. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n105. Survival.\r\nThe provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n106. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n107. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n108. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n109. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n110. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n111. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n112. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 14,
+              "text": "IN WITNESS WHEREOF, the parties have executed this Statement of Work.\r\nExecuted on April 9, 2026.\r\nRIDGELINE CARTOGRAPHY LLC\r\nBy: /s/ Dana Ruiz\r\nName: Dana Ruiz\r\nTitle: Engagement Director\r\nVISTAGE WORLDWIDE, INC.\r\nBy: /s/ Priya Nandakumar\r\nName: Priya Nandakumar\r\nTitle: Director of Revenue Operations",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "2479bbed04b0809131b2be79788971bd865b5ef2b899c0f1a2258a85de78287b",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Statement of Work",
+          "document_date": "2023-06-02",
+          "date_role": "effective",
+          "parties": [
+            "Ridgeline Cartography LLC",
+            "Vistage Worldwide, Inc."
+          ],
+          "party_relation": "between",
+          "description": "A Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc. for a project effective June 2, 2023, through March 31, 2027, with a fixed fee of $248,000.",
+          "confidence": 0.99,
+          "needs_review": false,
+          "evidence": {
+            "date": "Issued under the Master Services Agreement dated June 2, 2023",
+            "document_type": "Statement of Work NO. 4",
+            "parties": [
+              "Ridgeline Cartography LLC, a Delaware limited liability company ("
+            ]
+          }
+        }
+      }
+    },
+    {
+      "file": "termination-notice.pdf",
+      "sha256": "5dcb19411217f8280a262f8fd587abf5a784e7bec5cce84fe433f8893b8cbebd",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "NOTICE OF TERMINATION\r\nDelivered by certified mail and electronic mail\r\nDate of this Notice: December 29, 2026\r\nTo: John Smith, 1420 Fielder Lane, Cedar Rapids, IA 52402\r\nFrom: Harriet Voss, Vice President of People Operations\r\n Northstar Lantern Works LLC, 88 Harbour Street, Cedar Rapids, IA 52401\r\ncc: Marcus Reyes, Esq., Reyes and Tolliver LLP, outside counsel to the Company\r\nRe: Termination of the Employment Agreement dated March 3, 2024\r\nThis letter constitutes formal notice under Section 9.2 of the\r\nEmployment Agreement between you and Northstar Lantern Works LLC dated\r\nMarch 3, 2024 (the \"Employment Agreement\") that the Company is\r\nterminating the Employment Agreement without cause.\r\nYour employment with the Company will end effective January 31, 2027\r\n(the \"Separation Date\"). You will remain on the payroll through the\r\nSeparation Date and will continue to receive your base salary and\r\nbenefits through that date.\r\nFinal expense reimbursements must be submitted no later than February\r\n14, 2027. Any severance election form must be returned to the Company by\r\nFebruary 28, 2027. Company property, including the laptop assigned to\r\nyou on May 12, 2025, must be returned on or before the Separation Date.\r\nSincerely,\r\n/s/ Harriet Voss\r\nHarriet Voss, Vice President of People Operations\r\nNorthstar Lantern Works LLC",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "d59de5bfe4b48f824470e893a7c0fc4e3583265ff0cf8e0e67ce931bbf3a1238",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Notice of Termination",
+          "document_date": "2026-12-29",
+          "date_role": "notice",
+          "parties": [
+            "John Smith",
+            "Northstar Lantern Works LLC"
+          ],
+          "party_relation": "to",
+          "description": "A notice of termination sent to John Smith from Northstar Lantern Works LLC, terminating an employment agreement effective January 31, 2027.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "Date of this Notice: December 29, 2026",
+            "document_type": "NOTICE OF TERMINATION",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "consulting-amendment.pdf",
+      "sha256": "ccdd230170b42b532efd95c85f59acc0dfd1500d996f30b7ff879559985cbd38",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "FIRST AMENDMENT TO CONSULTING AGREEMENT\r\nThis First Amendment to Consulting Agreement (this \"Amendment\") is dated\r\nas of September 14, 2025, and amends the Consulting Agreement dated\r\nJanuary 12, 2023 (the \"Consulting Agreement\") by and between Vistage\r\nWorldwide, Inc. (\"Company\") and Jane Ellery (\"Consultant\").\r\nRECITALS\r\nWHEREAS the parties entered into the Consulting Agreement dated January\r\n12, 2023; and WHEREAS the Consulting Agreement dated January 12, 2023\r\nprovides for amendment only in writing; and WHEREAS the parties wish to\r\namend the Consulting Agreement dated January 12, 2023 as set out below;\r\n1. Amendment to Fees.\r\nSection 4.1 of the Consulting Agreement dated January 12, 2023 is\r\ndeleted and replaced with the following: \"Company will pay Consultant a\r\nmonthly retainer of $9,500, payable in arrears within fifteen days after\r\nthe end of each calendar month.\"\r\n2. Amendment to Term.\r\nSection 2.1 of the Consulting Agreement dated January 12, 2023 is\r\namended to extend the term through December 31, 2026. All renewal\r\nnotices required by the Consulting Agreement dated January 12, 2023\r\nremain due sixty days before the end of the then-current term.\r\n3. No Other Changes.\r\nExcept as expressly amended by this Amendment, the Consulting Agreement\r\ndated January 12, 2023 remains in full force and effect, and all\r\nreferences in the Consulting Agreement dated January 12, 2023 to \"this\r\nAgreement\" mean the Consulting Agreement dated January 12, 2023 as\r\namended by this Amendment.\r\n4. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n5. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n6. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n7. Assignment.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 2,
+              "text": "Neither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n8. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n9. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\nIN WITNESS WHEREOF, the parties have executed this Amendment.\r\nVISTAGE WORLDWIDE, INC. By: /s/ R. Alvarado Title: General Counsel\r\nJANE ELLERY By: /s/ Jane Ellery",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "84b9376875db21d04546e6cce4b0dfc8c8c872988378fc20c63da3dd358b75c1",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "First Amendment to Consulting Agreement",
+          "document_date": "2025-09-14",
+          "date_role": "effective",
+          "parties": [
+            "Vistage Worldwide, Inc.",
+            "Jane Ellery"
+          ],
+          "party_relation": "between",
+          "description": "This First Amendment to Consulting Agreement is dated September 14, 2025, and amends the Consulting Agreement between Vistage Worldwide, Inc. and Jane Ellery regarding fees and term.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "as of September 14, 2025",
+            "document_type": "FIRST AMENDMENT TO CONSULTING AGREEMENT",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "vendor-invoice.pdf",
+      "sha256": "74f1c0ae99739e111a33f7c88aed5863d44e0b1204be073060c58ef3fe85c008",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "INVOICE\r\nAcme Corporation, 500 Foundry Road, Providence, RI 02903\r\nInvoice Number: INV-7741\r\nInvoice Date: January 5, 2026\r\nPayment Due Date: February 4, 2026\r\nPurchase Order: PO-2025-8834\r\nBill To: Vistage Worldwide, Inc., Accounts Payable\r\nRemit To: Acme Corporation, Account 4471-9920\r\nDescription Qty Rate Amount\r\nAnnual platform subscription, 2026 term 1 $42,000 $42,000\r\nOnboarding and configuration services 40 $210 $8,400\r\nPremium support uplift 1 $6,300 $6,300\r\nSubtotal: $56,700\r\nTax: $0.00\r\nTotal Due: $56,700\r\nLate payments accrue interest at 1.5% per month from the Payment Due Date.\r\nQuestions: billing@acme-corporation.example",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "d848f0db688650be19095acdd54d3f4ccb4c7c31920631593d7e97b493b4fc70",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Invoice",
+          "document_date": "2026-01-05",
+          "date_role": "invoice",
+          "parties": [
+            "Acme Corporation",
+            "Vistage Worldwide, Inc."
+          ],
+          "party_relation": "between",
+          "description": "An invoice for Acme Corporation's annual platform subscription and services totaling $56,700 due on February 4, 2026.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "January 5, 2026",
+            "document_type": "INVOICE",
+            "parties": [
+              "Acme Corporation, 500 Foundry Road, Providence, RI 02903",
+              "Vistage Worldwide, Inc., Accounts Payable"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "file": "settlement-agreement.pdf",
+      "sha256": "7ca0c389031f109411753ffaaf88292a3715df382a5eb29813f3cd96b28eea4d",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "SETTLEMENT AGREEMENT AND MUTUAL RELEASE\r\nThis Settlement Agreement and Mutual Release (this \"Agreement\") is made\r\neffective as of July 22, 2026, by and between Harborline Freight Systems\r\nLLC (\"Harborline\") and Quill and Vane Advisory Group, Inc. (\"Quill and\r\nVane\"), each a \"Party\" and together the \"Parties.\"\r\nRECITALS\r\nWHEREAS the Parties are involved in a dispute concerning invoices issued\r\nunder a logistics services agreement dated February 9, 2024; and WHEREAS\r\nthe Parties wish to resolve that dispute without admission of liability;\r\n1. Settlement Payment.\r\nHarborline will pay Quill and Vane the sum of $312,500 in full and final\r\nsettlement, payable in a single wire transfer no later than August 21,\r\n2026.\r\n2. Mutual Release.\r\nEffective upon receipt of the Settlement Payment, each Party releases\r\nthe other from all claims, demands, and causes of action arising out of\r\nor relating to the dispute described in the Recitals.\r\n3. No Admission.\r\nThis Agreement is a compromise of disputed claims and is not an\r\nadmission of liability or wrongdoing by any Party.\r\n4. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n5. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n6. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n7. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n8. Survival.",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 2,
+              "text": "The provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n9. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n10. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n11. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n12. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n13. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n14. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n15. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n16. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n17. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 3,
+              "text": "signatures delivered electronically have the same effect as original\r\nsignatures.\r\n18. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n19. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n20. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n21. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n22. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n23. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n24. Survival.\r\nThe provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n25. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable\r\nto its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n26. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 4,
+              "text": "to the purposes and intent of this Agreement.\r\n27. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n28. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n29. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n30. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n31. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n32. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n33. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n34. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n35. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 5,
+              "text": "subject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n36. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n37. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial\r\nexercise of any right precludes any other or further exercise of it.\r\n38. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n39. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n40. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n41. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n42. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\n43. Survival.\r\nThe provisions of this Agreement that by their nature should survive\r\ntermination, including confidentiality, limitation of liability, and\r\ngoverning law, survive any expiration or termination of this Agreement.\r\n44. Compliance with Law.\r\nEach party will comply with all laws, rules, and regulations applicable",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 6,
+              "text": "to its performance under this Agreement, including those governing data\r\nprotection, anti-corruption, export control, and workplace safety.\r\n45. Further Assurances.\r\nEach party will execute and deliver any further documents and take any\r\nfurther actions that the other party reasonably requests to give effect\r\nto the purposes and intent of this Agreement.\r\n46. Headings.\r\nSection headings in this Agreement are for convenience of reference\r\nonly, do not form part of it, and do not affect the interpretation of\r\nany provision of this Agreement.\r\n47. Third-Party Beneficiaries.\r\nThis Agreement is for the sole benefit of the parties and their\r\npermitted successors and assigns, and nothing in it confers any right or\r\nremedy on any other person or entity.\r\n48. Dispute Resolution.\r\nThe parties will attempt in good faith to resolve any dispute through\r\nescalation to their respective executives before commencing litigation,\r\nand each party bears its own costs of that escalation process.\r\n49. Governing Law.\r\nThis Agreement is governed by the laws of the State of Delaware without\r\nregard to any conflict of laws principles, and each party irrevocably\r\nsubmits to the exclusive jurisdiction of the state and federal courts\r\nlocated in that State for any proceeding arising out of it.\r\n50. Severability.\r\nIf any provision of this Agreement is held invalid or unenforceable by a\r\ncourt of competent jurisdiction, that provision is modified to the\r\nminimum extent necessary to make it enforceable, and the remaining\r\nprovisions continue in full force and effect.\r\n51. Entire Agreement.\r\nThis Agreement, together with its exhibits and any documents it\r\nincorporates by reference, is the entire agreement of the parties on its\r\nsubject matter and supersedes all prior and contemporaneous\r\nunderstandings, whether written or oral.\r\n52. Counterparts.\r\nThis Agreement may be executed in counterparts, each of which is deemed\r\nan original and all of which together constitute one instrument, and\r\nsignatures delivered electronically have the same effect as original\r\nsignatures.\r\n53. No Waiver.\r\nNo failure or delay by either party in exercising any right under this\r\nAgreement operates as a waiver of that right, and no single or partial",
+              "origin": "native",
+              "ocr_confidence": null
+            },
+            {
+              "page_number": 7,
+              "text": "exercise of any right precludes any other or further exercise of it.\r\n54. Force Majeure.\r\nNeither party is liable for any failure or delay in performance caused\r\nby circumstances beyond its reasonable control, including acts of God,\r\nlabor disputes, utility failures, and governmental action, provided it\r\ngives prompt written notice.\r\n55. Assignment.\r\nNeither party may assign this Agreement without the prior written\r\nconsent of the other party, except to a successor in connection with a\r\nmerger or a sale of substantially all of its assets, and any other\r\nattempted assignment is void.\r\n56. Independent Contractor Status.\r\nThe parties are independent contractors, and nothing in this Agreement\r\ncreates a partnership, joint venture, agency, or employment relationship\r\nbetween them or between either party and the personnel of the other.\r\n57. Limitation of Liability.\r\nNeither party is liable for indirect, incidental, special,\r\nconsequential, or punitive damages, and each party total aggregate\r\nliability is limited to the amounts paid or payable under this Agreement\r\nin the twelve months preceding the claim.\r\n58. Notices.\r\nAll notices under this Agreement must be in writing and are effective\r\nwhen delivered by hand, by nationally recognized overnight courier, or\r\nby certified mail, return receipt requested, to the addresses set out in\r\nthe signature block.\r\nIN WITNESS WHEREOF, the Parties have executed this Agreement.\r\nHARBORLINE FREIGHT SYSTEMS LLC By: /s/ T. Okafor\r\nQUILL AND VANE ADVISORY GROUP, INC. By: /s/ L. Bergstrom",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "7566c98176120d7076904c8c44ed2afc51d67686c9ecf810c1ad9a6f230ff25b",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Settlement Agreement",
+          "document_date": "2026-07-22",
+          "date_role": "effective",
+          "parties": [
+            "Harborline Freight Systems LLC",
+            "Quill and Vane Advisory Group, Inc."
+          ],
+          "party_relation": "between",
+          "description": "Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc. settle a dispute over invoices under a logistics services agreement for $312,500.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "effective as of July 22, 2026",
+            "document_type": "SETTLEMENT AGREEMENT AND MUTUAL RELEASE",
+            "parties": [
+              "Harborline Freight Systems LLC",
+              "Quill and Vane Advisory Group, Inc."
+            ]
+          }
+        }
+      }
+    },
+    {
+      "file": "ambiguous-note.pdf",
+      "sha256": "9d183b1a151b190f44c3b1ae7e45a7af9d30448a8fef601448221419229698f9",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "Notes\r\nTalked with Rowan and Priya about the thing from last week. Still open.\r\nRowan thinks we should wait until after the offsite. Priya disagrees.\r\nSomeone should check whether Ridgeline already sent theirs.\r\nNumbers looked closer to 40 than 60 but nobody wrote them down.\r\nFollow up: ask Dana.",
+              "origin": "native",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "22cb317bd516a11768d95b7e56f087fed3a30441b6ba5afd12adf36da3dd65d3",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Notice of Termination",
+          "document_date": null,
+          "date_role": null,
+          "parties": [],
+          "party_relation": "none",
+          "description": "A document discussing a pending matter with Rowan and Priya regarding an offsite.",
+          "confidence": 0.5,
+          "needs_review": true,
+          "evidence": {
+            "date": "Talked with Rowan and Priya about the thing from last week.",
+            "document_type": "Notes",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "order-form.docx",
+      "sha256": "47cae15c715415f045b992916febd27ab0a6c3452fe8695f329458d9ae94303c",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "# Order Form\n\nThis Order Form is entered into by and between Tessellate Analytics Ltd. and Vistage Worldwide, Inc. under the Master Subscription Agreement dated August 8, 2022.\n\n| Subscription Start Date | February 1, 2026 |\n| --- | --- |\n| Subscription End Date | January 31, 2028 |\n| Annual Fee | $96,000 |\n| Invoice Due | Net 45 from invoice date |\n\nSigned on January 14, 2026 by authorized representatives of both parties.\n",
+              "origin": "office",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "33742d0d6b51c5caa308c905ce9c5342f90798331889e7620334f792e305fae5",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Order Form",
+          "document_date": "2026-02-01",
+          "date_role": "issuance",
+          "parties": [
+            "Tessellate Analytics Ltd.",
+            "Vistage Worldwide, Inc."
+          ],
+          "party_relation": "between",
+          "description": "An Order Form signed by authorized representatives of both parties under the Master Subscription Agreement, specifying an annual fee of $96,000 and subscription dates from February 1, 2026 to January 31, 2028.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "February 1, 2026",
+            "document_type": "Order Form",
+            "parties": []
+          }
+        }
+      }
+    }
+  ]
+}

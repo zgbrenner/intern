@@ -353,3 +353,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, tr:focus-visi
   .inspector { width: min(370px, calc(100vw - 64px)); }
   .product strong { font-size: 24px; }
 }
+
+/* Spellings Intern has learned: one row per rule, the change in the middle, its state and actions at the end. */
+.learned-rules { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; }
+.learned-rules li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-subtle); font-size: 13px; }
+.learned-rules q, .house-style-hint q { font-style: normal; }
+.rule-kind { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-soft); }
+.rule-state { font-size: 12px; color: var(--text-soft); white-space: nowrap; }
+.rule-actions { display: flex; gap: 6px; }
+.rule-actions button { min-height: 30px; padding: 0 10px; }
+@media (max-width: 640px) { .learned-rules li { grid-template-columns: auto 1fr; } .rule-state, .rule-actions { grid-column: 2; } }

@@ -1,4 +1,4 @@
-import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, LearnedRule, QueueItem, SetupState } from '../types';
 
 /** A JSON-safe local document reference that Task 6 can pass to Tauri. */
 export interface FileSelection {
@@ -143,6 +143,16 @@ export interface DesktopBridge {
    * third party Intern makes, and it carries no document of the user's.
    */
   hostedModelTest(settings: AppSettings): Promise<HostedModelTestResult>;
+  /**
+   * The spellings review has taught Intern, newest first: a party or a
+   * document type respelled in review, remembered, and applied on its own
+   * once the same change has been made twice.
+   */
+  houseRulesList(): Promise<LearnedRule[]>;
+  /** Stop applying a learned spelling. Documents still waiting go back to the document's own words. */
+  houseRuleForget(id: string): Promise<void>;
+  /** Apply a learned spelling from now on without waiting for a second edit. */
+  houseRuleUse(id: string): Promise<void>;
 }
 
 /**

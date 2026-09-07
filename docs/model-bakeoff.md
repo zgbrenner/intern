@@ -131,6 +131,66 @@ date on both. The new one takes the effective date buried on page five of a
 29,000-character contract, and the subscription start date from a table rather
 than the "Signed on" line beside it.
 
+## Replayed against the recorded corpus
+
+Everything above was scored live, on the machine named at the top, and could
+not be re-scored without it. Since then the corpus has a committed recording
+(`fixtures/corpus-recording.json`: what the worker read from every fixture and
+what the model replied, keyed by the hash of the prompt) and a baseline
+(`fixtures/corpus-baseline.json`) that CI replays on every push -
+[`evaluation.md`](evaluation.md) explains the mechanism. The recording was made
+with the pinned Qwen3.5-2B Q4_K_M model and llama.cpp `b10361` built from
+source, CPU only, 4 threads, 8,192-token context, on a Linux machine with the
+parser worker built against PDFium `chromium/7881` and the pinned
+`tessdata_fast` files under the distribution's Tesseract 5.3.4 rather than the
+installer's vcpkg 5.5.2; the recording's `note` field says so. The engine as it
+stands scores that recording as follows.
+
+| | Text documents (12) | Scanned (6) | Whole corpus |
+| --- | ---: | ---: | ---: |
+| Date correct | 11/11 | 2/6 | 13/17 |
+| Filed under a corpus-marked trap date | **0** | 0 | **0** |
+| Date *role* correct | **11/11** | 2/2 | **13/13** |
+| Document type | **11/11** | 6/6 | **17/17** |
+| Parties | 11/12 | 3/6 | 14/18 |
+| Named a party the corpus marks as not defining | 0/12 | 0/6 | 0/18 |
+| Description covers the listed facts | 9/11 | 6/6 | 15/17 |
+| Agreed with the corpus on review-or-name | 10/12 | 6/6 | 16/18 |
+| Review rate | 25% | 100% | 50% |
+
+Live inference on that machine took a median of 12.7 seconds per document
+(7.4 to 35.9), which is the recording's only number that replay cannot
+reproduce.
+
+The first replay of the recording scored four fixtures lower than this, and
+the difference is the point of having one: each was a defect in the
+deterministic stages after the model, found in seconds and fixed against the
+model's real replies rather than a guess at them.
+
+* The statement of work lost its second party. The model read it correctly
+  as `between` Ridgeline and Vistage; the invoice repair matched the word
+  "statement" in its type, found Vistage on a line with "Client", and dropped
+  it as a customer. An account statement is an issued document; a statement
+  of work is an agreement, and the type list now says so.
+* The vendor invoice kept both parties and `between`. It has a "Bill To" line
+  naming the customer *and* a "Remit To" line naming itself, and the repair
+  wanted exactly one cue. Cues that agree on the issuer now settle it; cues
+  that contradict each other still leave the model's answer alone.
+* The amendment's date role came back `effective`. The PDF wraps "is dated"
+  and "as of September 14, 2025" onto different lines, and the role was read
+  from the second line alone. Wrapped sentences are now rejoined before the
+  wording is read - only where the previous line did not end a sentence or a
+  label and the next carries one on, so a header's "To:" and "From:" lines,
+  and a "Date of this Notice:" line, keep their own cues.
+* The 100-page journal was typed `Journal` under a heading that reads
+  "MOONLIT ARCHIVE PROJECT JOURNAL". A supported type the title completes is
+  now completed from the title, whole - never with an exhibit label, a party's
+  name, or the "No" a stripped number leaves behind.
+
+Text-document date role went from the 6/13 reported above to 11/11, and
+document type from 13/17 to 17/17, on the same model. What remains is listed
+under known misses.
+
 ## Performance
 
 Measured over the same runs, per document, including extraction:
@@ -218,7 +278,26 @@ near the budget.
 ## Known misses
 
 Reported rather than tuned away, because twelve documents is a small corpus and
-fitting a prompt to it is not the same as being right:
+fitting a prompt to it is not the same as being right. What the recorded
+corpus still misses, as of the baseline above:
+
+* The termination notice names its sender, Northstar Lantern Works LLC, as a
+  second party beside John Smith. The filename is right - a notice takes one
+  name - but the corpus counts the sender as spurious, and the description
+  record carries it.
+* The short invoice's description is "An invoice for $1,248." The prompt
+  forbids exactly that sentence and the model wrote it anyway; validation
+  sends the document to review for it, which the corpus does not expect.
+* The 100-page journal is typed, dated, and named correctly, and goes to
+  review because the model reports low confidence and asks for it.
+* The meeting minutes are described without the word "minutes", which the
+  corpus lists as a required fact; the document itself never uses the word.
+* The scanned fixtures read digits badly enough (`24h24`, `2625`) that four
+  of six cannot be dated from their own text, exactly as the corpus expects
+  of them; see the paragraph on OCR fidelity below.
+
+The bullets that follow predate the recording and are kept as the history of
+how the numbers above were reached:
 
 * Two documents (`meeting-minutes.md`, a 100-page project journal) get no
   document type at all and are named `<date> Document.<ext>`. Both are the

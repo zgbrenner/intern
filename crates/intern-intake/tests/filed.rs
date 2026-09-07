@@ -1,6 +1,6 @@
 mod common;
 
-use std::fs;
+use std::{fs, time::UNIX_EPOCH};
 
 use common::{MockClock, identity, real_now};
 use intern_intake::{
@@ -246,7 +246,17 @@ fn prune_keeps_markers_for_a_year_and_clears_conflict_copies_after_a_day() {
         "a fresh conflict copy gets a day of grace"
     );
 
-    clock.advance(24 * 3600 + 1);
+    // The copy's age is measured from its own wall-clock mtime, and setup on
+    // a slow runner can take longer than the second `now` was truncated to,
+    // so the day is counted from the copy's timestamp rather than from `now`.
+    let copied_at = fs::metadata(&conflict)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    clock.advance((copied_at - now).max(0) + 24 * 3600 + 1);
     store.prune();
     assert!(
         !conflict.exists(),

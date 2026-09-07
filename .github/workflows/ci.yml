@@ -31,6 +31,47 @@ jobs:
       - run: npx playwright install chromium
       - run: npm run test:e2e
 
+  # The corpus, scored from the committed recording of what the worker read
+  # and what the model replied: no runtime, no model, seconds. A change to
+  # validation, evidence, distillation, or naming is measured here on every
+  # push; a change to the prompt makes the recording stale, and the job says
+  # so rather than scoring the wrong replies. See docs/evaluation.md.
+  corpus-replay:
+    name: Corpus replay against the recorded baseline (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup default 1.88.0
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-replay-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      - run: npm ci
+      - run: npm run fixtures
+      - name: Replay the corpus and compare with the baseline
+        run: >-
+          cargo run --locked -p intern-engine --bin intern-evaluate --
+          --fixtures fixtures/generated --expected fixtures/expected.json
+          --replay fixtures/corpus-recording.json --baseline fixtures/corpus-baseline.json
+          --output corpus-report.json
+      - name: Upload corpus report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: corpus-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: corpus-report.json
+          if-no-files-found: ignore
+
   windows-release-gates:
     name: Windows Rust, assets, E2E, and NSIS
     runs-on: windows-latest

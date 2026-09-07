@@ -24,6 +24,11 @@ export interface QueueItem {
   datesInDocument?: string[];
   /** The file's own last-modified date, a labelled last resort when the document states none. */
   fileModifiedDate?: string;
+  /**
+   * The reviewer's own spellings applied to this name. The evidence still
+   * shows the document's words; these say how the name differs from them.
+   */
+  houseRules?: HouseRule[];
 }
 
 /**
@@ -183,4 +188,27 @@ export interface SetupState {
   error?: string;
   /** A hosted model is chosen and configured, so documents can be processed without the local one. */
   hostedModelReady?: boolean;
+}
+
+/** Which part of a name a learned spelling rewrites. */
+export type RuleKind = 'party' | 'document_type';
+
+/** A spelling the reviewer prefers over the document's own, learned from edits made in review. */
+export interface HouseRule {
+  kind: RuleKind;
+  /** As the document writes it. */
+  from: string;
+  /** As the reviewer wrote it. */
+  to: string;
+}
+
+/** A learned spelling and how settled it is. */
+export interface LearnedRule extends HouseRule {
+  id: string;
+  /** How many times a reviewer has made exactly this change. */
+  seen: number;
+  /** Whether Intern applies it: made twice, or told to use it now. */
+  active: boolean;
+  /** Unix seconds of the latest edit that taught it. */
+  learnedAt: number;
 }
