@@ -22,7 +22,7 @@ fn a_filed_document_leaves_a_marker_that_any_machine_can_read_back() {
     let source = intake.path().join("scans").join("scan0012.pdf");
 
     let path = front_desk
-        .record(HASH, &source, FILED_NAME, 1_757_000_000)
+        .record(HASH, &source, FILED_NAME, 1_757_000_000, None)
         .unwrap();
 
     assert_eq!(
@@ -78,10 +78,22 @@ fn refiling_the_same_content_replaces_the_marker_whoever_wrote_it() {
     let front_desk = index(&intake, identity("aaa", "Front desk"));
     let laptop = index(&intake, identity("bbb", "Laptop"));
     let first = front_desk
-        .record(HASH, &intake.path().join("a.pdf"), "First name.pdf", 1)
+        .record(
+            HASH,
+            &intake.path().join("a.pdf"),
+            "First name.pdf",
+            1,
+            None,
+        )
         .unwrap();
     let second = laptop
-        .record(HASH, &intake.path().join("b.pdf"), "Second name.pdf", 2)
+        .record(
+            HASH,
+            &intake.path().join("b.pdf"),
+            "Second name.pdf",
+            2,
+            None,
+        )
         .unwrap();
     assert_eq!(first, second, "one content hash, one marker");
     let marker = front_desk.lookup(HASH).unwrap();
@@ -96,7 +108,7 @@ fn a_marker_is_retracted_only_by_the_machine_that_wrote_it() {
     let front_desk = index(&intake, identity("aaa", "Front desk"));
     let laptop = index(&intake, identity("bbb", "Laptop"));
     let path = front_desk
-        .record(HASH, &intake.path().join("scan.pdf"), FILED_NAME, 1)
+        .record(HASH, &intake.path().join("scan.pdf"), FILED_NAME, 1, None)
         .unwrap();
 
     assert!(
@@ -127,7 +139,13 @@ fn documents_from_outside_the_intake_folder_and_bad_hashes_are_refused() {
     );
 
     let outside = front_desk
-        .record(HASH, &elsewhere.path().join("scan.pdf"), FILED_NAME, 1)
+        .record(
+            HASH,
+            &elsewhere.path().join("scan.pdf"),
+            FILED_NAME,
+            1,
+            None,
+        )
         .unwrap_err();
     assert_eq!(outside.kind(), std::io::ErrorKind::InvalidInput);
 
@@ -139,7 +157,7 @@ fn documents_from_outside_the_intake_folder_and_bad_hashes_are_refused() {
         "sha256:abcdef",
     ] {
         let error = front_desk
-            .record(bad, &intake.path().join("scan.pdf"), FILED_NAME, 1)
+            .record(bad, &intake.path().join("scan.pdf"), FILED_NAME, 1, None)
             .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{bad:?}");
         assert_eq!(front_desk.lookup(bad), None);
@@ -167,6 +185,7 @@ fn a_marker_under_the_wrong_name_or_a_future_version_reads_as_nothing() {
         machine_name: "Front desk".to_string(),
         user_name: "tester".to_string(),
         filed_at: 1,
+        text_fingerprint: None,
     };
     // A sync conflict copy: valid JSON that names a different hash.
     fs::write(
@@ -222,6 +241,7 @@ fn prune_keeps_markers_for_a_year_and_clears_conflict_copies_after_a_day() {
             &intake.path().join("old.pdf"),
             "Old.pdf",
             now - FILED_RETENTION_SECONDS,
+            None,
         )
         .unwrap();
     let recent = front_desk
@@ -230,6 +250,7 @@ fn prune_keeps_markers_for_a_year_and_clears_conflict_copies_after_a_day() {
             &intake.path().join("recent.pdf"),
             "Recent.pdf",
             now - FILED_RETENTION_SECONDS + 7 * 24 * 3600,
+            None,
         )
         .unwrap();
     // A conflict copy: this machine's own marker under the sync client's name.

@@ -363,3 +363,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, tr:focus-visi
 .rule-actions { display: flex; gap: 6px; }
 .rule-actions button { min-height: 30px; padding: 0 10px; }
 @media (max-width: 640px) { .learned-rules li { grid-template-columns: auto 1fr; } .rule-state, .rule-actions { grid-column: 2; } }
+
+/* The filing a near-duplicate repeats, under the reason for review. */
+.near-duplicate { margin: 8px 0 0; font-size: 13px; }
+.near-duplicate q { font-style: normal; font-weight: 600; }

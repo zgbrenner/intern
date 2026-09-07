@@ -6,7 +6,7 @@ whole generated corpus. Nothing is extrapolated from published benchmarks.
 **Machine:** AMD Ryzen 7 PRO 8840U, 8 cores / 16 threads, 14.7 GB usable RAM, no
 discrete GPU, Windows 11, ordinary background applications running.
 **Runtime:** llama.cpp `b10361`, CPU only, 8 threads, 8,192-token context.
-**Corpus:** `fixtures/generated`, 20 fixtures. Twelve are text-bearing documents
+**Corpus:** `fixtures/generated`, 21 fixtures. Thirteen are text-bearing documents
 that reach the model; two are intentionally unreadable (encrypted, malformed);
 six require OCR and were not scored on this machine, which has PDFium but no
 Tesseract build.
@@ -143,23 +143,25 @@ with the pinned Qwen3.5-2B Q4_K_M model and llama.cpp `b10361` built from
 source, CPU only, 4 threads, 8,192-token context, on a Linux machine with the
 parser worker built against PDFium `chromium/7881` and the pinned
 `tessdata_fast` files under the distribution's Tesseract 5.3.4 rather than the
-installer's vcpkg 5.5.2; the recording's `note` field says so. The engine as it
-stands scores that recording as follows.
+installer's vcpkg 5.5.2; the recording's `note` field says so. The corpus gained a
+three-slide PowerPoint deck in round six and was re-recorded; every other
+fixture scored exactly as before. The engine as it stands scores that
+recording as follows.
 
-| | Text documents (12) | Scanned (6) | Whole corpus |
+| | Text documents (13) | Scanned (6) | Whole corpus |
 | --- | ---: | ---: | ---: |
-| Date correct | 11/11 | 2/6 | 13/17 |
+| Date correct | 12/12 | 2/6 | 14/18 |
 | Filed under a corpus-marked trap date | **0** | 0 | **0** |
-| Date *role* correct | **11/11** | 2/2 | **13/13** |
-| Document type | **11/11** | 6/6 | **17/17** |
-| Parties | 11/12 | 3/6 | 14/18 |
-| Named a party the corpus marks as not defining | 0/12 | 0/6 | 0/18 |
-| Description covers the listed facts | 9/11 | 6/6 | 15/17 |
-| Agreed with the corpus on review-or-name | 10/12 | 6/6 | 16/18 |
-| Review rate | 25% | 100% | 50% |
+| Date *role* correct | **11/12** | 2/2 | **13/14** |
+| Document type | **12/12** | 6/6 | **18/18** |
+| Parties | 12/13 | 3/6 | 15/19 |
+| Named a party the corpus marks as not defining | 0/13 | 0/6 | 0/19 |
+| Description covers the listed facts | 10/12 | 6/6 | 16/18 |
+| Agreed with the corpus on review-or-name | 11/13 | 6/6 | 17/19 |
+| Review rate | 23% | 100% | 47% |
 
-Live inference on that machine took a median of 12.7 seconds per document
-(7.4 to 35.9), which is the recording's only number that replay cannot
+Live inference on that machine took a median of 13.9 seconds per document
+(7.0 to 56.7), which is the recording's only number that replay cannot
 reproduce.
 
 The first replay of the recording scored four fixtures lower than this, and
@@ -277,7 +279,7 @@ near the budget.
 
 ## Known misses
 
-Reported rather than tuned away, because twelve documents is a small corpus and
+Reported rather than tuned away, because thirteen documents is a small corpus and
 fitting a prompt to it is not the same as being right. What the recorded
 corpus still misses, as of the baseline above:
 
@@ -295,6 +297,10 @@ corpus still misses, as of the baseline above:
 * The scanned fixtures read digits badly enough (`24h24`, `2625`) that four
   of six cannot be dated from their own text, exactly as the corpus expects
   of them; see the paragraph on OCR fidelity below.
+* The review deck (round six) is dated, typed, and named for both parties
+  correctly and goes straight to ready, but its date is labelled `notice`:
+  "Presented on May 21, 2026" carries no cue the role reader knows, so the
+  model's label stood. The corpus calls it `issuance`.
 
 The bullets that follow predate the recording and are kept as the history of
 how the numbers above were reached:

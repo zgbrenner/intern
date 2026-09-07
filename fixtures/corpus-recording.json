@@ -2,7 +2,7 @@
   "schema_version": 1,
   "model_id": "intern-local",
   "budget_characters": 12000,
-  "recorded_at_unix": 1788737589,
+  "recorded_at_unix": 1788749572,
   "note": "Qwen3.5-2B-Q4_K_M.gguf (manifest sha256 aaf42c8b), llama.cpp b10361 CPU build, 4 threads, 8192 context; worker built on Linux with pdfium chromium/7881 and tesseract 5.3.4 over the pinned tessdata_fast files",
   "fixtures": [
     {
@@ -1471,6 +1471,47 @@
           "evidence": {
             "date": "Talked with Rowan and Priya about the thing from last week.",
             "document_type": "Notes",
+            "parties": []
+          }
+        }
+      }
+    },
+    {
+      "file": "board-deck.pptx",
+      "sha256": "bb1949e38dee01bfb8250f96b1ae25bb1a09a9e0694e1e43f2b5be93a6c54070",
+      "extraction": {
+        "outcome": "parsed",
+        "source": {
+          "pages": [
+            {
+              "page_number": 1,
+              "text": "QUARTERLY BUSINESS REVIEW\n\nPrepared for Vistage Worldwide, Inc.\n\nPresented by Ridgeline Cartography LLC\n\nPresented on May 21, 2026\n\nAgenda\n\nMember map renewals across all chapters\n\nQ2 pipeline: 14 engagements, $412,000 in bookings\n\nRoadmap through December 31, 2027\n\nNext steps\n\nNext quarterly review: August 20, 2026\n\nContact: Dana Ruiz, Ridgeline Cartography LLC\n",
+              "origin": "office",
+              "ocr_confidence": null
+            }
+          ],
+          "parser_warnings": [],
+          "page_image": null
+        }
+      },
+      "prompt_sha256": "ef2079484f19c829826cd8e989a3eb36723c67aafa5265d123cebb8372d3fc92",
+      "reply": {
+        "outcome": "proposed",
+        "proposal": {
+          "document_type": "Quarterly Business Review",
+          "document_date": "2026-05-21",
+          "date_role": "notice",
+          "parties": [
+            "Vistage Worldwide, Inc.",
+            "Ridgeline Cartography LLC"
+          ],
+          "party_relation": "none",
+          "description": "A quarterly business review presented to Vistage Worldwide, Inc. by Ridgeline Cartography LLC outlining Q2 pipeline and a roadmap through December 2027.",
+          "confidence": 1.0,
+          "needs_review": false,
+          "evidence": {
+            "date": "Presented on May 21, 2026",
+            "document_type": "QUARTERLY BUSINESS REVIEW",
             "parties": []
           }
         }

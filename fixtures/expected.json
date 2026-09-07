@@ -450,6 +450,38 @@
       "expected_routing": "native_text"
     },
     {
+      "file": "board-deck.pptx",
+      "kind": "pptx",
+      "document_type": "Quarterly Business Review",
+      "acceptable_types": [
+        "Business Review"
+      ],
+      "document_date": "2026-05-21",
+      "acceptable_dates": [],
+      "forbidden_dates": [
+        "2026-08-20",
+        "2027-12-31"
+      ],
+      "date_role": "issuance",
+      "parties": [
+        "Ridgeline Cartography LLC",
+        "Vistage Worldwide, Inc."
+      ],
+      "forbidden_parties": [
+        "Dana Ruiz"
+      ],
+      "party_relation": "for",
+      "expected_readiness": "ready",
+      "ambiguity": [
+        "next_review_date",
+        "roadmap_end_date"
+      ],
+      "acceptable_description_facts": [
+        "review"
+      ],
+      "expected_routing": "anydoc"
+    },
+    {
       "file": "order-form.docx",
       "kind": "docx",
       "document_type": "Order Form",

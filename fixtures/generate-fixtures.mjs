@@ -39,6 +39,7 @@ const GOLD = {
     { file: 'vendor-invoice.pdf', kind: 'text_pdf', document_type: 'Invoice', acceptable_types: [], document_date: '2026-01-05', acceptable_dates: [], forbidden_dates: ['2026-02-04'], date_role: 'invoice', parties: ['Acme Corporation'], forbidden_parties: [], party_relation: 'from', expected_readiness: 'ready', ambiguity: ['invoice_and_due_dates'], acceptable_description_facts: ['invoice'], expected_routing: 'native_text' },
     { file: 'settlement-agreement.pdf', kind: 'long_contract_pdf', document_type: 'Settlement Agreement', acceptable_types: [], document_date: '2026-07-22', acceptable_dates: [], forbidden_dates: ['2026-08-21', '2024-02-09'], date_role: 'effective', parties: ['Harborline Freight Systems LLC', 'Quill and Vane Advisory Group, Inc.'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'ready', ambiguity: ['boilerplate_heavy', 'payment_date_differs_from_effective_date'], acceptable_description_facts: ['settlement'], expected_routing: 'native_text' },
     { file: 'ambiguous-note.pdf', kind: 'text_pdf', acceptable_dates: [], forbidden_dates: [], parties: [], forbidden_parties: ['Rowan', 'Priya', 'Dana', 'Ridgeline'], party_relation: 'none', expected_readiness: 'needs_review', ambiguity: ['no_document_type', 'no_defining_date'], acceptable_description_facts: [], expected_routing: 'native_text' },
+    { file: 'board-deck.pptx', kind: 'pptx', document_type: 'Quarterly Business Review', acceptable_types: ['Business Review'], document_date: '2026-05-21', acceptable_dates: [], forbidden_dates: ['2026-08-20', '2027-12-31'], date_role: 'issuance', parties: ['Ridgeline Cartography LLC', 'Vistage Worldwide, Inc.'], forbidden_parties: ['Dana Ruiz'], party_relation: 'for', expected_readiness: 'ready', ambiguity: ['next_review_date', 'roadmap_end_date'], acceptable_description_facts: ['review'], expected_routing: 'anydoc' },
     { file: 'order-form.docx', kind: 'docx', document_type: 'Order Form', acceptable_types: [], document_date: '2026-02-01', acceptable_dates: [], forbidden_dates: ['2026-01-14', '2022-08-08', '2028-01-31'], date_role: 'effective', parties: ['Tessellate Analytics Ltd.', 'Vistage Worldwide, Inc.'], forbidden_parties: [], party_relation: 'between', expected_readiness: 'ready', ambiguity: ['start_date_differs_from_signature_date'], acceptable_description_facts: ['subscription'], expected_routing: 'anydoc' },
   ],
 };
@@ -557,6 +558,27 @@ function orderFormDocx() {
   ]);
 }
 
+/// A three-slide review deck: the date it was presented on the title slide,
+/// a roadmap end date and a next-review date as traps, and the presenter's
+/// contact as a person who is not a party.
+function boardDeckPptx() {
+  const namespaces = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
+  const slide = (paragraphs) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld ${namespaces}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Content"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${paragraphs.map((text) => `<a:p><a:r><a:rPr lang="en-US"/><a:t>${text}</a:t></a:r></a:p>`).join('')}</p:txBody></p:sp></p:spTree></p:cSld></p:sld>`;
+  const slides = [
+    ['QUARTERLY BUSINESS REVIEW', 'Prepared for Vistage Worldwide, Inc.', 'Presented by Ridgeline Cartography LLC', 'Presented on May 21, 2026'],
+    ['Agenda', 'Member map renewals across all chapters', 'Q2 pipeline: 14 engagements, $412,000 in bookings', 'Roadmap through December 31, 2027'],
+    ['Next steps', 'Next quarterly review: August 20, 2026', 'Contact: Dana Ruiz, Ridgeline Cartography LLC'],
+  ];
+  return zip([
+    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>${slides.map((_, index) => `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join('')}</Types>`],
+    ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`],
+    ['ppt/presentation.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation ${namespaces}><p:sldIdLst>${slides.map((_, index) => `<p:sldId id="${256 + index}" r:id="rId${index + 2}"/>`).join('')}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`],
+    ['ppt/_rels/presentation.xml.rels', `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${slides.map((_, index) => `<Relationship Id="rId${index + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`).join('')}</Relationships>`],
+    ...slides.map((paragraphs, index) => [`ppt/slides/slide${index + 1}.xml`, slide(paragraphs)]),
+  ]);
+}
+
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -599,6 +621,7 @@ export async function generateFixtures(outputDirectory) {
     ['settlement-agreement.pdf', settlementAgreement()],
     ['ambiguous-note.pdf', ambiguousNote()],
     ['order-form.docx', orderFormDocx()],
+    ['board-deck.pptx', boardDeckPptx()],
     ['mixed-batch/duplicate-invoice-a.pdf', invoice],
     ['mixed-batch/duplicate-invoice-b.pdf', invoice],
     ['mixed-batch/unsupported.csv', Buffer.from('fictional_id,status\nX-001,unsupported\n')],

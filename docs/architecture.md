@@ -36,7 +36,9 @@ characters came back as replacement glyphs. Office containers go through AnyDoc
 to Markdown, which preserves headings and tables; plain text and Markdown are
 read directly. Excel workbooks are read sheet-per-page as Markdown tables,
 capped at 200 rows by 30 columns per sheet with an elision marker so a large
-workbook cannot flood distillation. `.eml` emails emit a fixed-order header
+workbook cannot flood distillation. PowerPoint decks go through the same
+Office reader as Word documents, slide by slide in order. `.eml` emails and
+Outlook `.msg` messages emit a fixed-order header
 block — the `Date:` line verbatim, so the sent date is checkable against the
 document like any other fact — followed by the plain-text body and a listing
 (never an extraction) of attachments.
@@ -377,6 +379,29 @@ this machine, so a local server can be used without a certificate and a
 remote one cannot be used without one. **Test connection** sends the same
 calibration document setup uses to check the local model, so a wrong key,
 model name, or address is found before a real document is sent.
+
+### The same document twice
+
+Exact duplicates are a hash comparison before analysis. The duplicates people
+make are not exact: a second scan of the same page, a PDF exported twice from
+the same message, a copy saved again by a program that rewrote its metadata.
+So the engine also fingerprints everything the extractor read - a 64-bit
+simhash over five-character shingles of the normalised text, hashed with
+FNV-1a spelled out in the crate so the value is identical on every machine
+and in every build, because the shared filed index carries it between
+teammates. Similar text gives similar bits; a second scan with a handful of
+misread characters lands within six bits, and two unrelated documents sit
+about thirty-two apart.
+
+The queue holds every analysis against the fingerprints of its own filings
+and asks the duplicate oracle about other machines. Closeness alone does not
+decide: this month's statement and last month's share almost every word, and
+a fingerprint barely sees the date and the figures that differ. So the dates
+have to agree - the filed name's leading date against the date the analysis
+found or the model read - and without a date on one side only a
+near-identical text counts. A match sends the document to review with
+`NEAR_DUPLICATE`, named after the filing it repeats and the machine that made
+it; it is never filed on its own, and an undo forgets the fingerprint.
 
 ## Measuring it
 

@@ -13,8 +13,10 @@ use intern_core::{
 };
 use intern_engine::{
     DocumentAnalysis, DocumentSource, ExtractProgress, HouseRule, HouseStyle, ProposalStatus,
-    RuleKind, ValidatedProposal, compose_filename, evidence::is_valid_iso_date, lesson_from_edit,
-    sanitize_folder_name,
+    RuleKind, ValidatedProposal, compose_filename,
+    evidence::is_valid_iso_date,
+    fingerprint::{self, NEAR_DUPLICATE_DISTANCE},
+    lesson_from_edit, sanitize_folder_name,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -352,6 +354,9 @@ pub struct FiledDocument {
     pub proposal: ValidatedProposal,
     /// Unix seconds when the apply completed.
     pub filed_at: i64,
+    /// The text fingerprint the analysis carried, for a near-duplicate check
+    /// on other machines. Absent for a text too short to fingerprint.
+    pub text_fingerprint: Option<String>,
 }
 
 /// A filing the queue has just undone: the document is back at
@@ -428,6 +433,19 @@ impl KnownFiling {
 /// a duplicate, where "process anyway" is one click.
 pub trait DuplicateOracle: Send + Sync {
     fn filed_elsewhere(&self, source_hash: &str, source_path: &Path) -> Option<KnownFiling>;
+    /// A filing whose text fingerprint is within [`NEAR_DUPLICATE_DISTANCE`]
+    /// of `fingerprint`: the closest one, when there is one.
+    fn similar_elsewhere(&self, _fingerprint: u64) -> Option<SimilarFiling> {
+        None
+    }
+}
+
+/// A filing whose text is nearly the text of the document at hand.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimilarFiling {
+    pub filing: KnownFiling,
+    /// How many fingerprint bits apart the two texts are.
+    pub distance: u32,
 }
 
 /// The default: the queue's own history is all there is.
@@ -459,7 +477,16 @@ pub struct ProposalRecord {
     /// differs from them, and why.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub house_rules: Vec<HouseRule>,
+    /// The name a document with nearly this text was already filed under -
+    /// a second scan, a re-export, a copy saved again - when there is one.
+    /// Such a document waits for a person rather than being filed twice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub near_duplicate_of: Option<String>,
 }
+
+/// The review reason for a document whose text is nearly the text of one
+/// already filed. The record's `near_duplicate_of` names that filing.
+pub const NEAR_DUPLICATE: &str = "NEAR_DUPLICATE";
 
 impl ProposalRecord {
     /// The validated facts as the name carries them: the document's words,
@@ -966,18 +993,30 @@ impl Pipeline {
         // document's and only the name is the reviewer's.
         let (styled, house_rules) = self.repository.active_style()?.apply(&analysis.proposal);
         let filename = self.compose_for_target(&item.source_path, &styled, &extension, &existing);
+        // The exact-bytes check ran before analysis. This one needs the text
+        // and the date, so it runs after: a second scan, a re-export, or a
+        // copy saved again with new metadata says what a filed document
+        // says, and is not filed on its own.
+        let near_duplicate_of = self.near_duplicate_of(item.id, &analysis);
+        let mut reasons = analysis
+            .review_reasons
+            .iter()
+            .map(|reason| reason.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let mut status = analysis.status;
+        if near_duplicate_of.is_some() {
+            reasons.push(NEAR_DUPLICATE.to_owned());
+            status = ProposalStatus::NeedsReview;
+        }
         let record = ProposalRecord {
-            status: analysis.status,
+            status,
             filename,
             description: analysis.description.clone(),
-            reasons: analysis
-                .review_reasons
-                .iter()
-                .map(|reason| reason.as_str().to_owned())
-                .collect(),
+            reasons,
             analysis,
             revision: 1,
             house_rules,
+            near_duplicate_of,
         };
         let next = match record.status {
             ProposalStatus::Ready => QueueStatus::Ready,
@@ -1063,6 +1102,36 @@ impl Pipeline {
             return Err(error);
         }
         Ok(())
+    }
+
+    /// The filing whose text this analysis nearly repeats, if any: first the
+    /// queue's own history, then whatever the duplicate oracle knows from
+    /// other machines.
+    fn near_duplicate_of(&self, item_id: i64, analysis: &DocumentAnalysis) -> Option<String> {
+        let fingerprint = fingerprint::decode(analysis.text_fingerprint.as_deref()?)?;
+        let date = analysis.proposal.document_date.clone().or_else(|| {
+            analysis
+                .model_proposal
+                .as_ref()
+                .and_then(|reply| reply.document_date.clone())
+        });
+        let local = self
+            .repository
+            .find_similar(fingerprint, item_id)
+            .ok()
+            .flatten()
+            .filter(|similar| {
+                same_document(similar.distance, &similar.filing.filename, date.as_deref())
+            })
+            .map(|similar| similar.filing.describe());
+        local.or_else(|| {
+            self.duplicates
+                .similar_elsewhere(fingerprint)
+                .filter(|similar| {
+                    same_document(similar.distance, &similar.filing.filename, date.as_deref())
+                })
+                .map(|similar| similar.filing.describe())
+        })
     }
 
     /// The name a proposal will be applied under. The engine composed its
@@ -1323,6 +1392,20 @@ impl Pipeline {
         if let Some(document) =
             filed_document(item.id, &item.source_hash, &receipt, &proposal, unix_now())
         {
+            if let Some(fingerprint) = document
+                .text_fingerprint
+                .as_deref()
+                .and_then(fingerprint::decode)
+            {
+                let filed_name = document
+                    .destination
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let _ = self
+                    .repository
+                    .remember_fingerprint(item.id, fingerprint, &filed_name);
+            }
             self.filing.filed(&document);
         }
     }
@@ -1557,6 +1640,7 @@ impl Pipeline {
             )
         })?;
         self.files.undo(&item, &receipt)?;
+        let _ = self.repository.forget_fingerprint(id);
         self.filing.unfiled(&UnfiledDocument {
             item_id: item.id,
             source_path: item.source_path.clone(),
@@ -1672,6 +1756,12 @@ impl PipelineRepository {
                    created_at INTEGER NOT NULL,
                    updated_at INTEGER NOT NULL,
                    UNIQUE(kind, from_key)
+                 );
+                 CREATE TABLE IF NOT EXISTS fingerprints (
+                   queue_item_id INTEGER PRIMARY KEY REFERENCES queue_items(id) ON DELETE CASCADE,
+                   fingerprint INTEGER NOT NULL,
+                   filed_name TEXT NOT NULL,
+                   filed_at INTEGER NOT NULL
                  );",
             )
             .map_err(database_error)?;
@@ -1849,6 +1939,74 @@ impl PipelineRepository {
                 },
             )
             .map_err(database_error)
+    }
+
+    /// Keeps the text fingerprint of a document just filed, under the name
+    /// it was filed as, so a later document saying the same thing can be
+    /// told so. Cleared with the item when the history is cleared.
+    fn remember_fingerprint(
+        &self,
+        item_id: i64,
+        fingerprint: u64,
+        filed_name: &str,
+    ) -> PipelineResult<()> {
+        self.lock()?
+            .execute(
+                "INSERT INTO fingerprints(queue_item_id, fingerprint, filed_name, filed_at)
+                 VALUES (?1, ?2, ?3, unixepoch())
+                 ON CONFLICT(queue_item_id) DO UPDATE SET
+                   fingerprint = excluded.fingerprint,
+                   filed_name = excluded.filed_name,
+                   filed_at = excluded.filed_at",
+                params![item_id, fingerprint as i64, filed_name],
+            )
+            .map_err(database_error)?;
+        Ok(())
+    }
+
+    fn forget_fingerprint(&self, item_id: i64) -> PipelineResult<()> {
+        self.lock()?
+            .execute(
+                "DELETE FROM fingerprints WHERE queue_item_id = ?1",
+                params![item_id],
+            )
+            .map_err(database_error)?;
+        Ok(())
+    }
+
+    /// The closest filing to `fingerprint` within the near-duplicate
+    /// distance, other than `except_item`'s own.
+    fn find_similar(
+        &self,
+        fingerprint: u64,
+        except_item: i64,
+    ) -> PipelineResult<Option<SimilarFiling>> {
+        let connection = self.lock()?;
+        let mut statement = connection
+            .prepare("SELECT fingerprint, filed_name FROM fingerprints WHERE queue_item_id <> ?1")
+            .map_err(database_error)?;
+        let rows = statement
+            .query_map(params![except_item], |row| {
+                Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?))
+            })
+            .map_err(database_error)?;
+        let mut closest: Option<SimilarFiling> = None;
+        for row in rows {
+            let (stored, filed_name) = row.map_err(database_error)?;
+            let distance = fingerprint::hamming(fingerprint, stored);
+            if distance <= NEAR_DUPLICATE_DISTANCE
+                && closest.as_ref().is_none_or(|best| distance < best.distance)
+            {
+                closest = Some(SimilarFiling {
+                    filing: KnownFiling {
+                        filename: filed_name,
+                        filed_by: None,
+                    },
+                    distance,
+                });
+            }
+        }
+        Ok(closest)
     }
 
     fn forget_rule_for(&self, kind: RuleKind, from: &str) -> PipelineResult<()> {
@@ -2129,7 +2287,23 @@ fn filed_document(
                     .unwrap_or_default(),
             ),
             filed_at,
+            text_fingerprint: proposal.analysis.text_fingerprint.clone(),
         })
+}
+
+/// Whether a fingerprint match is one document filed twice, or two
+/// documents that share their words: this month's statement and last
+/// month's differ in a date and a few figures, which a fingerprint barely
+/// sees. Dates settle it when both sides have one; without a date on one
+/// side only a near-identical text may say duplicate.
+fn same_document(distance: u32, filed_name: &str, date: Option<&str>) -> bool {
+    if distance > NEAR_DUPLICATE_DISTANCE {
+        return false;
+    }
+    match (leading_date(filed_name), date) {
+        (Some(filed), Some(this)) => filed == this,
+        _ => distance <= 1,
+    }
 }
 
 /// The validated facts as the applied name carries them. A reviewer who
@@ -2343,6 +2517,7 @@ mod sink_tests {
                 evidence: Evidence::default(),
             },
             filed_at: 1,
+            text_fingerprint: None,
         });
         sinks.unfiled(&UnfiledDocument {
             item_id: 4,

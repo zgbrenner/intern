@@ -29,6 +29,12 @@ export interface QueueItem {
    * shows the document's words; these say how the name differs from them.
    */
   houseRules?: HouseRule[];
+  /**
+   * The name a document with nearly this text was already filed under, when
+   * there is one - a second scan, a re-export, a copy saved again. Such a
+   * document waits for a person instead of being filed twice.
+   */
+  nearDuplicateOf?: string;
 }
 
 /**

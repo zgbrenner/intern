@@ -54,6 +54,12 @@ pub struct FiledMarker {
     pub user_name: String,
     /// Unix seconds.
     pub filed_at: i64,
+    /// The engine's text fingerprint of the document (sixteen hex digits),
+    /// so another machine can tell a second scan of this document from a
+    /// new one. Absent for a text too short to fingerprint, and in markers
+    /// written before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_fingerprint: Option<String>,
 }
 
 impl Versioned for FiledMarker {
@@ -118,6 +124,7 @@ impl FiledIndex {
         source: &Path,
         filename: &str,
         filed_at: i64,
+        text_fingerprint: Option<&str>,
     ) -> io::Result<PathBuf> {
         if !is_hex_digest(content_hash) {
             return Err(io::Error::new(
@@ -140,6 +147,7 @@ impl FiledIndex {
             machine_name: self.identity.name.clone(),
             user_name: self.identity.user.clone(),
             filed_at,
+            text_fingerprint: text_fingerprint.map(str::to_owned),
         };
         fs::create_dir_all(&self.directory)?;
         let path = self.marker_path(content_hash);
@@ -177,6 +185,37 @@ impl FiledIndex {
             Stored::Parsed(marker) if marker.content_hash == content_hash => Some(marker),
             _ => None,
         }
+    }
+
+    /// The marker whose text fingerprint is closest to `fingerprint`, within
+    /// `within` bits, from any machine. Reads every marker in the folder;
+    /// markers are pruned after a year, so the folder stays the size of a
+    /// year's filings.
+    pub fn lookup_similar(&self, fingerprint: u64, within: u32) -> Option<(FiledMarker, u32)> {
+        let entries = fs::read_dir(&self.directory).ok()?;
+        let mut closest: Option<(FiledMarker, u32)> = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            let Stored::Parsed(marker) = load::<FiledMarker>(&path) else {
+                continue;
+            };
+            let Some(stored) = marker
+                .text_fingerprint
+                .as_deref()
+                .filter(|value| value.len() == 16)
+                .and_then(|value| u64::from_str_radix(value, 16).ok())
+            else {
+                continue;
+            };
+            let distance = (stored ^ fingerprint).count_ones();
+            if distance <= within && closest.as_ref().is_none_or(|(_, best)| distance < *best) {
+                closest = Some((marker, distance));
+            }
+        }
+        closest
     }
 
     fn marker_path(&self, content_hash: &str) -> PathBuf {

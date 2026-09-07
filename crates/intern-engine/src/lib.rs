@@ -29,6 +29,7 @@ pub mod download;
 pub mod engine;
 pub mod error;
 pub mod evidence;
+pub mod fingerprint;
 pub mod hosted;
 pub mod house_style;
 pub mod infer;

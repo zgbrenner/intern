@@ -354,6 +354,7 @@ mod tests {
             review_reasons: Vec::new(),
             proposal,
             telemetry: AnalysisTelemetry::default(),
+            text_fingerprint: None,
             model_proposal: Some(ModelProposal {
                 document_type: Some("Invoice".into()),
                 document_date: proposed.map(str::to_owned),

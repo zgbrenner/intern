@@ -1,4 +1,4 @@
-//! Email (.eml) extraction.
+//! Email extraction: Internet mail (.eml) and Outlook messages (.msg).
 //!
 //! An email becomes one page: a deterministic header block — `From`, `To`,
 //! `Cc`, `Date` (as written in the message), `Subject`, then `Sent` as the
@@ -7,6 +7,11 @@
 //! `Attachment: <filename>` line per attachment. Attachments are listed,
 //! never extracted. The `Date` line survives verbatim so downstream
 //! validation can find the sent date in the document text.
+//!
+//! An Outlook `.msg` is the same page built from MAPI properties: Outlook
+//! stores no `Date` header as written, only the submit and delivery times
+//! as FILETIMEs, so `Date` is the submit time in UTC, written so that the
+//! date part reads as a date on its own.
 
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -46,6 +51,116 @@ pub fn extract_eml(
         truncated: false,
         optional_image: None,
     })
+}
+
+/// Extracts an Outlook `.msg` file the way [`extract_eml`] extracts
+/// Internet mail: the same header block, the plain-text body (or the HTML
+/// body de-tagged, or the RTF body decompressed and de-tagged), and one
+/// `Attachment:` line per attachment.
+pub fn extract_msg(
+    path: &Path,
+    limits: &ResourceLimits,
+    cancel: &CancellationToken,
+) -> Result<ExtractedDocument, ExtractionError> {
+    cancel.check()?;
+    let bytes = read_bounded(path, limits, cancel)?;
+    let message = msg_parser::Outlook::from_slice(&bytes).map_err(|error| {
+        ExtractionError::parse_failed(format!("Outlook message did not parse: {error}"))
+    })?;
+    cancel.check()?;
+    Ok(ExtractedDocument {
+        pages: vec![ExtractedPage {
+            page_number: 1,
+            text: render_outlook(&message),
+            source: PageSource::Text,
+            ocr_confidence: None,
+            vision_escalated: false,
+        }],
+        warnings: vec![],
+        truncated: false,
+        optional_image: None,
+    })
+}
+
+fn render_outlook(message: &msg_parser::Outlook) -> String {
+    let person = |person: &msg_parser::Person| {
+        let name = single_line(&person.name.to_string());
+        let email = single_line(&person.email.to_string());
+        match (name.is_empty(), email.is_empty()) {
+            (false, false) => format!("{name} <{email}>"),
+            (false, true) => name,
+            (true, _) => email,
+        }
+    };
+    let people = |people: &[msg_parser::Person]| {
+        people
+            .iter()
+            .map(person)
+            .filter(|entry| !entry.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    // The moment the sender pressed Send defines an email; delivery and
+    // creation times stand in when a draft or an import has no submit time.
+    let sent = [
+        &message.client_submit_time,
+        &message.message_delivery_time,
+        &message.creation_time,
+    ]
+    .into_iter()
+    .find(|value| !value.trim().is_empty())
+    .map(|value| value.trim().to_owned())
+    .unwrap_or_default();
+    let mut lines = vec![
+        format!("From: {}", person(&message.sender)),
+        format!("To: {}", people(&message.to)),
+        format!("Cc: {}", people(&message.cc)),
+        format!("Date: {}", readable_utc(&sent)),
+        format!("Subject: {}", single_line(&message.subject)),
+    ];
+    if !sent.is_empty() {
+        lines.push(format!("Sent: {sent}"));
+    }
+    let body = if !message.body.trim().is_empty() {
+        message.body.clone()
+    } else if !message.html.trim().is_empty() {
+        html_to_text(&message.html)
+    } else {
+        message
+            .html_from_rtf()
+            .map(|html| html_to_text(&html))
+            .unwrap_or_default()
+    };
+    let mut text = lines.join("\n");
+    text.push_str("\n\n");
+    text.push_str(body.trim());
+    text.push('\n');
+    for attachment in &message.attachments {
+        let name = [
+            &attachment.long_file_name,
+            &attachment.file_name,
+            &attachment.display_name,
+        ]
+        .into_iter()
+        .find(|value| !value.trim().is_empty())
+        .map(|value| single_line(value))
+        .unwrap_or_default();
+        if !name.is_empty() {
+            text.push_str(&format!("Attachment: {name}\n"));
+        }
+    }
+    text
+}
+
+/// `2026-03-04T15:22:10Z` as `2026-03-04 15:22:10 UTC`: the date then
+/// stands on its own for the date finder, instead of running into a `T`.
+fn readable_utc(iso: &str) -> String {
+    match iso.split_once('T') {
+        Some((date, time)) if date.len() == 10 => {
+            format!("{date} {} UTC", time.trim_end_matches('Z'))
+        }
+        _ => iso.to_owned(),
+    }
 }
 
 fn read_bounded(
