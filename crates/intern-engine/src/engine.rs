@@ -24,6 +24,7 @@ use crate::domain::{
 };
 use crate::error::EngineResult;
 use crate::evidence::stated_dates;
+use crate::fingerprint::{self, source_fingerprint};
 use crate::naming::compose_filename;
 use crate::validate::validate;
 
@@ -102,7 +103,7 @@ impl Engine {
             }
             outcome.status = ProposalStatus::NeedsReview;
         }
-        Ok(finish(
+        let mut analysis = finish(
             outcome,
             digest,
             extension,
@@ -114,7 +115,9 @@ impl Engine {
                 distill_micros,
                 inference_millis,
             },
-        ))
+        );
+        analysis.text_fingerprint = source_fingerprint(source).map(fingerprint::encode);
+        Ok(analysis)
     }
 
     pub fn distill(&self, source: &DocumentSource) -> DocumentDigest {
@@ -143,6 +146,7 @@ pub fn finish(
         telemetry,
         model_proposal: Some(outcome.candidate),
         stated_dates: stated_dates(digest),
+        text_fingerprint: None,
     }
 }
 

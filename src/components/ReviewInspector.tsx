@@ -132,7 +132,14 @@ export function ReviewInspector({ item, drawer, busy, onClose, onApprove, onKeep
         <dt className="field-label">{label}</dt>
         <dd>{quotes.map((quote) => <q key={quote}>{quote}</q>)}</dd>
       </div>)}</dl></section>}
-    {item.reason && <section className={`note note--${item.status === 'failed' ? 'failed' : 'review'}`}><h3>{item.status === 'failed' ? 'Failure details' : 'Reason for review'}</h3><p>{item.reason}</p></section>}
+    {item.reason && <section className={`note note--${item.status === 'failed' ? 'failed' : 'review'}`}><h3>{item.status === 'failed' ? 'Failure details' : 'Reason for review'}</h3><p>{item.reason}</p>
+      {/*
+        The sentence says "a document that was filed already"; this says
+        which one, so the person can open it and compare rather than take
+        Intern's word for it.
+      */}
+      {item.nearDuplicateOf && <p className="near-duplicate" aria-label="Filed already as">Filed already as <q>{item.nearDuplicateOf}</q>.</p>}
+    </section>}
     <div className="inspector-actions">
       {item.status === 'review' && <><button type="button" className="primary" disabled={busy} onClick={approve}><Icon icon={FileCheck2} />Approve & rename</button><button type="button" className="secondary-action" disabled={busy} onClick={onKeep}><Icon icon={FileText} />Keep original</button><button type="button" className="icon-button more-actions" disabled={busy} aria-label="More review actions" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}><Icon icon={Ellipsis} /></button>{moreOpen && <div className="review-menu" role="group" aria-label="More review actions"><button type="button" disabled={busy} onClick={onRetry}><Icon icon={RotateCcw} />Retry</button><button type="button" disabled={busy} onClick={onRemove}><Icon icon={Trash2} />Remove</button></div>}</>}
       {item.status === 'ready' && <button type="button" className="primary" disabled={busy} onClick={approve}><Icon icon={FileCheck2} />Apply rename</button>}

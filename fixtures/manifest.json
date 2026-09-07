@@ -105,6 +105,11 @@
       "sha256": "47cae15c715415f045b992916febd27ab0a6c3452fe8695f329458d9ae94303c"
     },
     {
+      "file": "board-deck.pptx",
+      "size": 5538,
+      "sha256": "bb1949e38dee01bfb8250f96b1ae25bb1a09a9e0694e1e43f2b5be93a6c54070"
+    },
+    {
       "file": "mixed-batch/duplicate-invoice-a.pdf",
       "size": 770,
       "sha256": "7fcf505d8caee6801e6c307a4c807144b5f62e05c22bc878ea6fdcced935530a"

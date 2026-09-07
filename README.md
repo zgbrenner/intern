@@ -84,7 +84,8 @@ files** points Intern at it and skips the download. Nothing else needs
 installing — PDF text extraction, OCR, and inference all ship inside the app.
 
 Then drag documents or a folder onto the window — PDFs, Word documents, Excel
-workbooks, `.eml` emails, plain text, Markdown, and scanned images. Names
+workbooks, PowerPoint decks, `.eml` and Outlook `.msg` emails, plain text,
+Markdown, and scanned images. Names
 Intern can support with verbatim text from the document appear ready to apply;
 anything else goes to review with the reason shown. Nothing on disk is renamed
 until you approve it, either one item at a time or with **Apply all ready**,
@@ -226,6 +227,21 @@ Names are sanitised for Windows, keep the original extension, shed the least
 identifying detail first when they would be too long to scan, and get a numeric
 suffix on collision.
 
+### The same document twice
+
+Identical bytes are caught before analysis and flagged as a duplicate of the
+filed name. A second scan of the same page, a PDF exported twice, or a copy
+saved again with new metadata is not identical bytes, so Intern also
+fingerprints the text it extracted and holds every new document against what
+it has filed - on this machine and, through the shared filed index, on
+teammates' machines. Two documents that share their words are not always one
+document: this month's statement and last month's differ in a date and a few
+figures, so the dates must agree too. A near-duplicate waits in review, named
+after the filing it repeats, and is never filed on its own; a person can file
+it anyway, keep the original, or remove it.
+[`docs/prior-art.md`](docs/prior-art.md) says where the idea came from and
+what was left on the table.
+
 ### Spellings Intern learns from you
 
 The document says "Vistage Worldwide, Inc."; you call it "Vistage". Respell a
@@ -290,7 +306,7 @@ A prompt change makes the recording stale and needs a live re-record;
 | `intern-intake` | Shared intake folders: the multi-machine claim protocol, cloud sync-root detection, and the polling watcher. |
 | `intern-queue` | The durable queue: ordering, leases, retries, the review/apply workflow, and the spellings it learns from approvals. |
 | `intern-core` | Crash-safe queue storage and journalled file operations. |
-| `intern-worker` | The out-of-process parser: PDFium, OCR, and Office extraction. |
+| `intern-worker` | The out-of-process parser: PDFium, OCR, Office, and Outlook message extraction. |
 | `intern-app` | The Tauri desktop shell, including the switch between the local and hosted models and the credential store the hosted key lives in. |
 
 The engine is usable without the desktop app:

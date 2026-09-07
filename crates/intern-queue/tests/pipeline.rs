@@ -13,13 +13,13 @@ use intern_core::{ErrorCode, OperationReceipt, QueueItem, QueueStatus};
 use intern_engine::{
     AnalysisTelemetry, DateRole, DigestBudget, DocumentAnalysis, DocumentSource, Evidence,
     ExtractProgress, ModelProposal, PageOrigin, ParserWarning, PartyRelation, ProposalStatus,
-    SourcePage, distill, engine::finish, validate,
+    SourcePage, distill, engine::finish, fingerprint, validate,
 };
 use intern_queue::{
     pipeline::{
         AnalyzerBoundary, DuplicateOracle, FileActions, FiledDocument, FilingSink, KnownFiling,
-        ModelFailure, Pipeline, PipelineError, PipelineEventSink, PipelineProgress,
-        UnfiledDocument, WorkerBoundary, WorkerFailure,
+        ModelFailure, NEAR_DUPLICATE, Pipeline, PipelineError, PipelineEventSink, PipelineProgress,
+        SimilarFiling, UnfiledDocument, WorkerBoundary, WorkerFailure,
     },
     settings::{AppSettings, DestinationLayout, SettingsStore},
 };
@@ -37,13 +37,15 @@ fn analyze_locally(
 ) -> DocumentAnalysis {
     let digest = distill(source, DigestBudget::default());
     let outcome = validate(proposal, &digest);
-    finish(
+    let mut analysis = finish(
         outcome,
         &digest,
         extension,
         existing_names,
         AnalysisTelemetry::default(),
-    )
+    );
+    analysis.text_fingerprint = fingerprint::source_fingerprint(source).map(fingerprint::encode);
+    analysis
 }
 
 #[derive(Default)]
@@ -74,6 +76,8 @@ impl FilingSink for RecordingFiling {
 struct TeammateFilings {
     known: Mutex<HashMap<String, KnownFiling>>,
     asked: Mutex<Vec<(String, PathBuf)>>,
+    /// What the shared index answers about a text fingerprint.
+    similar: Mutex<Option<SimilarFiling>>,
 }
 
 impl DuplicateOracle for TeammateFilings {
@@ -83,6 +87,10 @@ impl DuplicateOracle for TeammateFilings {
             .unwrap()
             .push((source_hash.to_owned(), source_path.to_path_buf()));
         self.known.lock().unwrap().get(source_hash).cloned()
+    }
+
+    fn similar_elsewhere(&self, _fingerprint: u64) -> Option<SimilarFiling> {
+        self.similar.lock().unwrap().clone()
     }
 }
 
@@ -2145,4 +2153,223 @@ fn respelling_interns_own_spelling_in_review_changes_the_rule_not_the_document()
         )
         .unwrap();
     assert!(pipeline.learned_rules().unwrap().is_empty());
+}
+
+/// An agreement long enough to fingerprint, with the date and the names
+/// the canned proposal quotes.
+const AGREEMENT: &str = "EMPLOYMENT AGREEMENT\n\nThis Employment Agreement is signed April 12, 2024 \
+    by John Smith and Acme Corporation. Acme Corporation employs John Smith as a senior \
+    cartographer at its Fictional Harbor office. The position begins on the start date named \
+    above and continues until terminated by either party on thirty days written notice. Salary, \
+    benefits, and duties are described in the attached schedule, which forms part of this \
+    agreement.";
+
+/// Two documents that say the same thing are one document filed twice. A
+/// second scan of a filed agreement - different bytes, three misread words -
+/// waits for a person and names the filing it repeats; the same template
+/// signed a year later is a new document; and once the filing is undone the
+/// scan is new again.
+#[test]
+fn a_second_scan_of_a_filed_document_waits_and_names_the_filing_it_repeats() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    let filed = temp.path().join("filed");
+    std::fs::create_dir_all(&inbox).unwrap();
+    std::fs::create_dir_all(&filed).unwrap();
+    let rescan_text = AGREEMENT
+        .replace("employs John", "emplcys John")
+        .replace("cartographer", "cartograpner")
+        .replace("thirty", "thirly");
+    let renewal_text = AGREEMENT
+        .replace("April 12, 2024", "April 12, 2025")
+        .replace("continues", "renews");
+    let renewal = ModelProposal {
+        document_date: Some("2025-04-12".into()),
+        evidence: Evidence {
+            date: Some("signed April 12, 2025".into()),
+            ..proposal(0.94, false).evidence
+        },
+        ..proposal(0.94, false)
+    };
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(AGREEMENT)),
+        Ok(parsed(&rescan_text)),
+        Ok(parsed(&renewal_text)),
+        Ok(parsed(&rescan_text)),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(proposal(0.94, false)),
+        Ok(renewal),
+        Ok(proposal(0.94, false)),
+    ]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            destination: filed.to_string_lossy().into_owned(),
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+
+    let original = source(&inbox, "agreement-scan-1.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&original))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let first = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(first.status, QueueStatus::Ready);
+    let filed_name = first.proposal.as_ref().unwrap().filename.clone();
+    assert_eq!(
+        filed_name,
+        "2024-04-12 Employment Agreement between John Smith and Acme Corporation.pdf"
+    );
+    pipeline
+        .approve(
+            first.id,
+            &filed_name,
+            "Employment agreement between John Smith and Acme Corporation.",
+        )
+        .unwrap();
+
+    let rescan = source(&inbox, "agreement-scan-2.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&rescan))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let second = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.source_path == rescan)
+        .unwrap();
+    assert_eq!(
+        second.status,
+        QueueStatus::NeedsReview,
+        "not filed on its own"
+    );
+    let record = second.proposal.as_ref().unwrap();
+    assert!(
+        record.reasons.iter().any(|reason| reason == NEAR_DUPLICATE),
+        "{:?}",
+        record.reasons
+    );
+    assert_eq!(
+        record.near_duplicate_of.as_deref(),
+        Some(filed_name.as_str())
+    );
+    assert_eq!(record.status, ProposalStatus::NeedsReview);
+
+    let renewal_path = source(&inbox, "agreement-renewal.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&renewal_path))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let third = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.source_path == renewal_path)
+        .unwrap();
+    assert_eq!(
+        third.status,
+        QueueStatus::Ready,
+        "same words, another date: a new document"
+    );
+    assert_eq!(third.proposal.as_ref().unwrap().near_duplicate_of, None);
+
+    pipeline.undo(first.id).unwrap();
+    let again = source(&inbox, "agreement-scan-3.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&again))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let fourth = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.source_path == again)
+        .unwrap();
+    assert_eq!(
+        fourth.status,
+        QueueStatus::Ready,
+        "an undone filing is forgotten"
+    );
+    assert_eq!(fourth.proposal.as_ref().unwrap().near_duplicate_of, None);
+}
+
+/// The shared index answers for teammates' machines. Its answer is held to
+/// the same date test, and names the machine.
+#[test]
+fn a_teammates_filing_with_nearly_this_text_is_named_with_their_machine() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "agreement.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(AGREEMENT)),
+        Ok(parsed(AGREEMENT)),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(proposal(0.94, false)),
+    ]));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "agreement-hash");
+    let teammates = Arc::new(TeammateFilings::default());
+    *teammates.similar.lock().unwrap() = Some(SimilarFiling {
+        filing: KnownFiling {
+            filename: "2024-04-12 Employment Agreement between John Smith and Acme Corporation.pdf"
+                .into(),
+            filed_by: Some("Front desk".into()),
+        },
+        distance: 2,
+    });
+    let pipeline = pipeline(
+        temp.path(),
+        worker,
+        model,
+        Arc::clone(&files),
+        AppSettings::default(),
+    )
+    .with_duplicate_oracle(Arc::clone(&teammates) as Arc<dyn DuplicateOracle>);
+    pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+    pipeline.run_until_idle().unwrap();
+    let item = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(item.status, QueueStatus::NeedsReview);
+    assert_eq!(
+        item.proposal.as_ref().unwrap().near_duplicate_of.as_deref(),
+        Some(
+            "2024-04-12 Employment Agreement between John Smith and Acme Corporation.pdf (filed from Front desk)"
+        )
+    );
+
+    // The same words filed under another date, on another machine: a new
+    // document here too.
+    *teammates.similar.lock().unwrap() = Some(SimilarFiling {
+        filing: KnownFiling {
+            filename: "2023-04-12 Employment Agreement between John Smith and Acme Corporation.pdf"
+                .into(),
+            filed_by: Some("Front desk".into()),
+        },
+        distance: 0,
+    });
+    let other = source(temp.path(), "agreement-b.pdf");
+    files.trust(&other, "agreement-b-hash");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&other))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let item = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.source_path == other)
+        .unwrap();
+    assert_eq!(item.status, QueueStatus::Ready);
 }

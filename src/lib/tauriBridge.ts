@@ -64,6 +64,7 @@ interface QueueItemDto {
   suggestedDate?: string;
   datesInDocument?: string[];
   houseRules?: HouseRule[];
+  nearDuplicateOf?: string;
   fileModifiedDate?: string;
 }
 
@@ -368,6 +369,7 @@ function normalizeItem(item: QueueItemDto): QueueItem {
     ...(item.suggestedDate === undefined ? {} : { suggestedDate: item.suggestedDate }),
     ...(item.datesInDocument?.length ? { datesInDocument: [...item.datesInDocument] } : {}),
     ...(item.houseRules?.length ? { houseRules: item.houseRules.map((rule) => ({ ...rule })) } : {}),
+    ...(item.nearDuplicateOf === undefined ? {} : { nearDuplicateOf: item.nearDuplicateOf }),
     ...(item.fileModifiedDate === undefined ? {} : { fileModifiedDate: item.fileModifiedDate }),
   };
 }

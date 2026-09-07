@@ -14,11 +14,11 @@ fn canonical_file_accepts_only_existing_supported_regular_files() {
     let pdf = temp.path().join("Contract.PDF");
     let sheet = temp.path().join("sheet.xlsx");
     let email = temp.path().join("message.eml");
-    let unsupported = temp.path().join("deck.pptx");
+    let unsupported = temp.path().join("deck.key");
     fs::write(&pdf, b"pdf").unwrap();
     fs::write(&sheet, b"sheet").unwrap();
     fs::write(&email, b"email").unwrap();
-    fs::write(&unsupported, b"deck").unwrap();
+    fs::write(&unsupported, b"keynote deck").unwrap();
 
     assert_eq!(canonical_file(&pdf).unwrap(), pdf.canonicalize().unwrap());
     assert_eq!(

@@ -123,6 +123,10 @@ pub struct QueueItemDto {
     /// inspector can say why the name differs from the evidence under it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     house_rules: Vec<HouseRuleDto>,
+    /// The filing this document's text nearly repeats, when there is one:
+    /// the name it was filed under, and the machine when it was not this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    near_duplicate_of: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1724,6 +1728,7 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
         house_rules: proposal
             .map(|record| record.house_rules.iter().map(HouseRuleDto::from).collect())
             .unwrap_or_default(),
+        near_duplicate_of: proposal.and_then(|record| record.near_duplicate_of.clone()),
     })
 }
 

@@ -13,6 +13,7 @@ use std::{
 };
 
 use intern_core::{OperationDirection, OperationReceipt, OperationStage, QueueStatus};
+use intern_engine::fingerprint::NEAR_DUPLICATE_DISTANCE;
 use intern_intake::{
     CloudLocation, CloudProviderKind, CloudRoot, DescriptionLedger, DoneOutcome, FiledIndex,
     FiledMarker, IntakeHost, IntakeStatus, ItemState, MachineIdentity, MachinePresence,
@@ -20,7 +21,7 @@ use intern_intake::{
 };
 use intern_queue::{
     DuplicateOracle, FiledDocument, FilingSink, KnownFiling, Pipeline, PipelineItem, SettingsStore,
-    UnfiledDocument,
+    SimilarFiling, UnfiledDocument,
     paths::{canonical_file, display_path},
 };
 use serde::Serialize;
@@ -441,6 +442,7 @@ impl FilingSink for SharedFiledIndex {
                     &document.source_path,
                     &filename,
                     document.filed_at,
+                    document.text_fingerprint.as_deref(),
                 )
                 .map(drop)
                 .map_err(|error| format!("FILED_INDEX_WRITE_FAILED: {error}")),
@@ -472,6 +474,16 @@ impl DuplicateOracle for SharedFiledIndex {
             &index.identity().id,
             index.relative_path(source_path).as_deref(),
         )
+    }
+
+    /// The closest marker by text fingerprint from any machine. Whether the
+    /// closeness means one document is the queue's call, made with the
+    /// dates; the index only says how close.
+    fn similar_elsewhere(&self, fingerprint: u64) -> Option<SimilarFiling> {
+        let index = self.index()?;
+        let (marker, distance) = index.lookup_similar(fingerprint, NEAR_DUPLICATE_DISTANCE)?;
+        let filing = known_filing(&marker, &index.identity().id, None)?;
+        Some(SimilarFiling { filing, distance })
     }
 }
 
@@ -702,6 +714,7 @@ mod filed_index_tests {
             machine_name: "Front desk".into(),
             user_name: "pat".into(),
             filed_at: 1,
+            text_fingerprint: None,
         }
     }
 

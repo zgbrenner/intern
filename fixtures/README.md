@@ -14,10 +14,14 @@ bytes.
 ## What the corpus covers
 
 **Formats and extraction paths.** Text PDFs, an image-only PDF, a mixed
-text/scan PDF, DOCX with header/footer/footnote/table, Markdown, PNG/JPEG/TIFF
-document images, a rotated low-resolution scan, encrypted and malformed PDFs, a
-100-page boundary document, exact duplicates, an unsupported format, and an
-Office lock file. The intentionally invalid fixtures must remain invalid.
+text/scan PDF, DOCX with header/footer/footnote/table, a three-slide PPTX deck,
+Markdown, PNG/JPEG/TIFF document images, a rotated low-resolution scan,
+encrypted and malformed PDFs, a 100-page boundary document, exact duplicates,
+an unsupported format, and an Office lock file. The intentionally invalid
+fixtures must remain invalid. Outlook `.msg` messages are covered by the
+worker's own tests, which build one from the MS-OXMSG property layout; the
+corpus carries none because the generator writes ZIP containers, not compound
+files.
 
 **Document understanding.** Seven fixtures exist specifically to test whether
 Intern chooses the date it *understood* rather than the date that was easiest to
@@ -32,6 +36,7 @@ find:
 | `settlement-agreement.pdf` | Boilerplate-heavy. Its effective date differs from its payment date and from the date of the dispute it settles. |
 | `order-form.docx` | A subscription start date in a table, a different signature date in prose, an end date, and a master agreement date. |
 | `ambiguous-note.pdf` | No document type, no defining date, several names in no clear role. It exists to be sent to review. |
+| `board-deck.pptx` | A review deck presented on one date, with a roadmap end date and a next-review date as traps, and the presenter's contact person who is not a party. |
 
 `expected.json` records, for each fixture, the reviewed `document_date`, any
 other `acceptable_dates`, and the `forbidden_dates` and `forbidden_parties` that

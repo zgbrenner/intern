@@ -39,6 +39,10 @@ const SENTENCES: Record<string, string> = {
   // filed under is normally given instead, as "Duplicate of ...". The bare code
   // only reaches here once the record of that filing is gone.
   DUPLICATE: 'This document\'s content was filed once already. Retry to process it anyway, or remove it.',
+  // Raised after analysis when the text is nearly the text of a document
+  // already filed - a second scan, a re-export, a copy saved again. The
+  // inspector names that filing beside this sentence.
+  NEAR_DUPLICATE: 'This looks like a document that was filed already. Approve to file it as well, keep the original, or remove it.',
 };
 
 /**

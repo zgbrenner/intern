@@ -159,6 +159,17 @@ year, long enough to outlast the annual re-send of a recurring document, and
 only documents that came from the intake folder get one: a document filed
 from anywhere else on a machine is nobody else's business.
 
+The marker also carries a fingerprint of the document's extracted text
+(`textFingerprint`, sixteen hex digits), because the second copy a teammate
+sends is rarely the same bytes: it is a fresh scan of the same page, or the
+same attachment exported again. A machine that analyses a document whose
+text is within a few bits of a marker's fingerprint, dated the same, sends
+it to review as *Filed already as ... (filed from Front desk)* rather than
+filing it a second time. The comparison is made by the queue with both
+dates in hand; the folder only says how close the texts are. Markers written
+before the fingerprint existed simply have none and take part only in the
+exact-bytes check.
+
 ### Whose documents are they?
 
 Each machine records an **origin marker** for files that first appear locally

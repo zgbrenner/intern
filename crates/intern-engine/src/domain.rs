@@ -312,4 +312,10 @@ pub struct DocumentAnalysis {
     /// reviewer who must give the document a date the model did not.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stated_dates: Vec<String>,
+    /// A fingerprint of everything the extractor read (see
+    /// [`crate::fingerprint`]), for telling a second scan or a re-export of
+    /// a filed document from a new one. Absent for a text too short to
+    /// fingerprint, and for analyses stored by versions that kept none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_fingerprint: Option<String>,
 }

@@ -19,6 +19,11 @@ describe('humanizeReason', () => {
     expect(humanizeReason('date_unsupported')).toContain('verbatim');
   });
 
+  it('tells a near-duplicate apart from an exact one', () => {
+    expect(humanizeReason('NEAR_DUPLICATE')).toBe('This looks like a document that was filed already. Approve to file it as well, keep the original, or remove it.');
+    expect(humanizeReason('LOW_CONFIDENCE, NEAR_DUPLICATE')).toContain('filed already');
+  });
+
   it('explains a bare duplicate flag once the filed name it referred to is gone', () => {
     expect(humanizeReason('DUPLICATE')).toBe('This document\'s content was filed once already. Retry to process it anyway, or remove it.');
   });
