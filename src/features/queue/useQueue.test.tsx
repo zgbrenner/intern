@@ -16,7 +16,7 @@ function deferred<T>() {
 
 const item: QueueItem = { id: 'document', originalFilename: 'agreement.pdf', status: 'waiting' };
 
- describe('queue synchronization', () => {
+describe('queue synchronization', () => {
   it('ignores an older refresh that resolves after a newer one', async () => {
     const first = deferred<QueueItem[]>();
     const second = deferred<QueueItem[]>();
@@ -88,7 +88,7 @@ const item: QueueItem = { id: 'document', originalFilename: 'agreement.pdf', sta
       subscribeQueue: async (next: typeof oldListener) => { oldListener = next; return () => {}; },
     };
     const nextBridge = { ...createInMemoryBridge({ items: [{ ...item, status: 'completed' }] }), subscribeQueue: async () => () => {} };
-    const { result, rerender } = renderHook(({ bridge }: { bridge: DesktopBridge }) => useQueue(bridge), { initialProps: { bridge: oldBridge } });
+    const { result, rerender } = renderHook<ReturnType<typeof useQueue>, { bridge: DesktopBridge }>(({ bridge }) => useQueue(bridge), { initialProps: { bridge: oldBridge } });
     await waitFor(() => expect(oldListener).toBeTypeOf('function'));
     rerender({ bridge: nextBridge });
     await waitFor(() => expect(result.current.items[0]?.status).toBe('completed'));

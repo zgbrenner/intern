@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 import { createQueueReader } from './queueReader';
 
 function deferred<T>() {
@@ -26,7 +25,7 @@ test('publishes a successful queue snapshot', async () => {
   const refresh = reader.refresh();
   requests[0].resolve(['ready']);
   await refresh;
-  assert.deepEqual(snapshots, [['ready']]);
+  expect(snapshots).toEqual([['ready']]);
 });
 
 test('an older response cannot overwrite a newer queue snapshot', async () => {
@@ -37,7 +36,7 @@ test('an older response cannot overwrite a newer queue snapshot', async () => {
   await newer;
   requests[0].resolve(['processing']);
   await older;
-  assert.deepEqual(snapshots, [['completed']]);
+  expect(snapshots).toEqual([['completed']]);
 });
 
 test('an obsolete snapshot is ignored even while the latest read is pending', async () => {
@@ -46,10 +45,10 @@ test('an obsolete snapshot is ignored even while the latest read is pending', as
   const newer = reader.refresh();
   requests[0].resolve(['processing']);
   await older;
-  assert.deepEqual(snapshots, []);
+  expect(snapshots).toEqual([]);
   requests[1].resolve(['ready']);
   await newer;
-  assert.deepEqual(snapshots, [['ready']]);
+  expect(snapshots).toEqual([['ready']]);
 });
 
 test('a current failure is reported and rejects without erasing the last snapshot', async () => {
@@ -59,11 +58,11 @@ test('a current failure is reported and rejects without erasing the last snapsho
   await initial;
   const error = new Error('Queue database is busy.');
   const refresh = reader.refresh();
-  const rejected = assert.rejects(refresh, (cause) => cause === error);
+  const rejected = expect(refresh).rejects.toBe(error);
   requests[1].reject(error);
   await rejected;
-  assert.deepEqual(snapshots, [['ready']]);
-  assert.deepEqual(errors, [error]);
+  expect(snapshots).toEqual([['ready']]);
+  expect(errors).toEqual([error]);
 });
 
 test('an obsolete rejection cannot replace newer success with an error', async () => {
@@ -74,20 +73,20 @@ test('an obsolete rejection cannot replace newer success with an error', async (
   await newer;
   requests[0].reject(new Error('Old request failed.'));
   await older;
-  assert.deepEqual(snapshots, [['completed']]);
-  assert.deepEqual(errors, []);
+  expect(snapshots).toEqual([['completed']]);
+  expect(errors).toEqual([]);
 });
 
 test('a later successful retry can publish after a current failure', async () => {
   const { reader, requests, snapshots } = harness();
   const failed = reader.refresh();
-  const rejected = assert.rejects(failed);
+  const rejected = expect(failed).rejects.toThrow('Temporary failure.');
   requests[0].reject(new Error('Temporary failure.'));
   await rejected;
   const retry = reader.refresh();
   requests[1].resolve(['ready']);
   await retry;
-  assert.deepEqual(snapshots, [['ready']]);
+  expect(snapshots).toEqual([['ready']]);
 });
 
 test('disposal suppresses late snapshots', async () => {
@@ -96,7 +95,7 @@ test('disposal suppresses late snapshots', async () => {
   reader.dispose();
   requests[0].resolve(['ready']);
   await refresh;
-  assert.deepEqual(snapshots, []);
+  expect(snapshots).toEqual([]);
 });
 
 test('disposal absorbs late rejections rather than leaving an unhandled promise', async () => {
@@ -105,7 +104,7 @@ test('disposal absorbs late rejections rather than leaving an unhandled promise'
   reader.dispose();
   requests[0].reject(new Error('Old bridge disconnected.'));
   await refresh;
-  assert.deepEqual(errors, []);
+  expect(errors).toEqual([]);
 });
 
 test('a disposed reader never starts another bridge request', async () => {
@@ -114,7 +113,7 @@ test('a disposed reader never starts another bridge request', async () => {
   const refresh = reader.refresh();
   requests[0]?.resolve([]);
   await refresh;
-  assert.equal(requests.length, 0);
+  expect(requests).toHaveLength(0);
 });
 
 test('synchronous bridge errors use the same recoverable failure path', async () => {
@@ -122,9 +121,9 @@ test('synchronous bridge errors use the same recoverable failure path', async ()
   const errors: unknown[] = [];
   const reader = createQueueReader(
     () => { throw error; },
-    () => { assert.fail('No snapshot should be published.'); },
+    () => { throw new Error('No snapshot should be published.'); },
     (cause) => { errors.push(cause); },
   );
-  await assert.rejects(reader.refresh(), (cause) => cause === error);
-  assert.deepEqual(errors, [error]);
+  await expect(reader.refresh()).rejects.toBe(error);
+  expect(errors).toEqual([error]);
 });
