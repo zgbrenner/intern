@@ -808,6 +808,16 @@ impl AppState {
             code: "APP_DATA_UNAVAILABLE".into(),
             message: "private worker temporary directory is unavailable".into(),
         })?;
+        let microsoft = Arc::new(crate::microsoft_intake::MicrosoftIntake::new(
+            settings.clone(),
+            data.clone(),
+        ));
+        // Invalid identity configuration holds processing, but the UI must
+        // still open so its diagnostic can be read and repaired.
+        if let Ok(initial) = settings.load() {
+            let _ = microsoft.protect_settings(&initial);
+        }
+        app.manage(microsoft.clone());
         let ledger = Arc::new(LedgerSink::new(settings.clone(), data.clone()));
         ledger.attach(app.clone());
         let filed_index = Arc::new(SharedFiledIndex::new(settings.clone(), data.clone()));
@@ -832,8 +842,10 @@ impl AppState {
             .with_filing_sink(Arc::new(FilingSinks(vec![
                 ledger.clone() as Arc<dyn FilingSink>,
                 filed_index.clone(),
+                microsoft.clone(),
             ])))
-            .with_duplicate_oracle(filed_index.clone()),
+            .with_duplicate_oracle(filed_index.clone())
+            .with_admission_guard(microsoft),
         );
         pipeline.recover()?;
         // Opened after the pipeline so the pipeline's own store has already
@@ -1046,33 +1058,51 @@ fn attention_counts(items: &[PipelineItem]) -> (usize, usize) {
 }
 
 #[tauri::command]
-pub fn queue_add_files(
+pub async fn queue_add_files(
     files: Vec<FileSelectionDto>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    let mut paths = Vec::new();
-    for file in files {
-        let input = Path::new(&file.path);
-        match canonical_file(input) {
-            Ok(path) => paths.push(path),
-            Err(file_error) => match canonical_folder(input) {
-                Ok(folder) => paths.extend(collect_supported_files(&folder)?),
-                Err(_) => return Err(file_error.into()),
-            },
+    let pipeline = state.pipeline.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), CommandError> {
+        let mut paths = Vec::new();
+        for file in files {
+            let input = Path::new(&file.path);
+            match canonical_file(input) {
+                Ok(path) => paths.push(path),
+                Err(file_error) => match canonical_folder(input) {
+                    Ok(folder) => paths.extend(collect_supported_files(&folder)?),
+                    Err(_) => return Err(file_error.into()),
+                },
+            }
         }
-    }
-    state.pipeline.enqueue_files(&paths)?;
+        pipeline.enqueue_files(&paths)?;
+        Ok(())
+    })
+    .await
+    .map_err(|_| CommandError {
+        code: "UPLOADER_UNVERIFIED".into(),
+        message: "File intake could not complete verification.".into(),
+    })??;
     state.schedule()
 }
 
 #[tauri::command]
-pub fn queue_add_folder(
+pub async fn queue_add_folder(
     folder: FolderSelectionDto,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    let folder = canonical_folder(Path::new(&folder.path))?;
-    let paths = collect_supported_files(&folder)?;
-    state.pipeline.enqueue_files(&paths)?;
+    let pipeline = state.pipeline.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), CommandError> {
+        let folder = canonical_folder(Path::new(&folder.path))?;
+        let paths = collect_supported_files(&folder)?;
+        pipeline.enqueue_files(&paths)?;
+        Ok(())
+    })
+    .await
+    .map_err(|_| CommandError {
+        code: "UPLOADER_UNVERIFIED".into(),
+        message: "Folder intake could not complete verification.".into(),
+    })??;
     state.schedule()
 }
 
@@ -1113,15 +1143,20 @@ pub fn queue_remove(id: String, state: State<'_, AppState>) -> Result<(), Comman
 }
 
 #[tauri::command]
-pub fn proposal_approve(
+pub async fn proposal_approve(
     id: String,
     filename: String,
     description: String,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    state
-        .pipeline
-        .approve(parse_item_id(&id)?, &filename, &description)?;
+    let pipeline = state.pipeline.clone();
+    let id = parse_item_id(&id)?;
+    tauri::async_runtime::spawn_blocking(move || pipeline.approve(id, &filename, &description))
+        .await
+        .map_err(|_| CommandError {
+            code: "UPLOADER_UNVERIFIED".into(),
+            message: "Rename authorization could not complete.".into(),
+        })??;
     Ok(())
 }
 
@@ -1211,6 +1246,14 @@ pub fn settings_save(
     if previous.start_at_login != settings.start_at_login {
         apply_autostart(&state.app, settings.start_at_login)?;
     }
+    state
+        .app
+        .state::<Arc<crate::microsoft_intake::MicrosoftIntake>>()
+        .protect_settings(&settings)
+        .map_err(|message| CommandError {
+            code: "UPLOADER_UNVERIFIED".into(),
+            message,
+        })?;
     state.settings.save(&settings)?;
     state.refresh_hosted_active(&settings);
     if previous.model_source != settings.model_source {
@@ -1229,6 +1272,7 @@ pub fn settings_save(
     }
     if previous.intake_folder != settings.intake_folder
         || previous.intake_enabled != settings.intake_enabled
+        || previous.intake_local_only != settings.intake_local_only
         || previous.process_others_uploads != settings.process_others_uploads
         || previous.machine_label != settings.machine_label
     {

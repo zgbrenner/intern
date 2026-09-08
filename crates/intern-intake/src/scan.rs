@@ -50,7 +50,20 @@ pub enum ItemState {
 /// The boundary to whatever processes documents (the pipeline in the real
 /// app, a fake in tests). The watcher only hands over paths and asks about
 /// their fate; it never reads document content itself.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IntakeAdmission {
+    LocalOnly,
+    Verified,
+    Other,
+    Unknown,
+}
+
 pub trait IntakeHost: Send + Sync {
+    /// The default is a hold. File arrival and origin markers are not proof of
+    /// a Microsoft uploader. A host must explicitly authorize the source.
+    fn admission(&self, _path: &Path) -> IntakeAdmission {
+        IntakeAdmission::Unknown
+    }
     fn enqueue(&self, paths: &[PathBuf]) -> Result<(), String>;
     fn item_state(&self, path: &Path) -> ItemState;
     /// The claim was lost to a takeover or sync conflict: cancel/remove the
@@ -66,6 +79,7 @@ pub struct IntakeStatus {
     pub last_scan_at: Option<i64>,
     /// Eligible-extension files we are NOT claiming (scope/ownership rules).
     pub held_for_others: u32,
+    pub uploader_unknown: u32,
     /// Files skipped because their name is a sync client's conflict copy.
     pub sync_conflicts: u32,
     /// Claims held open because the document's content is not on this disk yet.
@@ -89,6 +103,7 @@ impl IntakeStatus {
             folder,
             last_scan_at: None,
             held_for_others: 0,
+            uploader_unknown: 0,
             sync_conflicts: 0,
             awaiting_hydration: 0,
             unreadable_folders: 0,
@@ -105,6 +120,7 @@ impl IntakeStatus {
         self.watching != other.watching
             || self.folder != other.folder
             || self.held_for_others != other.held_for_others
+            || self.uploader_unknown != other.uploader_unknown
             || self.sync_conflicts != other.sync_conflicts
             || self.awaiting_hydration != other.awaiting_hydration
             || self.unreadable_folders != other.unreadable_folders

@@ -57,7 +57,11 @@ impl QueueStatus {
             (Self::Queued, Self::Canceled | Self::NeedsReview)
                 | (
                     Self::Extracting,
-                    Self::Analyzing | Self::Queued | Self::Failed | Self::Canceled
+                    Self::Analyzing
+                        | Self::NeedsReview
+                        | Self::Queued
+                        | Self::Failed
+                        | Self::Canceled
                 )
                 | (
                     Self::Analyzing,

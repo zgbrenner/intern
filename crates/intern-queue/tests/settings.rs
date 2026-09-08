@@ -25,6 +25,7 @@ fn settings_saved_before_the_intake_fields_existed_load_with_defaults() {
             automatic_rename: true,
             intake_folder: String::new(),
             intake_enabled: false,
+            intake_local_only: false,
             process_others_uploads: false,
             machine_label: String::new(),
             run_in_background: false,
@@ -52,6 +53,7 @@ fn save_replaces_existing_content_atomically_and_round_trips_the_intake_fields()
         automatic_rename: true,
         intake_folder: "/somewhere/intake".into(),
         intake_enabled: true,
+        intake_local_only: true,
         process_others_uploads: true,
         machine_label: "study desk".into(),
         run_in_background: true,
@@ -70,6 +72,7 @@ fn save_replaces_existing_content_atomically_and_round_trips_the_intake_fields()
     for key in [
         "intakeFolder",
         "intakeEnabled",
+        "intakeLocalOnly",
         "processOthersUploads",
         "machineLabel",
         "runInBackground",

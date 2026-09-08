@@ -5,7 +5,10 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     thread::{self, JoinHandle},
     time::Instant,
 };
@@ -17,8 +20,8 @@ use crate::{
     },
     identity::MachineIdentity,
     scan::{
-        FileFacts, Hydration, IntakeConfig, IntakeHost, IntakeStatus, ItemState, StabilityTracker,
-        SystemHydration, is_conflict_copy, walk_intake,
+        FileFacts, Hydration, IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus, ItemState,
+        StabilityTracker, SystemHydration, is_conflict_copy, walk_intake,
     },
 };
 
@@ -31,6 +34,7 @@ struct Shared {
     control: Mutex<Control>,
     wake: Condvar,
     status: Mutex<IntakeStatus>,
+    shutdown: AtomicBool,
 }
 
 struct Control {
@@ -67,6 +71,7 @@ impl IntakeWatcher {
     ) -> IntakeWatcher {
         let shared = Arc::new(Shared {
             status: Mutex::new(IntakeStatus::idle(config.intake_root.clone())),
+            shutdown: AtomicBool::new(false),
             control: Mutex::new(Control {
                 config,
                 generation: 0,
@@ -116,6 +121,7 @@ impl IntakeWatcher {
 /// documents for a host that is shutting down.
 impl Drop for IntakeWatcher {
     fn drop(&mut self) {
+        self.shared.shutdown.store(true, Ordering::SeqCst);
         lock(&self.shared.control).shutdown = true;
         self.shared.wake.notify_all();
         if let Some(thread) = self.thread.take() {
@@ -175,6 +181,7 @@ fn run(
             &clock,
             hydration.as_ref(),
             &mut state,
+            &shared.shutdown,
         );
         *lock(&shared.status) = status.clone();
         if last_reported
@@ -207,6 +214,7 @@ fn scan_once(
     clock: &Arc<dyn Clock>,
     hydration: &dyn Hydration,
     state: &mut ScanState,
+    shutdown: &AtomicBool,
 ) -> IntakeStatus {
     // Stamped at the start of the walk: the timestamp then vouches that
     // everything on disk up to that instant has been observed.
@@ -270,6 +278,9 @@ fn scan_once(
         live: HashSet::new(),
     };
     for facts in &files {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
         scanner.process_file(facts);
     }
     scanner.finish_unseen_owned();
@@ -329,6 +340,23 @@ impl Scanner<'_> {
         };
         let key = doc.key();
         self.visited.insert(key.clone());
+        let admission = self.host.admission(&facts.path);
+        if matches!(admission, IntakeAdmission::Other | IntakeAdmission::Unknown) {
+            if admission == IntakeAdmission::Other {
+                self.status.held_for_others += 1;
+            } else {
+                self.status.uploader_unknown += 1;
+            }
+            if self.owned.remove(&key).is_some()
+                || self.store.read(&key).is_some_and(|claim| {
+                    claim.machine_id == self.identity.id && claim.state == ClaimState::Claimed
+                })
+            {
+                self.host.abandon(&facts.path);
+                let _ = self.store.release(&key);
+            }
+            return;
+        }
 
         if self.owned.contains_key(&key) {
             if self.store.verify(&key) {
@@ -354,6 +382,9 @@ impl Scanner<'_> {
                 if claim.state == ClaimState::Claimed {
                     self.status.claimed_by_others += 1;
                 }
+            }
+            None if admission == IntakeAdmission::Verified => {
+                self.attempt_claim(&doc, &key, &facts.path)
             }
             None => self.consider_unclaimed(&doc, &key, facts),
         }

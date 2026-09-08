@@ -2359,6 +2359,9 @@ dependencies = [
 name = "intern-intake"
 version = "0.1.0-alpha.6"
 dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "reqwest 0.12.15",
  "serde",
  "serde_json",
  "sha2",

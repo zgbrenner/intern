@@ -25,7 +25,7 @@ use intern_queue::{
     paths::{canonical_file, display_path},
 };
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::SchedulerMessage;
 
@@ -131,6 +131,7 @@ pub struct IntakeStatusDto {
     pub cloud: Option<CloudLocationDto>,
     pub machines: Vec<IntakeMachineDto>,
     pub held_for_others: u32,
+    pub uploader_unknown: u32,
     pub sync_conflicts: u32,
     pub awaiting_hydration: u32,
     pub unreadable_folders: u32,
@@ -196,6 +197,7 @@ pub(crate) fn status_dto(
         cloud: classify_folder(folder),
         machines: Vec::new(),
         held_for_others: 0,
+        uploader_unknown: 0,
         sync_conflicts: 0,
         awaiting_hydration: 0,
         unreadable_folders: 0,
@@ -218,6 +220,7 @@ pub(crate) fn status_dto(
             .map(|machine| machine_dto(machine, now))
             .collect(),
         held_for_others: status.held_for_others,
+        uploader_unknown: status.uploader_unknown,
         sync_conflicts: status.sync_conflicts,
         awaiting_hydration: status.awaiting_hydration,
         unreadable_folders: status.unreadable_folders,
@@ -319,6 +322,18 @@ impl PipelineIntakeHost {
 }
 
 impl IntakeHost for PipelineIntakeHost {
+    fn admission(&self, path: &Path) -> intern_intake::IntakeAdmission {
+        use intern_queue::{AdmissionGuard, AdmissionStage};
+        let manager = self
+            .app
+            .state::<Arc<crate::microsoft_intake::MicrosoftIntake>>();
+        match manager.authorize(path, AdmissionStage::Enqueue) {
+            Ok(Some(_)) => intern_intake::IntakeAdmission::Verified,
+            Ok(None) => intern_intake::IntakeAdmission::LocalOnly,
+            Err(error) if error.code == "UPLOADER_OTHER" => intern_intake::IntakeAdmission::Other,
+            Err(_) => intern_intake::IntakeAdmission::Unknown,
+        }
+    }
     fn enqueue(&self, paths: &[PathBuf]) -> Result<(), String> {
         let mut canonical = Vec::with_capacity(paths.len());
         for path in paths {

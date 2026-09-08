@@ -2373,3 +2373,137 @@ fn a_teammates_filing_with_nearly_this_text_is_named_with_their_machine() {
         .unwrap();
     assert_eq!(item.status, QueueStatus::Ready);
 }
+
+struct UploaderGuard {
+    allowed: AtomicBool,
+    hash: Option<String>,
+}
+impl intern_queue::AdmissionGuard for UploaderGuard {
+    fn authorize(
+        &self,
+        _path: &Path,
+        _stage: intern_queue::AdmissionStage,
+    ) -> Result<Option<String>, PipelineError> {
+        if self.allowed.load(Ordering::SeqCst) {
+            Ok(self.hash.clone())
+        } else {
+            Err(PipelineError::new(
+                "UPLOADER_UNVERIFIED",
+                "Uploader could not be verified.",
+            ))
+        }
+    }
+}
+#[test]
+fn uploader_guard_denies_before_any_source_fingerprinting_or_enqueue() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "new.pdf");
+    let guard = Arc::new(UploaderGuard {
+        allowed: AtomicBool::new(false),
+        hash: None,
+    });
+    let pipeline = pipeline(
+        temp.path(),
+        Arc::new(FakeWorker::new(vec![])),
+        Arc::new(FakeModel::new(vec![])),
+        Arc::new(FakeFiles::default()),
+        AppSettings::default(),
+    )
+    .with_admission_guard(guard);
+    // FakeFiles has no fingerprint for the file. FILE_MISSING proves a read was
+    // attempted before identity authorization, rather than this explicit hold.
+    let error = pipeline.enqueue_files(&[path]).unwrap_err();
+    assert_eq!(error.code, "UPLOADER_UNVERIFIED");
+    assert!(pipeline.list().unwrap().is_empty());
+}
+#[test]
+fn uploader_guard_rechecks_a_previously_queued_document_before_extraction() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "new.pdf");
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "same-bytes");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed("private text"))]));
+    let model = Arc::new(FakeModel::new(vec![]));
+    let guard = Arc::new(UploaderGuard {
+        allowed: AtomicBool::new(true),
+        hash: Some("same-bytes".into()),
+    });
+    let pipeline = pipeline(
+        temp.path(),
+        worker.clone(),
+        model.clone(),
+        files,
+        AppSettings::default(),
+    )
+    .with_admission_guard(guard.clone());
+    pipeline.enqueue_files(&[path]).unwrap();
+    guard.allowed.store(false, Ordering::SeqCst);
+    pipeline.run_until_idle().unwrap();
+    assert_eq!(worker.maximum_active.load(Ordering::SeqCst), 0);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        pipeline.list().unwrap()[0].error_code,
+        Some(ErrorCode::UploaderUnverified)
+    );
+}
+#[test]
+fn uploader_guard_binds_provider_verified_bytes_to_the_queue_fingerprint() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "new.pdf");
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "replacement");
+    let guard = Arc::new(UploaderGuard {
+        allowed: AtomicBool::new(true),
+        hash: Some("verified-version".into()),
+    });
+    let pipeline = pipeline(
+        temp.path(),
+        Arc::new(FakeWorker::new(vec![])),
+        Arc::new(FakeModel::new(vec![])),
+        files,
+        AppSettings::default(),
+    )
+    .with_admission_guard(guard);
+    assert_eq!(
+        pipeline.enqueue_files(&[path]).unwrap_err().code,
+        "FILE_CHANGED"
+    );
+    assert!(pipeline.list().unwrap().is_empty());
+}
+
+#[test]
+fn uploader_guard_rechecks_at_apply_and_never_renames_after_disconnect() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "new.pdf");
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "same-bytes");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let guard = Arc::new(UploaderGuard {
+        allowed: AtomicBool::new(true),
+        hash: Some("same-bytes".into()),
+    });
+    let pipeline = pipeline(
+        temp.path(),
+        worker,
+        model,
+        files.clone(),
+        AppSettings::default(),
+    )
+    .with_admission_guard(guard.clone());
+    let id = pipeline.enqueue_files(&[path.clone()]).unwrap()[0].id;
+    pipeline.run_until_idle().unwrap();
+    guard.allowed.store(false, Ordering::SeqCst);
+    assert_eq!(
+        pipeline
+            .approve(id, "2024-04-12 Employment Agreement.pdf", "")
+            .unwrap_err()
+            .code,
+        "UPLOADER_UNVERIFIED"
+    );
+    assert!(files.applies.lock().unwrap().is_empty());
+    assert!(path.exists());
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::NeedsReview);
+}

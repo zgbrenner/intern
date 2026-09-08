@@ -1,3 +1,4 @@
+import type { MicrosoftIntakeBridge } from '../features/intake/microsoft';
 import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, LearnedRule, QueueItem, SetupState } from '../types';
 
 /** A JSON-safe local document reference that Task 6 can pass to Tauri. */
@@ -46,7 +47,7 @@ export interface SelectionBoundary {
  */
 export const GUIDE_URL = 'https://zgbrenner.github.io/intern/guide.html';
 
-export interface DesktopBridge {
+export interface DesktopBridge extends Partial<MicrosoftIntakeBridge> {
   listItems(): Promise<QueueItem[]>;
   addFiles(files: FileSelection[]): Promise<void>;
   addFolder(folder: FolderSelection): Promise<void>;

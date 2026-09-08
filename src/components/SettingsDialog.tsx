@@ -1,3 +1,4 @@
+import { MicrosoftIntakeSettings } from '../features/intake/MicrosoftIntakeSettings';
 import { ExternalLink, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, DestinationLayout, HostedModelStatus, HostedProvider, IntakeStatus, LearnedRule } from '../types';
@@ -451,8 +452,8 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
         {/*
           The watched folder may be a OneDrive/SharePoint synced folder shared by
           several machines. Coordination happens through small files the sync
-          client replicates - Intern itself still makes no network requests and
-          no document content leaves this machine.
+          client replicates. Microsoft upload verification separately reads account,
+          metadata and audit information after explicit sign-in.
         */}
         <p className="section-lead">Intern can watch a folder — including a OneDrive or SharePoint folder shared with other machines — and process documents that appear in it. Watched intake needs a destination folder outside the intake folder.</p>
         <label className="check-label"><input type="checkbox" checked={next.intakeEnabled} onChange={(event) => setNext({ ...next, intakeEnabled: event.target.checked })} />Watch a folder for new documents</label>
@@ -462,6 +463,10 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
         </div>
         {intakeCloud && <p className="cloud-badge">{cloudBadgeText(intakeCloud)}</p>}
         <label className="check-label"><input type="checkbox" checked={next.processOthersUploads} onChange={(event) => setNext({ ...next, processOthersUploads: event.target.checked })} />Also process documents uploaded by others</label>
+        <p className="check-hint">Off by default: only your verified uploads are eligible. Turning this on accepts other verified uploaders too, never unknown ones.</p>
+        <label className="check-label"><input type="checkbox" checked={Boolean(next.intakeLocalOnly)} disabled={Boolean(intakeCloud)} onChange={(event) => setNext({ ...next, intakeLocalOnly: event.target.checked })} />This is a private local intake, not a shared or synced folder</label>
+        <p className="check-hint">Private local mode does not verify Microsoft uploaders. Never use it for shared intake. Previously paired Microsoft folders remain protected.</p>
+        {!next.intakeLocalOnly && <MicrosoftIntakeSettings bridge={bridge} savedFolder={settings.intakeFolder} unsavedFolder={next.intakeFolder !== settings.intakeFolder} />}
         <label>This machine's name<input value={next.machineLabel} onChange={(event) => setNext({ ...next, machineLabel: event.target.value })} /></label>
         {/*
           The folder a SharePoint library syncs to lives under the user's
@@ -484,7 +489,7 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
         </div>}
         {next.intakeEnabled && <div className="intake-status">
           <p role="status" aria-label="Intake status" aria-live="polite">{intake
-            ? `${intake.watching ? 'Watching' : 'Not watching'} · ${activeMachines} ${activeMachines === 1 ? 'machine' : 'machines'} active · ${intake.heldForOthers} held for others · Last scan: ${formatScanTime(intake.lastScanAt)}`
+            ? `${intake.watching ? 'Watching' : 'Not watching'} · ${activeMachines} ${activeMachines === 1 ? 'machine' : 'machines'} active · ${intake.heldForOthers} held for others · ${intake.uploaderUnknown ?? 0} uploader unknown · Last scan: ${formatScanTime(intake.lastScanAt)}`
             : 'Checking intake status…'}</p>
           {intake && intake.syncConflicts > 0 && <p className="check-hint" role="status">{intake.syncConflicts === 1 ? '1 file is' : `${intake.syncConflicts} files are`} a sync conflict copy left behind by OneDrive or SharePoint. Intern leaves {intake.syncConflicts === 1 ? 'it' : 'them'} alone — resolve the conflict in the folder and the surviving document is picked up on the next scan.</p>}
           {intake && intake.awaitingHydration > 0 && <p className="check-hint" role="status">{intake.awaitingHydration === 1 ? '1 document is' : `${intake.awaitingHydration} documents are`} waiting for OneDrive to download {intake.awaitingHydration === 1 ? 'its' : 'their'} contents. Intern is holding {intake.awaitingHydration === 1 ? 'it' : 'them'} rather than failing {intake.awaitingHydration === 1 ? 'it' : 'them'}; connect this machine and the next scan picks {intake.awaitingHydration === 1 ? 'it' : 'them'} up.</p>}

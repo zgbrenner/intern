@@ -21,6 +21,7 @@ pub enum ErrorCode {
     Duplicate,
     /// The model declined to answer about this document.
     ModelDeclined,
+    UploaderUnverified,
 }
 
 impl ErrorCode {
@@ -39,6 +40,7 @@ impl ErrorCode {
             Self::ModelOutputInvalid => "MODEL_OUTPUT_INVALID",
             Self::Duplicate => "DUPLICATE",
             Self::ModelDeclined => "MODEL_DECLINED",
+            Self::UploaderUnverified => "UPLOADER_UNVERIFIED",
         }
     }
 
@@ -57,6 +59,7 @@ impl ErrorCode {
             "MODEL_OUTPUT_INVALID" => Self::ModelOutputInvalid,
             "DUPLICATE" => Self::Duplicate,
             "MODEL_DECLINED" => Self::ModelDeclined,
+            "UPLOADER_UNVERIFIED" => Self::UploaderUnverified,
             _ => return None,
         })
     }
