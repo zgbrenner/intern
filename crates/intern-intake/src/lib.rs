@@ -18,6 +18,7 @@ pub mod descriptions;
 pub mod filed;
 mod fsatomic;
 pub mod identity;
+pub mod microsoft;
 pub mod scan;
 pub mod watcher;
 
@@ -35,7 +36,7 @@ pub use descriptions::{DescriptionLedger, DescriptionRecord, FiledDocument, reco
 pub use filed::{FILED_RETENTION_SECONDS, FiledIndex, FiledMarker};
 pub use identity::MachineIdentity;
 pub use scan::{
-    DEFAULT_SCAN_INTERVAL, Hydration, IntakeConfig, IntakeHost, IntakeStatus, ItemState,
-    StabilityTracker, SystemHydration, is_conflict_copy,
+    DEFAULT_SCAN_INTERVAL, Hydration, IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus,
+    ItemState, StabilityTracker, SystemHydration, is_conflict_copy,
 };
 pub use watcher::IntakeWatcher;

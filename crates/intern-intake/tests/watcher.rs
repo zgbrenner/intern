@@ -15,7 +15,8 @@ use std::{
 use common::{MockClock, facts_for, identity, wait_until};
 use intern_intake::{
     COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome, Hydration,
-    IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState, scan::is_conflict_copy,
+    IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState,
+    scan::is_conflict_copy,
 };
 use tempfile::TempDir;
 
@@ -29,6 +30,7 @@ struct FakeHost {
     states: Mutex<HashMap<PathBuf, ItemState>>,
     statuses: Mutex<Vec<IntakeStatus>>,
     fail_enqueue: AtomicBool,
+    admission: Mutex<Option<IntakeAdmission>>,
 }
 
 impl FakeHost {
@@ -49,6 +51,13 @@ impl FakeHost {
 }
 
 impl IntakeHost for FakeHost {
+    // The existing tests exercise the explicitly local-only protocol.
+    fn admission(&self, _path: &Path) -> IntakeAdmission {
+        self.admission
+            .lock()
+            .unwrap()
+            .unwrap_or(IntakeAdmission::LocalOnly)
+    }
     fn enqueue(&self, paths: &[PathBuf]) -> Result<(), String> {
         if self.fail_enqueue.load(Ordering::SeqCst) {
             return Err("the queue is unavailable".to_string());
@@ -659,4 +668,39 @@ fn an_unreadable_subfolder_is_counted_and_skipped_rather_than_failing_the_scan()
     }));
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
     result.unwrap();
+}
+
+#[test]
+fn unknown_uploader_is_held_even_when_all_uploads_are_enabled() {
+    let rig = Rig::start(true, &[]);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Unknown);
+    rig.write("new.pdf", b"new upload");
+    rig.step();
+    rig.step();
+    assert!(rig.host.enqueued().is_empty());
+    assert_eq!(rig.watcher.status().uploader_unknown, 1);
+}
+#[test]
+fn verified_uploads_do_not_depend_on_which_machine_first_observed_a_file() {
+    let rig = Rig::start(false, &["mine.pdf"]);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Verified);
+    rig.step();
+    rig.step();
+    assert_eq!(rig.host.enqueued().len(), 1);
+}
+#[test]
+fn other_uploads_are_held_and_a_later_revocation_abandons_owned_work() {
+    let rig = Rig::start(false, &[]);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Other);
+    let path = rig.write("other.pdf", b"other upload");
+    rig.step();
+    rig.step();
+    assert!(rig.host.enqueued().is_empty());
+    assert_eq!(rig.watcher.status().held_for_others, 1);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Verified);
+    rig.step();
+    assert_eq!(rig.host.enqueued().len(), 1);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Unknown);
+    rig.step();
+    assert!(rig.host.abandoned().contains(&path));
 }

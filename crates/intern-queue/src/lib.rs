@@ -7,6 +7,8 @@
 
 #![deny(unsafe_code)]
 
+pub mod admission;
+pub use admission::{AdmissionGuard, AdmissionStage};
 pub mod paths;
 pub mod pipeline;
 pub mod settings;

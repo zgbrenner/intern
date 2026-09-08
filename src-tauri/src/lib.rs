@@ -4,6 +4,7 @@ use tauri::Manager;
 
 pub mod commands;
 pub mod intake;
+pub mod microsoft_intake;
 pub mod model;
 pub mod secrets;
 pub mod tray;
@@ -24,13 +25,9 @@ pub fn run() {
                 .arg("--minimized")
                 .build(),
         )
-        // The only network call Intern makes besides the one-off model
-        // download and, only when a person chose one in Settings, the hosted
-        // model - and it happens only when someone presses the button in
-        // Settings. There is no background poll and no timer: a document tool
-        // that reaches out on its own is a document tool you have to take on
-        // trust. Updates are verified against the public key in tauri.conf.json
-        // before anything is installed.
+        // Updates remain user-initiated and signature-verified. Microsoft
+        // upload verification and hosted inference are separate opt-in network
+        // integrations; see their explicit permissions/privacy notices.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let state = commands::AppState::initialize(app.handle()).map_err(|error| {
@@ -66,6 +63,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            microsoft_intake::microsoft_intake_status,
+            microsoft_intake::microsoft_sign_in_start,
+            microsoft_intake::microsoft_sign_in_poll,
+            microsoft_intake::microsoft_disconnect,
+            microsoft_intake::microsoft_bind_intake,
+            microsoft_intake::microsoft_open_sign_in,
             commands::queue_list,
             commands::queue_add_files,
             commands::queue_add_folder,

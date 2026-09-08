@@ -1,3 +1,4 @@
+import type { MicrosoftAuthConfig, MicrosoftIntakeStatus, MicrosoftDevicePrompt, MicrosoftSignInProgress, MicrosoftFolderBinding } from '../features/intake/microsoft';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, HouseRule, IntakeStatus, LearnedRule, QueueItem, SetupState } from '../types';
@@ -101,6 +102,13 @@ export interface TauriSelectionBoundary extends SelectionBoundary {
 
 export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventSource, IntakeEventSource, DescriptionsEventSource {
   constructor(private readonly transport: TauriTransport = defaultTransport) {}
+
+  microsoftIntakeStatus(): Promise<MicrosoftIntakeStatus> { return this.transport.invoke('microsoft_intake_status'); }
+  microsoftSignInStart(config: MicrosoftAuthConfig, acknowledgeAuditAccess: boolean): Promise<MicrosoftDevicePrompt> { return this.transport.invoke('microsoft_sign_in_start', { config, acknowledgeAuditAccess }); }
+  microsoftSignInPoll(): Promise<MicrosoftSignInProgress> { return this.transport.invoke('microsoft_sign_in_poll'); }
+  microsoftDisconnect(): Promise<void> { return this.transport.invoke('microsoft_disconnect'); }
+  microsoftBindIntake(driveId: string, folderId: string): Promise<MicrosoftFolderBinding> { return this.transport.invoke('microsoft_bind_intake', { driveId, folderId }); }
+  microsoftOpenSignIn(): Promise<void> { return this.transport.invoke('microsoft_open_sign_in'); }
 
   async listItems(): Promise<QueueItem[]> {
     const items = await this.transport.invoke<QueueItemDto[]>('queue_list');

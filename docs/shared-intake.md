@@ -17,23 +17,19 @@ library synced with **Sync** or **Add shortcut to OneDrive**. Intern detects
 sync roots and labels the folder in Settings ("Synced with OneDrive – Contoso",
 "Synced with SharePoint – Contoso") so you can see what you picked.
 
-What Intern deliberately does **not** do is talk to Microsoft's servers. There
-is no Graph API client, no OAuth token, no upload code. The product's core
-promise — document text, extracted pages, OCR output, and model prompts never
-leave the machine — survives this feature intact, because the only thing moving
-files to the cloud is the sync client you already run, under the account you
-already audit. Intern still makes only the network requests it always made —
-the model download and the update check, both user-initiated, neither about
-your documents — unless a hosted model has been chosen in Settings, which is a
-separate and explicit decision described in the README, and has nothing to do
-with the sync client.
+Shared upload identity is now verified through the opt-in Microsoft connector.
+This changes the older sync-only design: the app contacts Microsoft for
+account/file metadata and actual upload audit events. It never sends document
+text through that connector, but it sends paths/time ranges, creates audit
+searches and requires administrator-approved audit scopes. The precise setup,
+privacy costs and supported initial-upload cases are in
+[Microsoft upload verification](microsoft-upload-verification.md).
 
-Files On-Demand is handled: an online-only file is a placeholder on disk, and
-Intern queues it like any other document. The read that extraction performs is
-what makes the sync client download the content. If the machine is offline and
-a placeholder cannot hydrate, the document fails to extract and goes to review
-instead of being guessed at — keep intake files available, or the machine
-online, and it never comes up.
+Files On-Demand are not read by Intern until uploader verification succeeds.
+Once permitted, the sync client may hydrate a file for the local/cloud checksum
+comparison. An unavailable file remains held, never inferred from who synced
+it first. Personal OneDrive and unpaired/ambiguous roots stay unverified in this
+initial connector.
 
 A failure while the content is still in the cloud is not a verdict on the
 document, because nothing ever read it. Intern holds the claim open in that
@@ -90,7 +86,7 @@ be typed or browsed afterwards.
 
 ## Network shares
 
-Nothing here requires a sync client. A folder on a network share — a UNC path
+The lease protocol does not require a sync client. A folder on a network share — a UNC path
 such as `\\fileserver\legal\intake`, or a mapped drive letter Windows reports
 as remote — is recognised and labelled *On a network share* in Settings, and
 several machines watching the same share coordinate through exactly the same
@@ -98,6 +94,8 @@ several machines watching the same share coordinate through exactly the same
 filesystem, so claim creation is genuinely exclusive there, and the
 eventual-consistency caveats below do not apply. What the share does not do is
 hydrate anything; every file on it is already local to every machine.
+The network share alone does not establish a Microsoft uploader, so strict
+mode holds its files unless a supported Microsoft pairing and evidence exist.
 
 ## Several machines, one intake folder
 
@@ -172,18 +170,19 @@ exact-bytes check.
 
 ### Whose documents are they?
 
-Each machine records an **origin marker** for files that first appear locally
-on it — a file you dropped into the folder on this machine, as opposed to one
-that arrived through sync. By default a machine only processes its own
-uploads: documents that arrived from teammates, and documents that were
-already in the folder before watching started, are counted in Settings as
-held, not claimed.
+In strict shared-intake mode, Microsoft's authenticated account and upload
+event establish identity before any claim or content read. Only matching
+verified uploads are eligible by default. Other verified people are held;
+unknowns remain held even when team-worker mode is selected. Existing queued
+items, retries and manual imports from protected roots obey the same gate.
 
-Turning on **"Also process documents uploaded by others"** lets a machine take
-unowned and teammate-uploaded documents too — after a courtesy delay of two
-minutes, so the uploader's own machine always gets first claim on its own
-work. With every machine opted in, the folder behaves as a shared work queue:
-first claim wins, leases keep it fair, takeover keeps it live.
+Origin markers are retained only for coordination and the explicit private
+local-folder mode. They do not identify a Microsoft uploader. In particular,
+seeing a new local file with no marker proves nothing about who uploaded it.
+The separate `uploaderUnknown` count and per-file reasons expose unresolved
+identity instead of silently crediting the current machine. Local attribution
+keeps uploader, actual analysis processor and applied filename distinct; it is
+not a cross-machine Microsoft audit dashboard.
 
 ### What the shared folder learns about you
 

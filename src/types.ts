@@ -63,6 +63,8 @@ export interface AppSettings {
   /** Watched intake folder path; "" = none configured. */
   intakeFolder: string;
   intakeEnabled: boolean;
+  /** Only for explicitly private local folders, never a shared sync root. */
+  intakeLocalOnly?: boolean;
   /** false = only process documents uploaded from this machine ("mine" scope). */
   processOthersUploads: boolean;
   /** Overrides the hostname shown to other machines; "" = use hostname. */
@@ -177,6 +179,7 @@ export interface IntakeStatus {
   cloud: CloudLocation | null;
   machines: IntakeMachine[];
   heldForOthers: number;
+  uploaderUnknown?: number;
   syncConflicts: number;
   awaitingHydration: number;
   /** Subfolders the last scan could not read; the rest was still scanned. */

@@ -367,3 +367,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, tr:focus-visi
 /* The filing a near-duplicate repeats, under the reason for review. */
 .near-duplicate { margin: 8px 0 0; font-size: 13px; }
 .near-duplicate q { font-style: normal; font-weight: 600; }
+
+/* Microsoft identity is a separate decision from machine coordination. */
+.microsoft-intake { margin: 18px 0; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); display: grid; gap: 16px; }
+.microsoft-intake h4 { margin: 0; font-size: 14px; font-weight: 650; }
+.identity-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.identity-policy { font-size: 11px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); }
+.identity-account { display: grid; gap: 5px; padding: 14px; background: var(--surface-subtle); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.identity-account > strong { font-size: 17px; }
+.identity-account > span, .identity-account details { font-size: 12px; color: var(--text-muted); }
+.identity-admin summary { font-weight: 600; font-size: 13px; cursor: pointer; margin-bottom: 12px; }
+.identity-admin label, .identity-folder label { margin-top: 12px; }
+.identity-permissions { padding: 12px; background: var(--surface-subtle); border-left: 3px solid var(--border-strong); font-size: 12px; line-height: 1.6; }
+.identity-folder { padding-top: 16px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.identity-signin { padding: 16px; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.identity-code { display: block; font-family: ui-monospace, monospace; letter-spacing: .1em; font-size: 22px; user-select: all; margin: 12px 0; }
+.identity-documents > p { font-size: 12px; color: var(--text-muted); }
+.identity-documents ul { margin: 0; padding: 0; list-style: none; max-height: 300px; overflow-y: auto; }
+.identity-documents li { padding: 12px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.identity-documents li > strong { display: block; font-size: 13px; }
+.identity-documents li p { margin: 5px 0 0; font-size: 12px; line-height: 1.5; }
+.identity-state { display: block; font-size: 11px; font-weight: 600; margin: 5px 0; color: var(--text-muted); }

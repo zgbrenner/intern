@@ -21,6 +21,7 @@ use intern_engine::{
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+use crate::admission::{AdmissionGuard, AdmissionStage, LocalAdmission};
 use crate::settings::{AppSettings, DestinationLayout, SettingsStore};
 
 const LEASE_RENEWAL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
@@ -551,6 +552,7 @@ pub struct Pipeline {
     events: Arc<dyn PipelineEventSink>,
     filing: Arc<dyn FilingSink>,
     duplicates: Arc<dyn DuplicateOracle>,
+    admission: Arc<dyn AdmissionGuard>,
     settings: SettingsStore,
     paused: AtomicBool,
     active_item: AtomicI64,
@@ -587,6 +589,7 @@ impl Pipeline {
             events,
             filing: Arc::new(NoFilingSink),
             duplicates: Arc::new(NoDuplicateOracle),
+            admission: Arc::new(LocalAdmission),
             settings,
             paused: AtomicBool::new(false),
             active_item: AtomicI64::new(0),
@@ -617,6 +620,7 @@ impl Pipeline {
             events,
             filing: Arc::new(NoFilingSink),
             duplicates: Arc::new(NoDuplicateOracle),
+            admission: Arc::new(LocalAdmission),
             settings,
             paused: AtomicBool::new(false),
             active_item: AtomicI64::new(0),
@@ -642,6 +646,12 @@ impl Pipeline {
         self
     }
 
+    #[must_use]
+    pub fn with_admission_guard(mut self, guard: Arc<dyn AdmissionGuard>) -> Self {
+        self.admission = guard;
+        self
+    }
+
     #[doc(hidden)]
     pub fn with_model_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.model_timeout = timeout;
@@ -657,7 +667,14 @@ impl Pipeline {
     pub fn enqueue_files(&self, paths: &[PathBuf]) -> PipelineResult<Vec<QueueItem>> {
         let mut queued = Vec::with_capacity(paths.len());
         for path in paths {
+            let verified = self.admission.authorize(path, AdmissionStage::Enqueue)?;
             let fingerprint = self.files.fingerprint(path)?;
+            if verified.as_ref().is_some_and(|hash| hash != &fingerprint) {
+                return Err(PipelineError::new(
+                    "FILE_CHANGED",
+                    "The file changed after Microsoft verified its uploader.",
+                ));
+            }
             let mut item = self.store.enqueue(path, &fingerprint)?;
             if item.status == QueueStatus::Queued {
                 item = self.flag_if_completed_duplicate(item)?;
@@ -836,6 +853,16 @@ impl Pipeline {
         let Some(item) = self.store.claim_next()? else {
             return Ok(false);
         };
+        if self.authorize_item(&item, AdmissionStage::Extract).is_err() {
+            self.store.transition(
+                item.id,
+                QueueStatus::Extracting,
+                QueueStatus::NeedsReview,
+                Some(ErrorCode::UploaderUnverified),
+            )?;
+            self.events.queue_changed();
+            return Ok(true);
+        }
         self.active_item.store(item.id, Ordering::SeqCst);
         let request_id = format!("queue-{}-{}", item.id, item.processing_failures + 1);
         let phase = Arc::new(Mutex::new(LeasePhase::Extracting));
@@ -944,6 +971,18 @@ impl Pipeline {
             .unwrap_or_default()
             .to_owned();
         let existing = existing_names(item.source_path.parent().unwrap_or_else(|| Path::new(".")));
+        if self.authorize_item(&item, AdmissionStage::Analyze).is_err() {
+            lease.stop_and_check()?;
+            self.store.transition(
+                item.id,
+                QueueStatus::Analyzing,
+                QueueStatus::NeedsReview,
+                Some(ErrorCode::UploaderUnverified),
+            )?;
+            self.active_item.store(0, Ordering::SeqCst);
+            self.events.queue_changed();
+            return Ok(true);
+        }
         let analysis = match self.analyze_with_deadline(&source, &extension, &existing) {
             Ok(analysis) => analysis,
             Err(error) => {
@@ -1029,6 +1068,8 @@ impl Pipeline {
             next,
             self.store.session_id(),
         )?;
+        self.admission
+            .processed(&item.source_path, &item.source_hash);
         let ready_item = self
             .store
             .list()?
@@ -1313,12 +1354,33 @@ impl Pipeline {
         }
     }
 
+    fn authorize_item(&self, item: &QueueItem, stage: AdmissionStage) -> PipelineResult<()> {
+        let verified = self.admission.authorize(&item.source_path, stage)?;
+        if verified
+            .as_ref()
+            .is_some_and(|hash| hash != &item.source_hash)
+        {
+            return Err(PipelineError::new(
+                "UPLOADER_UNVERIFIED",
+                "The current file is not the version whose uploader was verified. Retry after verification.",
+            ));
+        }
+        Ok(())
+    }
+
     fn apply_if_unchanged(
         &self,
         item: &QueueItem,
         filename: &str,
         settings: &AppSettings,
     ) -> PipelineResult<()> {
+        if let Err(error) = self.authorize_item(item, AdmissionStage::Apply) {
+            let _ = self
+                .repository
+                .mark_needs_review(item.id, "UPLOADER_UNVERIFIED");
+            self.events.queue_changed();
+            return Err(error);
+        }
         let fingerprint = match self.files.fingerprint(&item.source_path) {
             Ok(fingerprint) => fingerprint,
             Err(error) => {
@@ -1576,6 +1638,13 @@ impl Pipeline {
                 "INVALID_TRANSITION",
                 "proposal is not reviewable",
             ));
+        }
+        if let Err(error) = self.authorize_item(&item, AdmissionStage::Apply) {
+            let _ = self
+                .repository
+                .mark_needs_review(item.id, "UPLOADER_UNVERIFIED");
+            self.events.queue_changed();
+            return Err(error);
         }
         let proposed = self.repository.load_proposal(id)?;
         self.repository

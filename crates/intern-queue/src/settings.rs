@@ -89,6 +89,9 @@ pub struct AppSettings {
     pub intake_folder: String,
     #[serde(default)]
     pub intake_enabled: bool,
+    /// Explicitly private/local intake; never permitted for a detected sync root.
+    #[serde(default)]
+    pub intake_local_only: bool,
     #[serde(default)]
     pub process_others_uploads: bool,
     #[serde(default)]

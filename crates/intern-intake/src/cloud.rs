@@ -1,7 +1,7 @@
 //! Detection of OneDrive/SharePoint sync roots and network shares on the
 //! local machine.
 //!
-//! Intern never talks to Microsoft Graph. A "cloud" folder is simply a local
+//! This discovery module does not contact Graph. A "cloud" folder is a local
 //! path that the Microsoft sync client replicates, so detection is a matter of
 //! reading the sync client's own breadcrumbs: environment variables and the
 //! per-user registry on Windows, well-known home-directory names elsewhere.

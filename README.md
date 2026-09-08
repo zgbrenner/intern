@@ -20,12 +20,13 @@ Alongside the name it produces one sentence saying what the document actually
 concerns, the verbatim excerpts behind every fact it used, and a confidence. If
 anything is unsupported, the document goes to review instead of being renamed.
 
-Everything happens on the machine. Document text, extracted pages, OCR output,
-and model prompts never leave it. There is no telemetry, no cloud fallback, and
-no remote processing.
+With local inference selected, document text, extracted pages, OCR output and
+model prompts stay on the machine. There is no telemetry or automatic cloud
+inference fallback. Optional Microsoft upload verification uses account, file
+metadata and audit APIs, not remote document analysis.
 
-Intern makes exactly two network requests, both started by a person pressing a
-button, neither carrying anything about your documents:
+Without either optional integration enabled, Intern has two user-initiated
+network features, neither carrying document information:
 
 1. The one-off download of the pinned model file — 1.19 GiB, the text model and
    nothing else.
@@ -33,7 +34,7 @@ button, neither carrying anything about your documents:
    manifest. There is no background poll and no timer. An update is installed
    only if it is signed by this project's key; anything else is refused.
 
-There is one optional exception, and it is a choice, never a default. Settings
+There are two optional integrations. Both require an explicit choice. Settings
 can point Intern at a **hosted model** — Anthropic's, OpenAI's, or any service
 that speaks the OpenAI chat-completions shape, including a local server such as
 Ollama or LM Studio — under your own API key. With that on, the condensed text
@@ -43,7 +44,13 @@ comes back, and the file itself never leaves. The header badge stops saying
 *On this device* for as long as it is on, the key lives in the operating
 system's credential store rather than in any Intern file, and **Test
 connection** sends only Intern's own calibration document. If the promise
-above is why you use Intern, leave it off.
+above is why you use Intern, leave hosted inference off.
+
+**Microsoft upload verification** is a separate, opt-in account and audit
+connection for shared intake. It sends Microsoft item paths and time ranges
+and reads identity/metadata, never document text. It requires administrator
+setup and broader audit permissions than a folder-only metadata lookup.
+Unknown uploaders stay held. See [setup and limitations](docs/microsoft-upload-verification.md).
 
 Intern reads documents as text: native PDF text first, OCR when a page has none,
 and no vision model. The projector for this model is 668,227,264 bytes — 637 MiB,
@@ -77,8 +84,7 @@ attestation is the part that establishes where the file came from.
 
 On first launch Intern shows a setup screen and asks to download the one thing
 the installer deliberately leaves out: the pinned model file, 1.19 GiB. That
-download is resumable, it is the only network request Intern makes on its own
-behalf, and the file becomes active only after its exact length and SHA-256 match the manifest
+download is resumable, it transfers no document information, and the file becomes active only after its exact length and SHA-256 match the manifest
 built into the installer. If you already have the file, **Choose existing model
 files** points Intern at it and skips the download. Nothing else needs
 installing — PDF text extraction, OCR, and inference all ship inside the app.
@@ -127,30 +133,26 @@ folder** to watch: documents that appear in it are analyzed and, once approved
 (or automatically, if you enable high-confidence renames), moved to the
 destination folder under their new name.
 
-Both folders can live inside OneDrive or a SharePoint document library. The
-integration is deliberately the **Microsoft sync client**, not a cloud API:
-point Intern at any folder the OneDrive engine keeps on disk — your personal
-OneDrive, OneDrive for Business, or a SharePoint library synced with **Sync**
-or **Add shortcut to OneDrive** — and Intern detects the sync root and labels
-the folder in Settings. Files On-Demand placeholders are handled; the sync
-client downloads content when Intern reads it. No document text, no OCR
-output, and no model prompt goes anywhere new: the two network requests listed
-above are still the only ones Intern makes, and the only thing moving files to
-the cloud is the sync client you already run.
+Files continue to move through the **Microsoft sync client**. Shared intake
+now defaults to strict Microsoft uploader verification rather than assuming
+that a file first seen on this machine was uploaded by its user. Unknown
+uploaders stay out of the processing queue, including manual imports from the
+protected folder. Ordinary manual documents outside intake stay local.
 
-Several machines can watch the **same** shared intake folder. They coordinate
-through small claim files in a `.intern/` directory inside it — leases with
-heartbeats, so a document is processed exactly once, a crashed machine's work
-is taken over after its lease lapses, and nothing needs a server. By default
-each machine only processes documents uploaded from that machine; enabling
-**"Also process documents uploaded by others"** turns the folder into a shared
-work queue, with a courtesy delay so the uploader's own machine gets first
-claim. The same directory keeps a **filed index**: a marker, named by the
-document's content hash, for every document any machine filed out of the
-folder, so a teammate who re-uploads last month's agreement under a new name
-sees it flagged as a duplicate of the filed name — and which machine filed it —
-rather than filed a second time. The design, its guarantees, and its failure
-behavior are documented in [`docs/shared-intake.md`](docs/shared-intake.md).
+In Settings, connect your Microsoft work/school account and pair the saved
+intake with its Microsoft drive/folder IDs. Your authenticated name/email is
+shown; the underlying tenant and account IDs decide ownership. Only actual,
+unambiguous upload-event evidence permits processing. The first connector
+supports new unchanged uploads, not arbitrary edits/moves/overwrites or
+personal OneDrive. Account setup requires an administrator, and Microsoft
+may delay upload audit records. Read the [pilot setup and limitations](docs/microsoft-upload-verification.md)
+before enabling it. No live tenant compatibility is implied by unit tests.
+
+Several machines can coordinate using `.intern/` claim files and the existing
+filed index. Sync-based leases are best-effort, not an exactly-once guarantee.
+Machine names and origin markers help coordination; they are never evidence
+of the Microsoft uploader. Team-worker mode still requires a verified uploader.
+The protocol is documented in [shared intake](docs/shared-intake.md).
 
 Settings lists the **synced locations** the sync client keeps on the machine
 — each SharePoint library and OneDrive account, with its local folder — so
