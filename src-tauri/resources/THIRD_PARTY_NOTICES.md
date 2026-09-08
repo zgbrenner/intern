@@ -1,6 +1,6 @@
 # Intern third-party notices
 
-Intern 0.1.0-alpha.6 is (c) 2026 Vistage Worldwide, Inc. and is distributed
+Intern 0.1.0-alpha.7 is (c) 2026 Vistage Worldwide, Inc. and is distributed
 under the Elastic License 2.0; see `LICENSE` in the source repository. This
 notice covers the third-party software shipped in, linked into, or downloaded
 by the Windows package. `runtime-assets.json` is the authoritative,

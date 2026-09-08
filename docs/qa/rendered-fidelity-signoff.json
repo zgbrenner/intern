@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "status": "accepted",
-  "release_inputs_sha256": "fe016f3944a190dd932d001367fdcc44a360b5cb6fd2030d6fe233e290a1c05c",
+  "status": "pending",
+  "release_inputs_sha256": "pending",
   "screenshot_path": "docs/qa/latest-implementation.png",
-  "screenshot_sha256": "1bc7bb1707c743fc87106eb3a2a914d234128cefdc20e92a77c88fa7a6b7fb76",
-  "reviewer": "Claude Opus 5 (Claude Code), at the maintainer's direction",
-  "reviewed_at": "2026-09-02T00:45:16Z",
-  "notes": "Inspected the fresh 1536x1024 capture from Whole-product QA evidence run 33572364279 at commit 9e91511c12ad9a3e727e3fa56e15b7197de191d2. This capture differs substantially from alpha.5's, as alpha.6 rebuilds the review panel. What the frame shows and what I checked: evidence now reads as attributed quotations under labelled DATE, TYPE, and PARTIES headings, with each party on its own line so it can be checked separately, rather than the previous run-together definition list; the model's confidence appears in the panel with an exact percentage beside a proportional track, on the surface where the trust decision is actually made; the approve and keep actions sit in a pinned bar at the foot of the panel; the selected row carries an accent bar as well as a tint, so it is no longer confusable with hover; and a help affordance sits beside the settings gear. Hierarchy, alignment, and spacing hold across all three planes. Statuses remain distinguishable by icon as well as colour, and this run's automated contrast assertions passed. No clipping, collisions, illegible copy, or ambiguous focus. The proposed filename is set in a monospace face on purpose: it is a string that will exist on disk verbatim, and mono is what makes a doubled space visible while it can still be corrected. Scope is a rendered fidelity review of the web build, not a pixel-equality claim; native title bar, 1024 layout, hover, and motion rely on the automated and installed-app gates, which passed in this run."
+  "screenshot_sha256": "pending",
+  "reviewer": "pending",
+  "reviewed_at": "pending",
+  "notes": "Awaiting a fresh alpha.7 capture. The accepted alpha.6 record was bound to release-input digest fe016f3944a190dd932d001367fdcc44a360b5cb6fd2030d6fe233e290a1c05c at commit 9e91511c12ad9a3e727e3fa56e15b7197de191d2. Eight pull requests and this version bump have changed the non-QA release inputs since, so that digest no longer describes what would ship, and the record it belongs to would be stale rather than merely old. This file is deliberately pending instead: a Whole-product QA evidence run binds cleanly against a pending sign-off and fails closed against an accepted one whose digest does not match, so leaving the alpha.6 record in place would block the very run that produces the capture needed to replace it. The screenshot named above is still alpha.6's capture until that run lands and a reviewer accepts its replacement."
 }

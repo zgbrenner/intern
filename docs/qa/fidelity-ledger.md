@@ -1,9 +1,21 @@
-# Intern alpha.6 rendered-fidelity ledger
+# Intern alpha.7 rendered-fidelity ledger
 
-**Rendered sign-off status: accepted.** The accepted record is
-`docs/qa/rendered-fidelity-signoff.json`, reviewed on 2026-09-02 and bound to
-the final non-QA release-input digest
-`fe016f3944a190dd932d001367fdcc44a360b5cb6fd2030d6fe233e290a1c05c`.
+**Rendered sign-off status: pending.** `docs/qa/rendered-fidelity-signoff.json`
+is a pending record awaiting a fresh alpha.7 capture. It is pending rather than
+stale-accepted on purpose: a Whole-product QA evidence run binds cleanly against
+a pending sign-off and fails closed against an accepted one bound to a digest
+that no longer matches, so the alpha.6 record left in place would have blocked
+the run that produces the capture needed to replace it. Everything below records
+the superseded alpha.6 review until that capture is taken and accepted.
+
+## Superseded alpha.6 record
+
+The alpha.6 sign-off was reviewed on 2026-09-02 and bound to the non-QA
+release-input digest
+`fe016f3944a190dd932d001367fdcc44a360b5cb6fd2030d6fe233e290a1c05c` at commit
+`9e91511c12ad9a3e727e3fa56e15b7197de191d2`. Eight pull requests and the alpha.7
+version bump have changed the non-QA release inputs since, so that digest no
+longer describes what would ship.
 
 ## Evidence inspected
 
