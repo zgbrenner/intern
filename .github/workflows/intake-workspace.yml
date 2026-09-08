@@ -1,0 +1,31 @@
+name: Intake verification workspace
+on:
+  push:
+    branches: [codex/intake-verification-workspace]
+    paths: [.github/workflows/intake-workspace.yml]
+permissions:
+  contents: read
+jobs:
+  workspace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - run: npm ci
+      - name: Package tracked source and public test dependencies
+        shell: bash
+        run: |
+          git archive --format=tar HEAD > "$RUNNER_TEMP/intern-workspace.tar"
+          tar -rf "$RUNNER_TEMP/intern-workspace.tar" node_modules
+          gzip "$RUNNER_TEMP/intern-workspace.tar"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: intern-verification-workspace
+          path: ${{ runner.temp }}/intern-workspace.tar.gz
+          retention-days: 1
