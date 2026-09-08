@@ -1,23 +1,30 @@
 //! The document-understanding engine: one call in, one structured result out.
 //!
 //! ```text
-//! DocumentSource ─▶ distill ─▶ prompt ─▶ one local inference ─▶ validate ─▶ name
+//! DocumentSource ─▶ distill ─▶ prompt ─▶ one inference ─▶ validate ─▶ name
 //! ```
 //!
 //! Everything above this line (extraction, OCR) and everything below it (the
 //! queue, the file operations, the UI) is somebody else's problem. That is what
 //! makes a CLI, a watched folder, or a future connector able to reuse this
 //! without touching how documents are understood.
+//!
+//! The inference is local by default. A hosted model behind an API key can
+//! stand in the same place - see [`crate::hosted`] - and everything on either
+//! side of it, the distillation the model reads and the validation its reply
+//! must pass, is identical.
 
 use std::time::Instant;
 
-use crate::client::{ModelClient, ModelRequest};
+use crate::client::{ModelClient, ModelRequest, Proposer};
 use crate::distill::{DigestBudget, DocumentDigest, distill};
 use crate::domain::{
     AnalysisTelemetry, DocumentAnalysis, DocumentSource, ProposalStatus, ReviewReason,
     ValidationOutcome,
 };
 use crate::error::EngineResult;
+use crate::evidence::stated_dates;
+use crate::fingerprint::{self, source_fingerprint};
 use crate::naming::compose_filename;
 use crate::validate::validate;
 
@@ -30,12 +37,18 @@ use crate::validate::validate;
 pub const MIN_READABLE_CHARACTERS: usize = 200;
 
 pub struct Engine {
-    client: ModelClient,
+    client: Box<dyn Proposer>,
     budget: DigestBudget,
 }
 
 impl Engine {
     pub fn new(client: ModelClient) -> Self {
+        Self::with_proposer(Box::new(client))
+    }
+
+    /// An engine over any model that can answer the prompt - the local server
+    /// or a hosted one.
+    pub fn with_proposer(client: Box<dyn Proposer>) -> Self {
         Self {
             client,
             budget: DigestBudget::default(),
@@ -90,7 +103,7 @@ impl Engine {
             }
             outcome.status = ProposalStatus::NeedsReview;
         }
-        Ok(finish(
+        let mut analysis = finish(
             outcome,
             digest,
             extension,
@@ -102,7 +115,9 @@ impl Engine {
                 distill_micros,
                 inference_millis,
             },
-        ))
+        );
+        analysis.text_fingerprint = source_fingerprint(source).map(fingerprint::encode);
+        Ok(analysis)
     }
 
     pub fn distill(&self, source: &DocumentSource) -> DocumentDigest {
@@ -122,7 +137,6 @@ pub fn finish(
     telemetry: AnalysisTelemetry,
 ) -> DocumentAnalysis {
     let filename = compose_filename(&outcome.proposal, extension, existing_names).value;
-    let _ = digest;
     DocumentAnalysis {
         filename,
         description: outcome.proposal.description.clone(),
@@ -130,6 +144,9 @@ pub fn finish(
         review_reasons: outcome.reasons,
         proposal: outcome.proposal,
         telemetry,
+        model_proposal: Some(outcome.candidate),
+        stated_dates: stated_dates(digest),
+        text_fingerprint: None,
     }
 }
 
@@ -173,6 +190,41 @@ mod tests {
     #[test]
     fn a_scan_that_yielded_nothing_is_flagged_rather_than_guessed_at() {
         assert!(barely_readable(&source_with_image("l1 ll  I")));
+    }
+
+    /// The dates a reviewer is offered are the document's own, each once, in
+    /// the order the document states them, and never more than a handful.
+    #[test]
+    fn the_analysis_lists_the_dates_the_document_states_once_each_in_order() {
+        use crate::domain::{ModelProposal, PartyRelation};
+
+        let source = source_from_text(
+            "CONSULTING AGREEMENT\n\nThis Agreement is effective as of April 1, 2026.\n\
+             Signed on March 28, 2026 by both parties.\n\
+             The initial term ends on 2027-03-31. Effective as of April 1, 2026 again.\n\
+             Invoices are due 30 days after 15 May 2026.",
+        );
+        let digest = crate::distill::distill(&source, crate::distill::DigestBudget::default());
+        let outcome = validate(
+            ModelProposal {
+                document_type: Some("Consulting Agreement".into()),
+                document_date: Some("2026-04-01".into()),
+                date_role: Some(crate::domain::DateRole::Effective),
+                parties: Vec::new(),
+                party_relation: PartyRelation::None,
+                description: "Consulting agreement effective April 1, 2026 for an initial term."
+                    .into(),
+                confidence: 0.9,
+                needs_review: false,
+                evidence: crate::domain::Evidence::default(),
+            },
+            &digest,
+        );
+        let analysis = finish(outcome, &digest, "pdf", &[], AnalysisTelemetry::default());
+        assert_eq!(
+            analysis.stated_dates,
+            vec!["2026-04-01", "2026-03-28", "2027-03-31", "2026-05-15"]
+        );
     }
 
     #[test]

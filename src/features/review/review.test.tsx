@@ -157,6 +157,27 @@ describe('review actions', () => {
     })));
   });
 
+  it('saves run in background with start at login, gating start minimized on the tray', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(base.saveSettings);
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    // Minimized-without-tray would strand the app invisibly, so the checkbox
+    // only unlocks once background mode is on.
+    expect(await screen.findByLabelText('Start minimized')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Run in background'));
+    fireEvent.click(screen.getByLabelText('Start Intern when you sign in'));
+    fireEvent.click(screen.getByLabelText('Start minimized'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      runInBackground: true,
+      startAtLogin: true,
+      startMinimized: true,
+    })));
+  });
+
   it('browses for the destination and intake folders at the selection boundary', async () => {
     const pickFolder = vi.fn()
       .mockResolvedValueOnce({ path: 'C:\\Filed', displayName: 'Filed' })
@@ -181,9 +202,103 @@ describe('review actions', () => {
     expect(await screen.findByText('Synced with OneDrive – Contoso')).toBeVisible();
   });
 
+  it('saves the destination layout and explains where a document will land', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(base.saveSettings);
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    const layout = await screen.findByLabelText('Arrange filed documents');
+    expect(layout).toHaveValue('flat');
+    fireEvent.change(layout, { target: { value: 'year_type' } });
+    expect(screen.getByText(/2026\\Statement of Work\\/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ destinationLayout: 'year_type' })));
+  });
+
+  it('offers the synced locations the sync client keeps and fills the folders from them', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(base.saveSettings);
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    const locations = await screen.findByRole('group', { name: 'Synced locations on this computer' });
+    expect(locations).toHaveTextContent('SharePoint – Contoso');
+    expect(locations).toHaveTextContent('C:\\Users\\pat\\Contoso\\Legal - Documents');
+    fireEvent.click(screen.getByRole('button', { name: 'Use SharePoint – Contoso as the destination folder' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use OneDrive – Contoso as the intake folder' }));
+
+    expect(screen.getByLabelText('Destination folder')).toHaveValue('C:\\Users\\pat\\Contoso\\Legal - Documents');
+    expect(screen.getByLabelText('Intake folder')).toHaveValue('C:\\Users\\pat\\OneDrive - Contoso');
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      destination: 'C:\\Users\\pat\\Contoso\\Legal - Documents',
+      intakeFolder: 'C:\\Users\\pat\\OneDrive - Contoso',
+    })));
+  });
+
+  it('labels a network share by its share name', async () => {
+    render(<App bridge={createInMemoryBridge()} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    fireEvent.change(await screen.findByLabelText('Destination folder'), { target: { value: '\\\\fileserver\\legal\\filed' } });
+
+    expect(await screen.findByText('On a network share – \\\\fileserver\\legal')).toBeVisible();
+  });
+
+  it('saves the description records setting and reports the records folder', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(base.saveSettings);
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    const status = await screen.findByRole('status', { name: 'Description records status' });
+    expect(status).toHaveTextContent('Off');
+    // Not yet saved on, so the backfill cannot be offered.
+    expect(screen.getByRole('button', { name: 'Write records for documents already filed' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Destination folder'), { target: { value: 'C:\\Filed' } });
+    fireEvent.click(screen.getByLabelText('Write a description record for each filed document'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      recordDescriptions: true,
+      destination: 'C:\\Filed',
+    })));
+  });
+
+  it('writes records for documents already filed once the setting is saved on', async () => {
+    const bridge = createInMemoryBridge();
+    await bridge.saveSettings({ destination: 'C:\\Filed', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: true, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' });
+    render(<App bridge={bridge} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+
+    const status = await screen.findByRole('status', { name: 'Description records status' });
+    expect(status).toHaveTextContent('On');
+    expect(status).toHaveTextContent('C:\\Filed\\.intern\\descriptions');
+    const backfill = await screen.findByRole('button', { name: 'Write records for documents already filed' });
+    await waitFor(() => expect(backfill).toBeEnabled());
+    fireEvent.click(backfill);
+
+    // The seeded queue has exactly one completed item that still carries its sentence.
+    expect(await screen.findByRole('status', { name: 'Backfill status' })).toHaveTextContent('1 record written.');
+    await waitFor(() => expect(status).toHaveTextContent('1 record written since Intern started'));
+  });
+
+  it('explains a records-without-destination refusal in plain words', async () => {
+    const base = createInMemoryBridge();
+    const saveSettings = vi.fn(async () => { throw { code: 'DESCRIPTIONS_NEED_DESTINATION', message: 'description records need a destination folder to live in' }; });
+    render(<App bridge={{ ...base, saveSettings }} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+    fireEvent.click(await screen.findByLabelText('Write a description record for each filed document'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/choose a destination before turning them on.*\(DESCRIPTIONS_NEED_DESTINATION\)/i);
+  });
+
   it('renders the live intake status with the held-for-others count', async () => {
     const bridge = createInMemoryBridge();
-    await bridge.saveSettings({ destination: 'C:\\Filed', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '' });
+    await bridge.saveSettings({ destination: 'C:\\Filed', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: 'C:\\Scans', intakeEnabled: true, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' });
     render(<App bridge={bridge} />);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
 
@@ -204,6 +319,31 @@ describe('review actions', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/destination folder is inside the intake folder.*\(DESTINATION_INSIDE_INTAKE\)/i);
     // The dialog stays open so the folders can be corrected.
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+  });
+
+  // Both affordances go through the bridge rather than a link, because inside
+  // Tauri a <a target="_blank"> has nowhere to open.
+  it('opens the published guide from the chrome and from Settings', async () => {
+    const openGuide = vi.fn(async () => undefined);
+    render(<App bridge={{ ...createInMemoryBridge(), openGuide }} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Help & support' }));
+    await waitFor(() => expect(openGuide).toHaveBeenCalledTimes(1));
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open the guide' }));
+
+    await waitFor(() => expect(openGuide).toHaveBeenCalledTimes(2));
+  });
+
+  it('names the guide address when the browser hand-off is refused', async () => {
+    const openGuide = vi.fn(async () => { throw new Error('opener denied'); });
+    render(<App bridge={{ ...createInMemoryBridge(), openGuide }} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Help & support' }));
+
+    expect(await screen.findByRole('status', { name: 'Action error' }))
+      .toHaveTextContent('https://zgbrenner.github.io/intern/guide.html');
   });
 
   it('moves Keep original to Completed and lets the user undo it', async () => {

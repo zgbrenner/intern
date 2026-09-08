@@ -34,7 +34,14 @@ page is covered by images. A page goes to OCR only when it has fewer than 20
 meaningful characters under heavy image coverage, or when more than 3% of its
 characters came back as replacement glyphs. Office containers go through AnyDoc
 to Markdown, which preserves headings and tables; plain text and Markdown are
-read directly.
+read directly. Excel workbooks are read sheet-per-page as Markdown tables,
+capped at 200 rows by 30 columns per sheet with an elision marker so a large
+workbook cannot flood distillation. PowerPoint decks go through the same
+Office reader as Word documents, slide by slide in order. `.eml` emails and
+Outlook `.msg` messages emit a fixed-order header
+block — the `Date:` line verbatim, so the sent date is checkable against the
+document like any other fact — followed by the plain-text body and a listing
+(never an extraction) of attachments.
 
 Two consequences of "OCR only when necessary" are enforced in code rather than
 documented as intent:
@@ -81,7 +88,10 @@ Distillation instead reads the whole document:
 4. **Select.** Mandatory blocks first (the opening, anything carrying a date with
    a stated role, anything naming parties and a type, subject lines, signature
    blocks), then the highest-scoring remainder, until the budget is spent.
-   Near-duplicate blocks never compete for budget with text that appears once.
+   A block whose text repeats one already kept (clause number aside) is never
+   kept twice, and near-duplicate blocks — the same opening or, for long body
+   text, the same closing 80 characters with digits masked — never compete
+   for budget with text that appears once.
 5. **Emit.** Kept blocks are written back **in document order**, with `[Page N]`
    markers, `[...]` where text was removed, a `SECTIONS:` outline of every
    heading found anywhere in the document, and an index of every sentence that
@@ -174,10 +184,10 @@ The goal is calibration, not timidity. A proposal goes to review only when a
 
 | Fact | Accepted when |
 | --- | --- |
-| Date | it is a real calendar date **and** is written, in some ordinary human form, in the document |
+| Date | it is a real calendar date **and** is written, in some ordinary human form, in the document — `April 1, 2026`, `1st April 2026`, `01/04/2026`, `01.04.2026`, `4/1/26`, and their relatives, matched as whole tokens so `12/1/2026` never supports February 1 |
 | Type | at least 60% of its significant words appear in the document |
-| Party | the name appears verbatim in the document |
-| Description | one sentence, 6–42 words, and every number and capitalised name in it appears in the document |
+| Party | the name appears in the document, verbatim or with punctuation disregarded (`Vistage Worldwide Inc` for a document that writes `Vistage Worldwide, Inc.`); the words themselves are never loosened |
+| Description | one sentence, 6–42 words, and every number and capitalised name in it appears in the document, allowing a possessive, a thousands separator, or a hyphen the sentence added |
 
 The date rule is deliberately about the *date*, not about the model's quoted
 line. Small models paraphrase their own quotes — answering
@@ -190,6 +200,44 @@ checked. The model's quoted line is still stored and shown to the reviewer.
 Self-reported confidence below 0.60 also routes to review, as does any
 fact-affecting parser warning, and any document with no defining date or no
 specific type.
+
+Three things are then decided from the document rather than from the model,
+because a two-billion-parameter model is good at finding facts and poor at
+labelling them consistently:
+
+* **The date's role.** The wording in the ninety-odd characters before the
+  validated date decides whether it is an effective, execution, invoice,
+  notice, termination, amendment, filing, or issuance date - `Effective as
+  of`, `Invoice date`, `Notice is hereby given ... on`, `signed on`. A bare
+  `Date:` label defers to the document type (an invoice's bare date is its
+  invoice date; an amendment's is its own date). The model's stated role is
+  used only when the document's wording says nothing. The wording is read
+  across a PDF's line wraps - "is dated" on one line and "as of September
+  14, 2025" on the next are one sentence - but a line that ended a sentence
+  or a label keeps its cue to itself, so a header's `Date of this Notice:`
+  never lends `notice` to the sentence under it.
+* **A missing type, or a partial one.** When the model offers no document
+  type, or one the document does not support, the document's own title - the
+  first outline heading, at most eight words, containing a type noun
+  (`agreement`, `invoice`, `minutes`, `NDA` ...) - becomes the type, and the
+  document is routed to review with `TYPE_INFERRED` so a person confirms the
+  title names the document. A document with no such title still gets no
+  type. A supported type the title merely completes - `Journal` under
+  "MOONLIT ARCHIVE PROJECT JOURNAL" - is completed from the title, whole,
+  without a review flag, provided the extra words are plain: not an exhibit
+  label, not a party's name, not the `No` a stripped number leaves behind.
+* **Who issued an invoice.** An invoice, receipt, account statement, or
+  quote is *from* whoever issued it, not *between* its two sides. When the
+  model says `between` for one of those types and the document's own layout
+  names a customer (`Bill to`, `Sold to`, `Attn`) or an issuer (`Remit to`,
+  `From:`), the relation is repaired to `from` the issuing party. Every cue
+  nominates an issuer; one nominee settles it, however many cues agree, and
+  two leave the model's answer alone. A statement *of work* is an agreement,
+  not a statement, and is never repaired this way.
+
+Each is deterministic, unit-tested against the corpus's own date lines and
+titles, and never invents a fact: a role, a type, or a relation is inferred
+only from text the validation has already found in the document.
 
 ## The filename
 
@@ -211,7 +259,17 @@ Lease Agreement with ORION GLASS STUDIO INC.pdf
 
 Those are outputs, not illustrations. The last one carries no date because the
 scan gave up no readable one, so it goes to review rather than borrowing a date
-from somewhere else in the page.
+from somewhere else in the page. Nor does it become a rename as it stands:
+every applied name must begin with a date (`DATE_REQUIRED`, refused at
+approval and again at the apply), so the reviewer types one or accepts the
+model's unverified reading. The analysis keeps the model's reply beside the
+validated facts for exactly that offer — a date the document never states
+verbatim is withheld from the name, not lost — and lists every date the
+document does state, so a document the model could not date is dated from
+its own page in a click, with the file's last-modified date as the labelled
+last resort. Whatever date the applied name carries is the date the queue
+files under: the layout's year folder and the description record read it
+from the name, never from the fact validation withheld.
 
 The party clause is composed from a validated relation and validated names, not
 from free text, so every name in a filename has been found in the document.
@@ -219,7 +277,54 @@ Names longer than 120 characters shed the second party, then the party clause,
 then truncate the type — detail is lost from the least identifying end first.
 Windows-hostile characters, reserved device names, trailing dots and spaces, and
 bidirectional control characters are removed; the original extension is always
-preserved; collisions get a ` (2)` suffix.
+preserved; collisions get a ` (2)` suffix. The engine checks collisions
+against the only folder it knows, the document's own; the queue recomposes the
+name against the folder the document is actually going to, so a suffix means
+a real collision at the destination and never a phantom one at the source.
+
+Where a document lands is the destination folder plus, optionally, a
+subfolder the queue derives from the validated facts: the year, the year and
+type, the type, or the first party (`2026/Statement of Work/`). A fact the
+layout needs but the document lacks sends it to `Undated` or `Unsorted`, never
+the root. Folders are created on first use and removed by the undo that
+empties them; the destination itself is never removed.
+
+### House style
+
+The document's words are not always the words a person files under.
+"Vistage Worldwide, Inc." is "Vistage" to everyone at Vistage, and a
+reviewer who fixes that in every name is teaching something the model cannot
+learn and validation must not: validation checks that a name is *in* the
+document, and "Vistage" alone would pass that check for the wrong reason.
+
+So house style is a separate, deterministic stage that runs after validation
+and before naming. A rule maps a spelling as the document writes it (matched
+with case, punctuation, and spacing disregarded, words never loosened) to the
+spelling the reviewer wrote, for one party or for the document type. The
+queue applies the rules in force to the validated proposal, composes the name
+from the result, and records which rules fired beside the proposal. The
+engine's analysis is untouched: the evidence panel still shows the document's
+words, and the description record and the layout folder follow the styled
+proposal, so the name, the folder, and the record agree.
+
+Rules are learned only from edits, and only from edits that respell exactly
+one field. The approved name is read with the grammar that composed the
+proposed one - type, connecting word, party, `and`, party - after stripping
+the extension, the date, and any collision suffix, so a reviewer who typed a
+date and shortened a party in one go still teaches the party. An edit that
+touches two fields, the connecting word, or a name the engine did not compose
+teaches nothing: it is a decision about that document. Reading the grammar
+rather than diffing matters, because the smallest edit lies: "Acme and
+Vistage" becomes "Acme Corp and Vistage Inc" by inserting text one character
+into the connector, and a diff would credit it all to one party.
+
+A rule takes effect on the second identical edit (`EDITS_TO_LEARN`), or at
+once when a person says "Use now" in Settings, and every document still
+waiting is recomposed under it so the queue shows the change immediately.
+Respelling a spelling Intern applied maps back to the document's word - the
+person changed their mind about the word, not about Intern - and restoring
+the document's own spelling retracts the rule. The whole memory is the list
+in Settings; nothing is learned that cannot be seen and forgotten there.
 
 ## Model and runtime
 
@@ -246,6 +351,70 @@ said so. Both statements could not be true.
 Threads are half the logical processors on purpose. llama.cpp scales with
 physical cores rather than SMT threads, and taking every core makes the rest of
 Windows stutter — the product's premise is that it runs while you work.
+
+### A hosted model
+
+The inference is local by default and the local server is the product. The
+same position in the pipeline can be filled by a hosted model behind an API
+key: the engine's `Proposer` is the one seam, the local client and the hosted
+client both implement it, and the distillation, prompt, validation, and naming
+on either side do not know which answered.
+
+The hosted client speaks two wire formats — Anthropic's Messages API, and the
+chat-completions shape OpenAI defined and most providers and local servers
+copy — and sends only what every server understands: the model, the system
+instruction, the prompt, and (for Anthropic, where it is required) an output
+cap. No sampling knobs, because a parameter one provider rejects is a document
+that never gets filed. What goes out is the distilled digest of the document,
+condensed but verbatim; what comes back is read through the same JSON
+recovery and the same evidence checks as a local reply. A refusal from the
+model is reported as one and sends the document to review, never re-routed
+elsewhere; a rejected key or an unreachable service pauses the queue rather
+than failing the backlog one item at a time; a busy service earns one retry.
+
+The key is stored in the operating system's credential store under Intern's
+name, never in the settings file, and never travels anywhere but the address
+that was configured — redirects are refused. Plain HTTP is accepted only to
+this machine, so a local server can be used without a certificate and a
+remote one cannot be used without one. **Test connection** sends the same
+calibration document setup uses to check the local model, so a wrong key,
+model name, or address is found before a real document is sent.
+
+### The same document twice
+
+Exact duplicates are a hash comparison before analysis. The duplicates people
+make are not exact: a second scan of the same page, a PDF exported twice from
+the same message, a copy saved again by a program that rewrote its metadata.
+So the engine also fingerprints everything the extractor read - a 64-bit
+simhash over five-character shingles of the normalised text, hashed with
+FNV-1a spelled out in the crate so the value is identical on every machine
+and in every build, because the shared filed index carries it between
+teammates. Similar text gives similar bits; a second scan with a handful of
+misread characters lands within six bits, and two unrelated documents sit
+about thirty-two apart.
+
+The queue holds every analysis against the fingerprints of its own filings
+and asks the duplicate oracle about other machines. Closeness alone does not
+decide: this month's statement and last month's share almost every word, and
+a fingerprint barely sees the date and the figures that differ. So the dates
+have to agree - the filed name's leading date against the date the analysis
+found or the model read - and without a date on one side only a
+near-identical text counts. A match sends the document to review with
+`NEAR_DUPLICATE`, named after the filing it repeats and the machine that made
+it; it is never filed on its own, and an undo forgets the fingerprint.
+
+## Measuring it
+
+Every stage after the model is deterministic, which is what makes accuracy
+measurable without the model. `intern-evaluate` records a live run - the text
+the worker extracted from each fixture and the reply the model gave, keyed by
+the hash of the prompt - and replays it in seconds: distillation, validation,
+inference of roles and types, house style, and naming run for real over the
+recorded reply, and the corpus is scored against `fixtures/expected.json`. A
+committed baseline turns that into a gate: CI replays on every push and fails
+when a reviewed answer that was right is now wrong, and a prompt change makes
+the recording stale rather than silently scoring replies to a question the
+engine no longer asks. [`evaluation.md`](evaluation.md) has the workflow.
 
 ## What it costs
 
@@ -295,11 +464,26 @@ review reasons, validated facts with evidence, and local timings.
 `intern-analyze` is that call as a command-line program. The desktop app, the
 CLI, and the watched intake folder are all callers of the same function; none
 of them can change how documents are understood. Adding a new host means
-adding a caller, not touching the engine.
+adding a caller, not touching the engine. Adding a model means implementing
+`Proposer`, which is what the hosted client is.
 
 The watched intake folder — including shared OneDrive/SharePoint intake
-folders and the multi-machine claim protocol behind them — lives in
-`intern-intake` and is documented in [`shared-intake.md`](shared-intake.md).
-It sits entirely on the queue side of this boundary: it decides *which*
-documents enter the local queue and records what happened to them, and knows
-nothing about models.
+folders, network shares, and the multi-machine claim protocol behind them —
+lives in `intern-intake` and is documented in
+[`shared-intake.md`](shared-intake.md). It sits entirely on the queue side of
+this boundary: it decides *which* documents enter the local queue and records
+what happened to them, and knows nothing about models.
+
+The queue reports every completed rename to a *filing sink*, and the desktop
+app's sinks write the description records that let a SharePoint column carry
+the sentence — see [`sharepoint-descriptions.md`](sharepoint-descriptions.md)
+— and the filed markers of the shared intake folder. A sink hears about a
+rename only after it has succeeded and cannot undo it; a record that fails to
+write is reported in Settings, and the rename stands.
+
+The mirror image is the *duplicate oracle*: before analysing a document the
+queue checks its own history for the same content, then asks the oracle,
+which in the desktop app reads the shared folder's filed markers. Either
+answer routes the document to review as a duplicate, naming what the content
+was filed as and, for a teammate's filing, by which machine. Analysis never
+runs on a duplicate unless a person asks for it.

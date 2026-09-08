@@ -1,5 +1,7 @@
+import { GUIDE_URL } from './bridge';
 import type { DesktopBridge, FileSelection, FolderSelection, SelectionBoundary, SelectionResult, UpdateStatus } from './bridge';
-import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, LearnedRule, QueueItem, SetupState } from '../types';
+import { leadingDate } from './filenames';
 
 /** Exact size of the single pinned model file this build downloads. */
 export const PINNED_MODEL_BYTES = 1_280_835_840;
@@ -8,10 +10,9 @@ const seedItems: QueueItem[] = [
   { id: 'employment', originalFilename: 'Employment Agreement - John Smith.pdf', status: 'ready', proposedFilename: '2024-04-12 Employment Agreement with John Smith.pdf', confidence: 0.98 },
   { id: 'lease', originalFilename: 'Lease Agreement - 123 Main St.pdf', status: 'review', proposedFilename: '2023-09-15 Lease Agreement between ABC Properties LLC and TenantCo Inc.pdf', confidence: 0.72, description: 'Commercial lease agreement between landlord and tenant for 123 Main St.', evidence: { date: 'Sep 15, 2023', type: 'Lease Agreement', parties: 'ABC Properties LLC; TenantCo Inc.' }, reason: 'Lower confidence due to unclear document type keywords and multiple possible dates.' },
   { id: 'nda', originalFilename: 'NDA - Acme Corp.docx', status: 'ready', proposedFilename: '2024-03-01 Non-Disclosure Agreement with Acme Corp.docx', confidence: 0.95 },
-  // Not a spreadsheet: .xlsx is not in SUPPORTED_EXTENSIONS, so a real one is
-  // rejected with UNSUPPORTED_FORMAT and can never reach `processing`. The demo
-  // queue showed it mid-run at 60% next to a drop zone whose own caption lists
-  // the supported formats and omits spreadsheets.
+  // Stays a PDF even though .xlsx is now supported: the reviewed QA capture
+  // pins this queue's rendered contents, and changing a demo row would force a
+  // re-sign-off for no product reason.
   { id: 'financials', originalFilename: 'Q1 Financials.pdf', status: 'processing', proposedFilename: '2024-03-31 Q1 Financial Statements.pdf', progress: 60 },
   { id: 'service', originalFilename: 'Service Agreement - BlueSky LLC.pdf', status: 'ready', proposedFilename: '2024-02-28 Service Agreement with BlueSky LLC.pdf', confidence: 0.96 },
   { id: 'minutes', originalFilename: 'Board Meeting Minutes - May 7, 2024.docx', status: 'waiting' },
@@ -20,9 +21,26 @@ const seedItems: QueueItem[] = [
   { id: 'completed', originalFilename: 'Completed lease.pdf', status: 'completed', proposedFilename: '2024-01-22 Lease Agreement.pdf', confidence: 0.93, undoable: true, description: 'Residential lease agreement for a twelve-month term beginning January 22, 2024.' },
 ];
 
+/**
+ * Plausible finished operations for browser dev and tests, newest first —
+ * the order the desktop backend returns. Timestamps are fixed so renders are
+ * deterministic.
+ */
+const seedHistory: HistoryEntry[] = [
+  { receiptId: '9', queueItemId: 'completed', at: 1716282900, direction: 'undo', kind: 'rename', stage: 'complete', originalPath: 'C:\\Filed\\2024-05-07 Board Meeting Minutes.docx', newPath: 'C:\\Drop\\Board Meeting Minutes - May 7, 2024.docx' },
+  { receiptId: '7', queueItemId: 'completed', at: 1716282600, direction: 'apply', kind: 'rename', stage: 'complete', originalPath: 'C:\\Drop\\Board Meeting Minutes - May 7, 2024.docx', newPath: 'C:\\Filed\\2024-05-07 Board Meeting Minutes.docx' },
+  { receiptId: '5', queueItemId: 'completed', at: 1716196500, direction: 'apply', kind: 'verified_copy', stage: 'complete', originalPath: 'C:\\Drop\\Invoice INV-1001.pdf', newPath: 'D:\\Archive\\2024-05-02 Invoice INV-1001 from BlueSky LLC.pdf', },
+  { receiptId: '3', queueItemId: 'completed', at: 1716108300, direction: 'apply', kind: 'rename', stage: 'complete', originalPath: 'C:\\Drop\\Completed lease.pdf', newPath: 'C:\\Filed\\2024-01-22 Lease Agreement.pdf' },
+  { receiptId: '1', queueItemId: 'completed', at: 1716021900, direction: 'apply', kind: 'rename', stage: 'complete', originalPath: 'C:\\Drop\\NDA - Acme Corp.docx', newPath: 'C:\\Filed\\2024-03-01 Non-Disclosure Agreement with Acme Corp.docx' },
+];
+
 export interface InMemoryBridgeOptions {
   items?: QueueItem[];
   setup?: Partial<SetupState>;
+  /** A hosted-model key already in the (fake) credential store. */
+  hostedKey?: string;
+  /** Spellings already learned from review. */
+  learnedRules?: LearnedRule[];
   downloadStepBytes?: number;
   downloadIntervalMs?: number;
   update?: UpdateStatus;
@@ -52,15 +70,63 @@ function itemFromFile(file: FileSelection, fixtureBatch = false): QueueItem {
 
 function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): DesktopBridge {
   let items = (options.items ?? seedItems).map((item) => ({ ...item }));
-  let settings: AppSettings = { destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '' };
+  let history = seedHistory.map((entry) => ({ ...entry }));
+  let settings: AppSettings = { destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' };
+  // The hosted model's key, as the desktop backend keeps it: out of the
+  // settings, reported only as stored-or-not with a hint.
+  let hostedKey: string | undefined = options.hostedKey;
+  // What review has taught, as the backend keeps it. Learning itself lives
+  // in the queue, so approving here teaches nothing; the list is fixed.
+  let learnedRules: LearnedRule[] = (options.learnedRules ?? []).map((rule) => ({ ...rule }));
+  const providerDefaults = [
+    { provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com/v1', model: 'claude-opus-5' },
+    { provider: 'openai_compatible' as const, baseUrl: 'https://api.openai.com/v1', model: '' },
+  ];
+  const hostedEndpoint = (draft: AppSettings): string | null => {
+    const defaults = providerDefaults.find((entry) => entry.provider === draft.hostedProvider)!;
+    const base = (draft.hostedBaseUrl.trim() || defaults.baseUrl).replace(/\/+$/, '');
+    const model = draft.hostedModel.trim() || defaults.model;
+    if (!model || !/^https:\/\//.test(base) && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(base)) return null;
+    return `${base}/${draft.hostedProvider === 'anthropic' ? 'messages' : 'chat/completions'}`;
+  };
+  const hostedConfigured = (draft: AppSettings) => hostedKey !== undefined && hostedEndpoint(draft) !== null;
+  const hostedModelStatus = (): HostedModelStatus => ({
+    keyStored: hostedKey !== undefined,
+    keyHint: hostedKey === undefined ? null : `…${hostedKey.slice(-4)}`,
+    endpoint: hostedConfigured(settings) ? hostedEndpoint(settings) : null,
+    providers: providerDefaults.map((entry) => ({ ...entry })),
+  });
   // Deterministic classification so browser dev and e2e runs can exercise the
   // cloud badge without a real sync client: the path only has to mention the
-  // provider. Mirrors the DTO the desktop backend returns from folder_classify.
+  // provider, or start like a UNC path. Mirrors the DTO the desktop backend
+  // returns from folder_classify.
   const classifyPath = async (path: string): Promise<CloudLocation | null> => {
     const lower = path.toLowerCase();
     if (lower.includes('onedrive')) return { provider: 'onedrive_business', displayName: 'OneDrive – Contoso' };
     if (lower.includes('sharepoint')) return { provider: 'sharepoint', displayName: 'Contoso' };
+    const share = /^\\\\([^\\]+)\\([^\\]+)/.exec(path);
+    if (share) return { provider: 'network_share', displayName: `\\\\${share[1]}\\${share[2]}` };
     return null;
+  };
+  // The sync roots a developer machine would show; fixed so the Settings
+  // list renders the same in dev and tests.
+  const roots: CloudRoot[] = [
+    { provider: 'sharepoint', displayName: 'Contoso', path: 'C:\\Users\\pat\\Contoso\\Legal - Documents' },
+    { provider: 'onedrive_business', displayName: 'OneDrive – Contoso', path: 'C:\\Users\\pat\\OneDrive - Contoso' },
+  ];
+  let recordedDescriptions = 0;
+  let lastRecordedAt: number | null = null;
+  const descriptionsStatus = (): DescriptionsStatus => ({
+    enabled: settings.recordDescriptions,
+    folder: settings.destination.trim() ? `${settings.destination.replace(/[\\/]+$/, '')}\\.intern\\descriptions` : '',
+    recordedThisSession: recordedDescriptions,
+    lastRecordedAt,
+    lastError: null,
+  });
+  const noteRecorded = () => {
+    if (!settings.recordDescriptions || !settings.destination.trim()) return;
+    recordedDescriptions += 1;
+    lastRecordedAt = Math.floor(Date.now() / 1000);
   };
   // The pinned model's exact size from src-tauri/resources/model-manifest.json.
   // The previous value, 3_278_329_184, was a model plus a vision projector that
@@ -104,7 +170,12 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     pauseQueue: async () => { items = items.map((item) => item.status === 'processing' ? { ...item, status: 'waiting' as const } : item); },
     resumeQueue: async () => { const item = items.find((entry) => entry.status === 'waiting'); if (item) update(item.id, { status: 'processing', progress: 0 }); },
     cancel: async (id) => update(id, { status: 'failed', progress: undefined, reason: 'Canceled.' }),
-    approve: async (id, filename, description) => update(id, { status: 'completed', proposedFilename: filename, description, undoable: true }),
+    // Mirrors the backend's gate: a rename carries a date or it does not happen.
+    approve: async (id, filename, description) => {
+      if (!leadingDate(filename)) throw { code: 'DATE_REQUIRED', message: 'the filename must start with the document\'s date as YYYY-MM-DD' };
+      update(id, { status: 'completed', proposedFilename: filename, description, undoable: true });
+      noteRecorded();
+    },
     keepOriginal: async (id) => update(id, { status: 'completed', proposedFilename: undefined, undoable: true }),
     retry: async (id) => update(id, { status: 'waiting', progress: undefined }),
     remove: async (id) => {
@@ -115,8 +186,16 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     },
     undo: async (id) => update(id, { status: 'review', undoable: false }),
     getSettings: async () => ({ ...settings }),
-    saveSettings: async (next) => { settings = { ...next }; },
-    getSetup: async () => ({ ...setup }),
+    // Mirrors the backend: a hosted model is refused at save time without a
+    // stored key or a usable address, never silently kept.
+    saveSettings: async (next) => {
+      if (next.modelSource === 'hosted') {
+        if (hostedKey === undefined) throw { code: 'HOSTED_MODEL_KEY_MISSING', message: 'no API key is stored for the hosted model' };
+        if (hostedEndpoint(next) === null) throw { code: 'HOSTED_MODEL_MISCONFIGURED', message: 'the hosted model\'s address or model name is not usable' };
+      }
+      settings = { ...next };
+    },
+    getSetup: async () => ({ ...setup, hostedModelReady: settings.modelSource === 'hosted' && hostedConfigured(settings) }),
     startModelDownload: async () => {
       if (setup.state === 'downloading') return;
       setup = { ...setup, state: 'downloading', error: undefined };
@@ -135,7 +214,13 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
       if (setup.state === 'downloading') throw { code: 'SETUP_BUSY', message: 'a model setup operation is already active' };
       setup = { ...setup, state: 'ready', downloadedBytes: setup.totalBytes, error: undefined };
     },
-    clearHistory: async () => { items = items.filter((item) => item.status !== 'completed' && item.status !== 'failed'); },
+    // Mirrors the backend: clearing history deletes terminal queue rows and,
+    // through cascade, the receipts the history view lists.
+    clearHistory: async () => { items = items.filter((item) => item.status !== 'completed' && item.status !== 'failed'); history = []; },
+    historyList: async () => history.map((entry) => ({ ...entry })),
+    // No file is written in the browser; resolve with the same count the
+    // desktop export reports.
+    historyExport: async () => history.length,
     discardWaiting: async () => {
       const waiting = items.filter((item) => item.status === 'waiting');
       items = items.filter((item) => item.status !== 'waiting');
@@ -164,6 +249,9 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
           { machineId: 'demo-peer', machineName: 'Front desk PC', userName: 'colleague', lastSeenAt: now - 90, active: true },
         ] : [],
         heldForOthers: enabled ? 2 : 0,
+        syncConflicts: 0,
+        awaitingHydration: 0,
+        unreadableFolders: 0,
         claimedByOthers: enabled ? 1 : 0,
         processedHere: enabled ? 3 : 0,
         lastScanAt: enabled ? now - 5 : null,
@@ -172,6 +260,45 @@ function createBridge(options: InMemoryBridgeOptions, fixtureBatch: boolean): De
     },
     scanIntakeNow: async () => { /* Nothing is watching in the browser; the desktop backend wakes its scan loop. */ },
     classifyFolder: (path) => classifyPath(path),
+    cloudRoots: async () => roots.map((root) => ({ ...root })),
+    descriptionsStatus: async () => descriptionsStatus(),
+    // Mirrors the backend: refused until the setting is saved on, otherwise
+    // one record per completed item that still carries its sentence.
+    descriptionsBackfill: async () => {
+      if (!settings.recordDescriptions) throw { code: 'DESCRIPTIONS_DISABLED', message: 'turn on description records and save before writing them' };
+      const written = items.filter((item) => item.status === 'completed' && item.description).length;
+      recordedDescriptions += written;
+      if (written) lastRecordedAt = Math.floor(Date.now() / 1000);
+      return { written, failed: 0 };
+    },
+    // Already in a browser, so the guide opens the way any other link would.
+    // noopener keeps the new tab from reaching back into this document.
+    openGuide: async () => { window.open(GUIDE_URL, '_blank', 'noopener,noreferrer'); },
+    hostedModelStatus: async () => hostedModelStatus(),
+    hostedModelSetKey: async (key) => {
+      if (!key.trim()) throw { code: 'HOSTED_MODEL_KEY_EMPTY', message: 'the API key is empty' };
+      hostedKey = key.trim();
+    },
+    hostedModelClearKey: async () => { hostedKey = undefined; },
+    // No request leaves the browser: the fake answers the way the desktop
+    // backend does once the key, address, and model resolve.
+    hostedModelTest: async (draft): Promise<HostedModelTestResult> => {
+      if (hostedKey === undefined) throw { code: 'HOSTED_MODEL_KEY_MISSING', message: 'no API key is stored for the hosted model' };
+      const endpoint = hostedEndpoint(draft);
+      if (endpoint === null) throw { code: 'HOSTED_MODEL_MISCONFIGURED', message: 'the hosted model\'s address or model name is not usable' };
+      if (hostedKey.startsWith('bad-')) throw { code: 'HOSTED_MODEL_UNAUTHORIZED', message: 'the hosted service rejected the API key' };
+      const defaults = providerDefaults.find((entry) => entry.provider === draft.hostedProvider)!;
+      return { model: draft.hostedModel.trim() || defaults.model, endpoint, filename: '2024-01-02 Notice of Calibration - Northstar Calibration Holdings LLC.pdf', inferenceMillis: 1840 };
+    },
+    houseRulesList: async () => learnedRules.map((rule) => ({ ...rule })),
+    houseRuleForget: async (id) => {
+      if (!learnedRules.some((rule) => rule.id === id)) throw { code: 'RULE_NOT_FOUND', message: 'learned spelling does not exist' };
+      learnedRules = learnedRules.filter((rule) => rule.id !== id);
+    },
+    houseRuleUse: async (id) => {
+      if (!learnedRules.some((rule) => rule.id === id)) throw { code: 'RULE_NOT_FOUND', message: 'learned spelling does not exist' };
+      learnedRules = learnedRules.map((rule) => rule.id === id ? { ...rule, seen: Math.max(rule.seen, 2), active: true } : rule);
+    },
   };
 }
 

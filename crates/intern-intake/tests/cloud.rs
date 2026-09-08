@@ -11,7 +11,9 @@ use std::{
 
 #[cfg(not(windows))]
 use intern_intake::detect_cloud_roots_with;
-use intern_intake::{CloudProviderKind, CloudRoot, EnvProbe, classify};
+use intern_intake::{
+    CloudProviderKind, CloudRoot, EnvProbe, classify, network_share, relative_to_root, unc_share,
+};
 
 #[derive(Default)]
 struct FakeEnv {
@@ -147,4 +149,90 @@ fn classify_matches_case_insensitively_and_only_on_component_boundaries() {
         "a sibling folder sharing the prefix string is not inside the root"
     );
     assert!(classify(Path::new("/somewhere/else.pdf"), &roots).is_none());
+}
+
+/// `canonicalize` on Windows returns `\\?\C:\...` while the registry records
+/// the same root as `C:\...`; the badge and every library-relative path
+/// depend on those two spellings agreeing.
+#[test]
+fn classify_folds_the_verbatim_prefix_drive_case_and_separators() {
+    let roots = vec![
+        root(
+            CloudProviderKind::OneDriveBusiness,
+            "OneDrive – Contoso",
+            r"C:\Users\Pat\OneDrive - Contoso",
+        ),
+        root(
+            CloudProviderKind::SharePoint,
+            "Contoso",
+            r"C:\Users\Pat\Contoso\Legal - Documents",
+        ),
+    ];
+    let verbatim = classify(
+        Path::new(r"\\?\c:\users\pat\onedrive - contoso\Scans"),
+        &roots,
+    )
+    .unwrap();
+    assert_eq!(verbatim.kind, CloudProviderKind::OneDriveBusiness);
+    let slashed = classify(
+        Path::new("C:/Users/Pat/Contoso/Legal - Documents/Contracts"),
+        &roots,
+    )
+    .unwrap();
+    assert_eq!(slashed.kind, CloudProviderKind::SharePoint);
+    assert_eq!(slashed.display_name, "Contoso");
+}
+
+#[test]
+fn a_unc_path_is_a_network_share_named_after_its_share() {
+    let roots = vec![root(
+        CloudProviderKind::OneDriveBusiness,
+        "OneDrive – Contoso",
+        r"C:\Users\Pat\OneDrive - Contoso",
+    )];
+    for path in [
+        r"\\fileserver\legal\intake",
+        r"\\?\UNC\fileserver\legal\intake\2026",
+        r"\\FILESERVER\Legal",
+    ] {
+        let location = classify(Path::new(path), &roots)
+            .unwrap_or_else(|| panic!("{path} should be a network share"));
+        assert_eq!(location.kind, CloudProviderKind::NetworkShare);
+        assert!(
+            location
+                .display_name
+                .eq_ignore_ascii_case(r"\\fileserver\legal"),
+            "{}",
+            location.display_name
+        );
+    }
+    assert_eq!(network_share(Path::new(r"\\fileserver")), None);
+    assert_eq!(network_share(Path::new("/srv/legal/intake")), None);
+    assert_eq!(unc_share(r"\\?\C:\Users\pat\Documents"), None);
+    assert_eq!(CloudProviderKind::NetworkShare.as_str(), "network_share");
+}
+
+#[test]
+fn a_sync_root_outranks_the_network_share_check() {
+    // Nobody syncs OneDrive to a UNC path, but the precedence is what makes
+    // the badge say the more specific thing when both could apply.
+    let roots = vec![root(
+        CloudProviderKind::SharePoint,
+        "Contoso",
+        r"\\fileserver\legal\Contoso - Documents",
+    )];
+    let location = classify(
+        Path::new(r"\\fileserver\legal\Contoso - Documents\Contracts"),
+        &roots,
+    )
+    .unwrap();
+    assert_eq!(location.kind, CloudProviderKind::SharePoint);
+    assert_eq!(
+        relative_to_root(
+            Path::new(r"\\?\UNC\fileserver\legal\Contoso - Documents\Contracts\a.pdf"),
+            Path::new(r"\\fileserver\legal\Contoso - Documents"),
+        )
+        .as_deref(),
+        Some("Contracts/a.pdf")
+    );
 }

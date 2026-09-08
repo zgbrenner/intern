@@ -20,6 +20,8 @@ use crate::domain::{ComposedName, PartyRelation, ValidatedProposal};
 /// Long enough to stay specific, short enough to read in a folder listing.
 pub const MAX_FILENAME_CHARS: usize = 120;
 const MIN_STEM_CHARS: usize = 4;
+/// What a name says where the document type should be when there is none.
+pub(crate) const DEFAULT_TYPE: &str = "Document";
 
 pub fn compose_filename(
     proposal: &ValidatedProposal,
@@ -37,7 +39,7 @@ pub fn compose_filename(
         .as_deref()
         .map(|value| strip_duplicate_extension(value, &extension))
         .and_then(sanitize_segment)
-        .unwrap_or_else(|| "Document".to_owned());
+        .unwrap_or_else(|| DEFAULT_TYPE.to_owned());
     let parties = proposal
         .parties
         .iter()
@@ -176,7 +178,7 @@ fn party_clause(parties: &[String], relation: PartyRelation) -> Option<String> {
     Some(format!("{} {names}", relation.as_str()))
 }
 
-fn sanitize_extension(value: &str) -> String {
+pub(crate) fn sanitize_extension(value: &str) -> String {
     value
         .trim()
         .trim_start_matches('.')
@@ -187,7 +189,7 @@ fn sanitize_extension(value: &str) -> String {
         .collect()
 }
 
-fn strip_duplicate_extension<'a>(value: &'a str, extension: &str) -> &'a str {
+pub(crate) fn strip_duplicate_extension<'a>(value: &'a str, extension: &str) -> &'a str {
     if extension.is_empty() {
         return value;
     }
@@ -212,7 +214,15 @@ fn strip_duplicate_extension<'a>(value: &'a str, extension: &str) -> &'a str {
     stripped
 }
 
-fn sanitize_segment(value: &str) -> Option<String> {
+/// A folder name Windows accepts, built from a fact the way filename segments
+/// are: hostile characters dropped, whitespace collapsed, trailing dots and
+/// spaces removed, reserved device names escaped. `None` when nothing is
+/// left.
+pub fn sanitize_folder_name(value: &str) -> Option<String> {
+    sanitize_segment(value).map(|name| name.chars().take(80).collect::<String>())
+}
+
+pub(crate) fn sanitize_segment(value: &str) -> Option<String> {
     let mut output = String::new();
     let mut pending_space = false;
     for character in value.chars() {

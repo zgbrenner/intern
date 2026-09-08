@@ -8,6 +8,7 @@ use crate::OperationReceipt;
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     FileChanged,
+    SourceLocked,
     DestinationUnavailable,
     MoveVerificationFailed,
     SourceDeleteFailed,
@@ -17,12 +18,16 @@ pub enum ErrorCode {
     IoError,
     InvalidData,
     ModelOutputInvalid,
+    Duplicate,
+    /// The model declined to answer about this document.
+    ModelDeclined,
 }
 
 impl ErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::FileChanged => "FILE_CHANGED",
+            Self::SourceLocked => "SOURCE_LOCKED",
             Self::DestinationUnavailable => "DESTINATION_UNAVAILABLE",
             Self::MoveVerificationFailed => "MOVE_VERIFICATION_FAILED",
             Self::SourceDeleteFailed => "SOURCE_DELETE_FAILED",
@@ -32,12 +37,15 @@ impl ErrorCode {
             Self::IoError => "IO_ERROR",
             Self::InvalidData => "INVALID_DATA",
             Self::ModelOutputInvalid => "MODEL_OUTPUT_INVALID",
+            Self::Duplicate => "DUPLICATE",
+            Self::ModelDeclined => "MODEL_DECLINED",
         }
     }
 
     pub(crate) fn from_str(value: &str) -> Option<Self> {
         Some(match value {
             "FILE_CHANGED" => Self::FileChanged,
+            "SOURCE_LOCKED" => Self::SourceLocked,
             "DESTINATION_UNAVAILABLE" => Self::DestinationUnavailable,
             "MOVE_VERIFICATION_FAILED" => Self::MoveVerificationFailed,
             "SOURCE_DELETE_FAILED" => Self::SourceDeleteFailed,
@@ -47,6 +55,8 @@ impl ErrorCode {
             "IO_ERROR" => Self::IoError,
             "INVALID_DATA" => Self::InvalidData,
             "MODEL_OUTPUT_INVALID" => Self::ModelOutputInvalid,
+            "DUPLICATE" => Self::Duplicate,
+            "MODEL_DECLINED" => Self::ModelDeclined,
             _ => return None,
         })
     }

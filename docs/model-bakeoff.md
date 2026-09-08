@@ -6,7 +6,7 @@ whole generated corpus. Nothing is extrapolated from published benchmarks.
 **Machine:** AMD Ryzen 7 PRO 8840U, 8 cores / 16 threads, 14.7 GB usable RAM, no
 discrete GPU, Windows 11, ordinary background applications running.
 **Runtime:** llama.cpp `b10361`, CPU only, 8 threads, 8,192-token context.
-**Corpus:** `fixtures/generated`, 20 fixtures. Twelve are text-bearing documents
+**Corpus:** `fixtures/generated`, 21 fixtures. Thirteen are text-bearing documents
 that reach the model; two are intentionally unreadable (encrypted, malformed);
 six require OCR and were not scored on this machine, which has PDFium but no
 Tesseract build.
@@ -131,6 +131,68 @@ date on both. The new one takes the effective date buried on page five of a
 29,000-character contract, and the subscription start date from a table rather
 than the "Signed on" line beside it.
 
+## Replayed against the recorded corpus
+
+Everything above was scored live, on the machine named at the top, and could
+not be re-scored without it. Since then the corpus has a committed recording
+(`fixtures/corpus-recording.json`: what the worker read from every fixture and
+what the model replied, keyed by the hash of the prompt) and a baseline
+(`fixtures/corpus-baseline.json`) that CI replays on every push -
+[`evaluation.md`](evaluation.md) explains the mechanism. The recording was made
+with the pinned Qwen3.5-2B Q4_K_M model and llama.cpp `b10361` built from
+source, CPU only, 4 threads, 8,192-token context, on a Linux machine with the
+parser worker built against PDFium `chromium/7881` and the pinned
+`tessdata_fast` files under the distribution's Tesseract 5.3.4 rather than the
+installer's vcpkg 5.5.2; the recording's `note` field says so. The corpus gained a
+three-slide PowerPoint deck in round six and was re-recorded; every other
+fixture scored exactly as before. The engine as it stands scores that
+recording as follows.
+
+| | Text documents (13) | Scanned (6) | Whole corpus |
+| --- | ---: | ---: | ---: |
+| Date correct | 12/12 | 2/6 | 14/18 |
+| Filed under a corpus-marked trap date | **0** | 0 | **0** |
+| Date *role* correct | **11/12** | 2/2 | **13/14** |
+| Document type | **12/12** | 6/6 | **18/18** |
+| Parties | 12/13 | 3/6 | 15/19 |
+| Named a party the corpus marks as not defining | 0/13 | 0/6 | 0/19 |
+| Description covers the listed facts | 10/12 | 6/6 | 16/18 |
+| Agreed with the corpus on review-or-name | 11/13 | 6/6 | 17/19 |
+| Review rate | 23% | 100% | 47% |
+
+Live inference on that machine took a median of 13.9 seconds per document
+(7.0 to 56.7), which is the recording's only number that replay cannot
+reproduce.
+
+The first replay of the recording scored four fixtures lower than this, and
+the difference is the point of having one: each was a defect in the
+deterministic stages after the model, found in seconds and fixed against the
+model's real replies rather than a guess at them.
+
+* The statement of work lost its second party. The model read it correctly
+  as `between` Ridgeline and Vistage; the invoice repair matched the word
+  "statement" in its type, found Vistage on a line with "Client", and dropped
+  it as a customer. An account statement is an issued document; a statement
+  of work is an agreement, and the type list now says so.
+* The vendor invoice kept both parties and `between`. It has a "Bill To" line
+  naming the customer *and* a "Remit To" line naming itself, and the repair
+  wanted exactly one cue. Cues that agree on the issuer now settle it; cues
+  that contradict each other still leave the model's answer alone.
+* The amendment's date role came back `effective`. The PDF wraps "is dated"
+  and "as of September 14, 2025" onto different lines, and the role was read
+  from the second line alone. Wrapped sentences are now rejoined before the
+  wording is read - only where the previous line did not end a sentence or a
+  label and the next carries one on, so a header's "To:" and "From:" lines,
+  and a "Date of this Notice:" line, keep their own cues.
+* The 100-page journal was typed `Journal` under a heading that reads
+  "MOONLIT ARCHIVE PROJECT JOURNAL". A supported type the title completes is
+  now completed from the title, whole - never with an exhibit label, a party's
+  name, or the "No" a stripped number leaves behind.
+
+Text-document date role went from the 6/13 reported above to 11/11, and
+document type from 13/17 to 17/17, on the same model. What remains is listed
+under known misses.
+
 ## Performance
 
 Measured over the same runs, per document, including extraction:
@@ -217,16 +279,52 @@ near the budget.
 
 ## Known misses
 
-Reported rather than tuned away, because twelve documents is a small corpus and
-fitting a prompt to it is not the same as being right:
+Reported rather than tuned away, because thirteen documents is a small corpus and
+fitting a prompt to it is not the same as being right. What the recorded
+corpus still misses, as of the baseline above:
+
+* The termination notice names its sender, Northstar Lantern Works LLC, as a
+  second party beside John Smith. The filename is right - a notice takes one
+  name - but the corpus counts the sender as spurious, and the description
+  record carries it.
+* The short invoice's description is "An invoice for $1,248." The prompt
+  forbids exactly that sentence and the model wrote it anyway; validation
+  sends the document to review for it, which the corpus does not expect.
+* The 100-page journal is typed, dated, and named correctly, and goes to
+  review because the model reports low confidence and asks for it.
+* The meeting minutes are described without the word "minutes", which the
+  corpus lists as a required fact; the document itself never uses the word.
+* The scanned fixtures read digits badly enough (`24h24`, `2625`) that four
+  of six cannot be dated from their own text, exactly as the corpus expects
+  of them; see the paragraph on OCR fidelity below.
+* The review deck (round six) is dated, typed, and named for both parties
+  correctly and goes straight to ready, but its date is labelled `notice`:
+  "Presented on May 21, 2026" carries no cue the role reader knows, so the
+  model's label stood. The corpus calls it `issuance`.
+
+The bullets that follow predate the recording and are kept as the history of
+how the numbers above were reached:
 
 * Two documents (`meeting-minutes.md`, a 100-page project journal) get no
   document type at all and are named `<date> Document.<ext>`. Both are the
   least contract-like fixtures in the corpus. `nda.docx` answers
   `Non-Disclosure Agreement` where the document says `Mutual Non-Disclosure
-  Agreement` - correct but less specific than the text supports.
+  Agreement` - correct but less specific than the text supports. Since then,
+  a document the model leaves untyped takes its type from its own title when
+  the title names one (`Board Meeting Minutes`, `MUTUAL NDA`) and goes to
+  review flagged `TYPE_INFERRED`; the rule is unit-tested on the corpus's
+  titles, and the corpus has not been re-scored against it.
 * The vendor invoice reads `between` its two sides rather than `from` the party
   that issued it. The direction is under-determined by the document's own layout.
+  The queue now repairs `between` to `from` for invoice-shaped types when the
+  layout names a customer (`Bill to`) or an issuer (`Remit to`), which covers
+  this fixture; a document with neither cue keeps what the model said.
+* `date_role_correct` was the weakest metric (6 of 13 on the after run): the
+  model finds the right date and mislabels it. The role is now read from the
+  document's wording around the date - `Effective as of`, `Invoice date`,
+  `Notice is hereby given ... on` - with the model's label used only when the
+  document says nothing. Each corpus date line is covered by a unit test;
+  the metric itself has not been re-run.
 * The six OCR fixtures are not scored for naming quality. They have since been
   run through the packaged worker against a real Tesseract, and the clean-room
   bitmap font reads at 62-95 mean confidence with digits corrupted often enough
@@ -246,12 +344,17 @@ fitting a prompt to it is not the same as being right:
   effectively every real document, still cost exactly one OCR pass.
 * Those OCR measurements come from UB-Mannheim Tesseract 5.4.0, not the pinned
   vcpkg 5.5.2 that ships; treat the exact confidences as indicative.
-* Repeated boilerplate still consumes digest budget. Near-duplicate blocks are
-  dropped by comparing a digit-masked prefix, so `25. Assignment.` and
-  `41. Assignment.` collapse to one - but only when the repeats begin the same
-  way. In the 14-page statement of work, the same assignment and force-majeure
-  clauses reappear several times because some copies start with the numbered
-  heading and some start mid-clause, and the prefixes therefore differ. It costs
-  budget rather than accuracy: the identifying content and every date still
-  survive, and date accuracy on that document is correct. Worth tightening only
-  with a measurement showing it buys something.
+* Repeated boilerplate used to consume digest budget. Near-duplicate blocks
+  were dropped by comparing a digit-masked prefix, so `25. Assignment.` and
+  `41. Assignment.` collapsed to one - but only when the repeats began the same
+  way, and never when the block was mandatory. In the 14-page statement of
+  work the same assignment and force-majeure clauses reappeared several times:
+  some copies started with the numbered heading, some mid-clause, and every
+  copy named the parties and the type, which made every copy mandatory. Two
+  changes since: a block whose text is identical to one already kept (clause
+  number aside) is dropped whether or not it is mandatory, and a
+  non-mandatory body block that ends on the same 80 characters as one already
+  kept is dropped too. Blocks that differ only in their digits are still both
+  kept, because the digits may be the date. This is verified on synthetic
+  documents in the distillation tests; the corpus has not been re-scored
+  against it, and the release evaluation will say what it buys.

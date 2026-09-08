@@ -7,11 +7,16 @@ use std::{
     time::Duration,
 };
 
-use intern_core::{OperationDirection, OperationStage, QueueStatus};
+use intern_core::{
+    HISTORY_LIMIT, HistoryEntry, OperationDirection, OperationKind, OperationStage, QueueStatus,
+    QueueStore,
+};
+use intern_engine::HouseRule;
 use intern_engine::{
     DocumentAnalysis, DocumentSource, Engine, LlamaServer, ModelClient, ModelManifest,
     ServerOptions, SupervisedWorker, prepare_worker_temp_root,
 };
+use intern_queue::{LearnedRule, ModelSource};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -25,17 +30,22 @@ use intern_engine::setup::{
 };
 use intern_intake::{IntakeConfig, IntakeWatcher, MachineIdentity};
 use intern_queue::{
-    AnalyzerBoundary, AppSettings, ModelFailure, Pipeline, PipelineError, PipelineEventSink,
-    PipelineItem, PipelineProgress, SettingsStore,
+    AnalyzerBoundary, AppSettings, FilingSink, FilingSinks, ModelFailure, Pipeline, PipelineError,
+    PipelineEventSink, PipelineItem, PipelineProgress, SettingsStore,
     paths::{
         SUPPORTED_EXTENSIONS, canonical_file, canonical_folder, canonical_model_file,
-        collect_supported_files, parse_item_id,
+        collect_supported_files, display_path, parse_item_id,
     },
 };
 
 use crate::intake::{
-    CloudLocationDto, IntakeStatusDto, PipelineIntakeHost, classify_folder, now_unix, status_dto,
+    CloudLocationDto, CloudRootDto, DescriptionsStatusDto, IntakeStatusDto, LedgerSink,
+    PipelineIntakeHost, SharedFiledIndex, classify_folder, list_cloud_roots, now_unix, status_dto,
 };
+use crate::model::{
+    HostedModel, HostedModelStatusDto, HostedModelTestDto, SwitchingModel, suggested_date,
+};
+use crate::secrets::{KeyringStore, SecretStore};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -77,7 +87,7 @@ impl From<intern_engine::EngineError> for CommandError {
     fn from(error: intern_engine::EngineError) -> Self {
         Self {
             code: error.code().as_str().into(),
-            message: "local model operation failed".into(),
+            message: error.message().into(),
         }
     }
 }
@@ -97,6 +107,71 @@ pub struct QueueItemDto {
     undoable: bool,
     proposal_revision: Option<String>,
     reconciliation: Option<ReconciliationDto>,
+    /// A date the model proposed that validation withheld from the filename,
+    /// for the reviewer to accept with one click.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggested_date: Option<String>,
+    /// Every date the document states, for a reviewer who must give a
+    /// document a date the model did not.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dates_in_document: Vec<String>,
+    /// The file's own last-modified date, in this machine's calendar - a
+    /// last resort for a document that states no date, labelled as such.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_modified_date: Option<String>,
+    /// The reviewer's own spellings applied to the proposed name, so the
+    /// inspector can say why the name differs from the evidence under it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    house_rules: Vec<HouseRuleDto>,
+    /// The filing this document's text nearly repeats, when there is one:
+    /// the name it was filed under, and the machine when it was not this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    near_duplicate_of: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HouseRuleDto {
+    kind: String,
+    from: String,
+    to: String,
+}
+
+impl From<&HouseRule> for HouseRuleDto {
+    fn from(rule: &HouseRule) -> Self {
+        Self {
+            kind: rule.kind.as_str().to_owned(),
+            from: rule.from.clone(),
+            to: rule.to.clone(),
+        }
+    }
+}
+
+/// A spelling review has taught Intern, as Settings lists it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnedRuleDto {
+    id: String,
+    kind: String,
+    from: String,
+    to: String,
+    seen: u32,
+    active: bool,
+    learned_at: i64,
+}
+
+impl From<LearnedRule> for LearnedRuleDto {
+    fn from(rule: LearnedRule) -> Self {
+        Self {
+            id: rule.id.to_string(),
+            kind: rule.kind.as_str().to_owned(),
+            from: rule.from,
+            to: rule.to,
+            seen: rule.seen,
+            active: rule.active,
+            learned_at: rule.learned_at,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -131,6 +206,9 @@ pub struct SetupStateDto {
     downloaded_bytes: u64,
     total_bytes: u64,
     error: Option<String>,
+    /// Whether a hosted model is chosen and configured, which lets documents
+    /// be processed whatever the local model's state.
+    hosted_model_ready: bool,
 }
 
 struct TauriPipelineEvents {
@@ -337,7 +415,11 @@ struct SetupManager {
     state: Mutex<SetupStateDto>,
     operation: SetupOperationGate,
     scheduler: Mutex<Option<std::sync::mpsc::Sender<SchedulerMessage>>>,
+    /// Whether the queue may run: the local model is ready, or a hosted one
+    /// is chosen and configured. The scheduler reads this.
     model_ready: Arc<AtomicBool>,
+    local_ready: AtomicBool,
+    hosted_active: AtomicBool,
 }
 
 impl SetupManager {
@@ -353,6 +435,7 @@ impl SetupManager {
             downloaded_bytes: if installed { total_bytes } else { 0 },
             total_bytes,
             error: None,
+            hosted_model_ready: false,
         };
         Self {
             app,
@@ -361,6 +444,39 @@ impl SetupManager {
             operation: SetupOperationGate::default(),
             scheduler: Mutex::new(None),
             model_ready: Arc::new(AtomicBool::new(installed)),
+            local_ready: AtomicBool::new(installed),
+            hosted_active: AtomicBool::new(false),
+        }
+    }
+
+    /// Records whether a hosted model stands ready, and lets the queue run
+    /// on it when the local model is not there.
+    fn set_hosted_active(&self, active: bool) {
+        self.hosted_active.store(active, Ordering::SeqCst);
+        let ready = self.refresh_ready();
+        if let Ok(mut current) = self.state.lock() {
+            current.hosted_model_ready = active;
+            let _ = self.app.emit("setup://progress", current.clone());
+        }
+        if ready {
+            self.wake_scheduler();
+        }
+    }
+
+    fn refresh_ready(&self) -> bool {
+        let ready = model_ready(
+            self.local_ready.load(Ordering::SeqCst),
+            self.hosted_active.load(Ordering::SeqCst),
+        );
+        self.model_ready.store(ready, Ordering::SeqCst);
+        ready
+    }
+
+    fn wake_scheduler(&self) {
+        if let Ok(scheduler) = self.scheduler.lock()
+            && let Some(sender) = scheduler.as_ref()
+        {
+            let _ = sender.send(SchedulerMessage::Wake);
         }
     }
 
@@ -375,7 +491,7 @@ impl SetupManager {
     }
 
     fn start(self: &Arc<Self>) -> Result<(), CommandError> {
-        if self.model_ready.load(Ordering::SeqCst) {
+        if self.local_ready.load(Ordering::SeqCst) {
             return Ok(());
         }
         self.start_operation(SetupSource::Download)
@@ -385,7 +501,7 @@ impl SetupManager {
         self: &Arc<Self>,
         selection: ExistingModelSelection,
     ) -> Result<(), CommandError> {
-        if self.model_ready.load(Ordering::SeqCst) {
+        if self.local_ready.load(Ordering::SeqCst) {
             return Err(CommandError {
                 code: "SETUP_ALREADY_READY".into(),
                 message: "local model setup is already complete".into(),
@@ -497,21 +613,25 @@ impl SetupManager {
     }
 
     fn set_state(&self, state: SetupStatus, downloaded_bytes: u64, error: Option<String>) {
-        let ready = matches!(state, SetupStatus::Ready);
-        self.model_ready.store(ready, Ordering::SeqCst);
+        let local_ready = matches!(state, SetupStatus::Ready);
+        self.local_ready.store(local_ready, Ordering::SeqCst);
+        let ready = self.refresh_ready();
         if let Ok(mut current) = self.state.lock() {
             current.state = state;
             current.downloaded_bytes = downloaded_bytes.min(current.total_bytes);
             current.error = error;
+            current.hosted_model_ready = self.hosted_active.load(Ordering::SeqCst);
             let _ = self.app.emit("setup://progress", current.clone());
         }
-        if ready
-            && let Ok(scheduler) = self.scheduler.lock()
-            && let Some(sender) = scheduler.as_ref()
-        {
-            let _ = sender.send(SchedulerMessage::Wake);
+        if ready {
+            self.wake_scheduler();
         }
     }
+}
+
+/// The queue runs when either model can answer.
+fn model_ready(local_ready: bool, hosted_active: bool) -> bool {
+    local_ready || hosted_active
 }
 
 enum SetupSource {
@@ -637,6 +757,22 @@ pub struct AppState {
     /// Why the watcher is not running even though intake is enabled — a stale
     /// intake folder must surface in `intake_status`, not block launch/save.
     intake_error: Mutex<Option<String>>,
+    /// A dedicated read-only connection to the queue database for the history
+    /// view. The pipeline owns its store privately; history listing and CSV
+    /// export are pure reads, so they take their own SQLite session (WAL
+    /// readers never block the pipeline's writes) instead of widening the
+    /// pipeline's surface.
+    history: QueueStore,
+    /// Writes description records beside filed documents when the setting
+    /// asks for them; the pipeline reports every completed rename to it.
+    ledger: Arc<LedgerSink>,
+    /// Leaves a marker in the watched intake folder for every document filed
+    /// out of it, and reads the markers teammates left, so the same content
+    /// is never filed twice across machines.
+    filed_index: Arc<SharedFiledIndex>,
+    /// The hosted model, when one is chosen: its key in the credential
+    /// store, its engine, and its test.
+    hosted: Arc<HostedModel>,
 }
 
 impl AppState {
@@ -694,17 +830,40 @@ impl AppState {
             code: "APP_DATA_UNAVAILABLE".into(),
             message: "private worker temporary directory is unavailable".into(),
         })?;
-        let pipeline = Arc::new(Pipeline::with_local_files(
-            data.join("queue.sqlite3"),
-            Arc::new(SupervisedWorker::with_temp_root(
-                executable_directory.join(worker_name),
-                worker_temp_root,
-            )),
-            runtime,
-            Arc::new(TauriPipelineEvents { app: app.clone() }),
+        let ledger = Arc::new(LedgerSink::new(settings.clone(), data.clone()));
+        ledger.attach(app.clone());
+        let filed_index = Arc::new(SharedFiledIndex::new(settings.clone(), data.clone()));
+        let secrets: Arc<dyn SecretStore> = Arc::new(KeyringStore);
+        let hosted = Arc::new(HostedModel::new(secrets));
+        let model = Arc::new(SwitchingModel::new(
+            Arc::clone(&runtime),
+            Arc::clone(&hosted),
             settings.clone(),
-        )?);
+        ));
+        let pipeline = Arc::new(
+            Pipeline::with_local_files(
+                data.join("queue.sqlite3"),
+                Arc::new(SupervisedWorker::with_temp_root(
+                    executable_directory.join(worker_name),
+                    worker_temp_root,
+                )),
+                model,
+                Arc::new(TauriPipelineEvents { app: app.clone() }),
+                settings.clone(),
+            )?
+            .with_filing_sink(Arc::new(FilingSinks(vec![
+                ledger.clone() as Arc<dyn FilingSink>,
+                filed_index.clone(),
+            ])))
+            .with_duplicate_oracle(filed_index.clone()),
+        );
         pipeline.recover()?;
+        // Opened after the pipeline so the pipeline's own store has already
+        // migrated the schema this connection reads.
+        let history = QueueStore::open(data.join("queue.sqlite3")).map_err(|_| CommandError {
+            code: "APP_DATA_UNAVAILABLE".into(),
+            message: "the rename history database is unavailable".into(),
+        })?;
         let scheduler = PipelineScheduler::start(
             Arc::clone(&pipeline),
             Arc::clone(&setup.model_ready),
@@ -730,8 +889,13 @@ impl AppState {
             identity: Mutex::new(identity),
             intake: Mutex::new(None),
             intake_error: Mutex::new(None),
+            history,
+            ledger,
+            filed_index,
+            hosted,
         };
-        if matches!(state.setup.get()?.state, SetupStatus::Ready) {
+        state.refresh_hosted_active(&startup_settings);
+        if state.setup.model_ready.load(Ordering::SeqCst) {
             state.schedule()?;
         }
         if startup_settings.intake_enabled
@@ -748,6 +912,14 @@ impl AppState {
             self.scheduler.wake()?;
         }
         Ok(())
+    }
+
+    /// Tells setup whether a hosted model is chosen and able to answer, so
+    /// the queue runs on it - or stops, when the key is gone.
+    fn refresh_hosted_active(&self, settings: &AppSettings) {
+        let active =
+            settings.model_source == ModelSource::Hosted && self.hosted.configured(settings);
+        self.setup.set_hosted_active(active);
     }
 
     /// Stops any running watcher and starts a fresh one when the settings
@@ -788,6 +960,7 @@ impl AppState {
                         Arc::clone(&self.setup.model_ready),
                         self.app.clone(),
                         identity.clone(),
+                        Arc::clone(&self.filed_index),
                     ));
                     watcher = Some(IntakeWatcher::start(config, identity, host));
                 }
@@ -821,7 +994,8 @@ impl AppState {
             .intake_error
             .lock()
             .map_err(|_| intake_state_conflict())?
-            .clone();
+            .clone()
+            .or_else(|| self.filed_index.last_error());
         Ok(status_dto(
             settings.intake_enabled,
             &identity,
@@ -837,6 +1011,35 @@ impl AppState {
         let _ = self.app.emit("intake://changed", dto);
         Ok(())
     }
+
+    /// The settings as currently stored, for startup decisions (tray,
+    /// start-hidden). A missing file is the defaults, same as `load`.
+    pub(crate) fn settings_snapshot(&self) -> AppSettings {
+        self.settings.load().unwrap_or_default()
+    }
+
+    /// Whether a main-window close should hide to the tray instead of running
+    /// the normal exit path. Read fresh on every close so a settings save
+    /// takes effect on the very next close, and erring toward `false`: a
+    /// broken settings file must fall back to the ordinary exit, never to a
+    /// window that hides with no tray to bring it back.
+    pub(crate) fn hide_window_on_close(&self) -> bool {
+        self.settings
+            .load()
+            .map(|settings| crate::tray::close_hides_to_tray(settings.run_in_background))
+            .unwrap_or(false)
+    }
+}
+
+/// The explicit quit path, used by the tray's "Quit Intern" item: shut the
+/// pipeline (and with it the local model process) down deliberately, then
+/// leave without starting window teardown - the same shape as the close-time
+/// exit, which deliberately avoids wedging in WebView destruction.
+pub(crate) fn shutdown_and_exit(app: &AppHandle) -> ! {
+    if let Some(state) = app.try_state::<AppState>() {
+        let _ = state.pipeline.shutdown();
+    }
+    std::process::exit(0);
 }
 
 fn intake_state_conflict() -> CommandError {
@@ -848,12 +1051,20 @@ fn intake_state_conflict() -> CommandError {
 
 #[tauri::command]
 pub fn queue_list(state: State<'_, AppState>) -> Result<Vec<QueueItemDto>, CommandError> {
-    state
-        .pipeline
-        .list()?
-        .into_iter()
-        .map(queue_item_dto)
-        .collect()
+    let items = state.pipeline.list()?;
+    // The window asks for the list on every queue change, which makes this
+    // the one place that always knows the current counts - so the tray's
+    // tooltip is kept here rather than on a second event path.
+    let (needs_review, ready) = attention_counts(&items);
+    crate::tray::update_tooltip(&state.app, needs_review, ready);
+    items.into_iter().map(queue_item_dto).collect()
+}
+
+/// How many items wait on a person: those needing review, and those ready
+/// to rename but not applied automatically.
+fn attention_counts(items: &[PipelineItem]) -> (usize, usize) {
+    let count = |status: QueueStatus| items.iter().filter(|item| item.status == status).count();
+    (count(QueueStatus::NeedsReview), count(QueueStatus::Ready))
 }
 
 #[tauri::command]
@@ -936,6 +1147,32 @@ pub fn proposal_approve(
     Ok(())
 }
 
+/// The spellings review has taught Intern, newest first.
+#[tauri::command]
+pub fn house_rules_list(state: State<'_, AppState>) -> Result<Vec<LearnedRuleDto>, CommandError> {
+    Ok(state
+        .pipeline
+        .learned_rules()?
+        .into_iter()
+        .map(LearnedRuleDto::from)
+        .collect())
+}
+
+/// Stop applying a learned spelling; documents still waiting go back to
+/// the document's own words. Takes effect at once.
+#[tauri::command]
+pub fn house_rule_forget(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.pipeline.forget_rule(parse_item_id(&id)?)?;
+    Ok(())
+}
+
+/// Apply a learned spelling from now on without waiting for a second edit.
+#[tauri::command]
+pub fn house_rule_use(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.pipeline.use_rule(parse_item_id(&id)?)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn proposal_keep_original(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     state.pipeline.keep_original(parse_item_id(&id)?)?;
@@ -948,9 +1185,24 @@ pub fn operation_undo(id: String, state: State<'_, AppState>) -> Result<(), Comm
     Ok(())
 }
 
+/// The settings as the interface should show them: folders in their readable
+/// spelling. Storage keeps the canonical form (on Windows, the verbatim
+/// `\\?\` prefix that long and oddly named paths need), and `settings_save`
+/// canonicalizes whatever comes back, so the round trip is lossless.
 #[tauri::command]
 pub fn settings_get(state: State<'_, AppState>) -> Result<AppSettings, CommandError> {
-    state.settings.load().map_err(Into::into)
+    let mut settings = state.settings.load()?;
+    settings.destination = display_folder(&settings.destination);
+    settings.intake_folder = display_folder(&settings.intake_folder);
+    Ok(settings)
+}
+
+fn display_folder(folder: &str) -> String {
+    if folder.trim().is_empty() {
+        String::new()
+    } else {
+        display_path(Path::new(folder))
+    }
 }
 
 #[tauri::command]
@@ -967,7 +1219,36 @@ pub fn settings_save(
             .to_string_lossy()
             .into_owned();
     }
+    validate_description_settings(&settings)?;
+    // A hosted model that could not be sent to is refused at save time, like
+    // every other configuration that could never do anything: the key must
+    // be in the credential store and the address must be one a key may be
+    // sent to.
+    if settings.model_source == ModelSource::Hosted {
+        state.hosted.config(&settings)?;
+    }
+    // Applied before anything persists so an operating system that refuses
+    // the login entry leaves the stored settings unchanged - the dialog shows
+    // the error against a state that is still true.
+    if previous.start_at_login != settings.start_at_login {
+        apply_autostart(&state.app, settings.start_at_login)?;
+    }
     state.settings.save(&settings)?;
+    state.refresh_hosted_active(&settings);
+    if previous.model_source != settings.model_source {
+        state.schedule()?;
+    }
+    if previous.run_in_background != settings.run_in_background {
+        crate::tray::sync_tray(&state.app, settings.run_in_background);
+        // A tray that was just created starts with the bare tooltip; give it
+        // the current counts rather than waiting for the next queue change.
+        if settings.run_in_background
+            && let Ok(items) = state.pipeline.list()
+        {
+            let (needs_review, ready) = attention_counts(&items);
+            crate::tray::update_tooltip(&state.app, needs_review, ready);
+        }
+    }
     if previous.intake_folder != settings.intake_folder
         || previous.intake_enabled != settings.intake_enabled
         || previous.process_others_uploads != settings.process_others_uploads
@@ -977,6 +1258,29 @@ pub fn settings_save(
         state.emit_intake_changed()?;
     }
     Ok(())
+}
+
+/// Enables or disables the start-at-login entry to match the setting.
+///
+/// Registration lives with the operating system and can be refused (a locked
+/// registry key, a read-only autostart directory); that refusal becomes an
+/// ordinary save error the dialog can show, never a crash.
+fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), CommandError> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    let result = if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+    result.map_err(|_| CommandError {
+        code: "AUTOSTART_FAILED".into(),
+        message: if enabled {
+            "starting Intern at sign-in could not be enabled".into()
+        } else {
+            "starting Intern at sign-in could not be disabled".into()
+        },
+    })
 }
 
 /// Intake-related validation for `settings_save`, before anything persists.
@@ -1030,9 +1334,102 @@ fn validate_intake_settings(
     Ok(())
 }
 
+/// Description records live under the destination folder, so asking for them
+/// without one is a configuration that could never do anything. Refused at
+/// save time, like the intake rules, rather than silently ignored.
+fn validate_description_settings(settings: &AppSettings) -> Result<(), CommandError> {
+    if settings.record_descriptions && settings.destination.trim().is_empty() {
+        return Err(CommandError {
+            code: "DESCRIPTIONS_NEED_DESTINATION".into(),
+            message: "description records need a destination folder to live in".into(),
+        });
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn intake_status(state: State<'_, AppState>) -> Result<IntakeStatusDto, CommandError> {
     state.intake_status_dto()
+}
+
+#[tauri::command]
+pub fn hosted_model_status(
+    state: State<'_, AppState>,
+) -> Result<HostedModelStatusDto, CommandError> {
+    let settings = state.settings.load().unwrap_or_default();
+    Ok(state.hosted.status(&settings))
+}
+
+/// Stores the API key in the operating system's credential store. The key
+/// travels from the dialog to here and no further; it is never written to
+/// the settings file.
+#[tauri::command]
+pub fn hosted_model_set_key(key: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.hosted.set_key(&key)?;
+    let settings = state.settings.load().unwrap_or_default();
+    state.refresh_hosted_active(&settings);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn hosted_model_clear_key(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.hosted.clear_key()?;
+    let settings = state.settings.load().unwrap_or_default();
+    state.refresh_hosted_active(&settings);
+    Ok(())
+}
+
+/// Sends the calibration document to the hosted model described by
+/// `settings` - the dialog's draft, so what is tested is what is on screen -
+/// with the stored key.
+#[tauri::command]
+pub fn hosted_model_test(
+    settings: AppSettings,
+    state: State<'_, AppState>,
+) -> Result<HostedModelTestDto, CommandError> {
+    state.hosted.test(&settings)
+}
+
+/// The OneDrive accounts and SharePoint libraries the sync client keeps on
+/// this machine. A local lookup of the sync client's own configuration; no
+/// network request is made.
+#[tauri::command]
+pub fn cloud_roots() -> Result<Vec<CloudRootDto>, CommandError> {
+    Ok(list_cloud_roots())
+}
+
+#[tauri::command]
+pub fn descriptions_status(
+    state: State<'_, AppState>,
+) -> Result<DescriptionsStatusDto, CommandError> {
+    Ok(state.ledger.status())
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillResultDto {
+    pub written: u32,
+    pub failed: u32,
+}
+
+/// Writes a description record for every document Intern has already filed
+/// and not undone, for a records folder switched on after the fact. Each
+/// document's record is rewritten from the queue's own copy of its sentence
+/// and facts, so running it twice changes nothing.
+#[tauri::command]
+pub fn descriptions_backfill(
+    state: State<'_, AppState>,
+) -> Result<BackfillResultDto, CommandError> {
+    let settings = state.settings.load()?;
+    if !settings.record_descriptions {
+        return Err(CommandError {
+            code: "DESCRIPTIONS_DISABLED".into(),
+            message: "turn on description records and save before writing them".into(),
+        });
+    }
+    let documents = state.pipeline.filed_documents()?;
+    let (written, failed) = state.ledger.backfill(&documents);
+    Ok(BackfillResultDto { written, failed })
 }
 
 #[tauri::command]
@@ -1081,6 +1478,203 @@ pub fn history_clear(state: State<'_, AppState>) -> Result<(), CommandError> {
     Ok(())
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntryDto {
+    receipt_id: String,
+    queue_item_id: String,
+    /// Unix seconds; the frontend formats it locally, the CSV as ISO-8601 UTC.
+    at: i64,
+    /// "apply" | "undo" (serde snake_case of the core enum).
+    direction: OperationDirection,
+    /// "rename" | "verified_copy".
+    kind: OperationKind,
+    /// "complete" | "rolled_back" — only terminal stages are listed.
+    stage: OperationStage,
+    original_path: String,
+    new_path: String,
+    /// The one-sentence description that was applied with the rename, when
+    /// the item still has its proposal.
+    description: Option<String>,
+}
+
+fn history_entry_dto(entry: HistoryEntry, description: Option<String>) -> HistoryEntryDto {
+    HistoryEntryDto {
+        receipt_id: entry.receipt_id.to_string(),
+        queue_item_id: entry.queue_item_id.to_string(),
+        at: entry.at,
+        direction: entry.direction,
+        kind: entry.kind,
+        stage: entry.stage,
+        original_path: display_path(&entry.original_path),
+        new_path: display_path(&entry.new_path),
+        description,
+    }
+}
+
+/// The applied description for every queue item that still has a proposal,
+/// so history rows and the CSV export can carry the sentence beside the
+/// rename it belongs to.
+fn descriptions_by_item(
+    state: &AppState,
+) -> Result<std::collections::HashMap<i64, String>, CommandError> {
+    Ok(state
+        .pipeline
+        .list()?
+        .into_iter()
+        .filter_map(|item| {
+            item.proposal
+                .map(|proposal| (item.id, proposal.description))
+        })
+        .collect())
+}
+
+fn history_read_error(error: intern_core::InternError) -> CommandError {
+    CommandError {
+        code: error.code().as_str().into(),
+        message: "the rename history could not be read".into(),
+    }
+}
+
+fn history_export_failed(message: impl Into<String>) -> CommandError {
+    CommandError {
+        code: "HISTORY_EXPORT_FAILED".into(),
+        message: message.into(),
+    }
+}
+
+#[tauri::command]
+pub fn history_list(state: State<'_, AppState>) -> Result<Vec<HistoryEntryDto>, CommandError> {
+    let descriptions = descriptions_by_item(&state)?;
+    Ok(state
+        .history
+        .list_operation_history(HISTORY_LIMIT)
+        .map_err(history_read_error)?
+        .into_iter()
+        .map(|entry| {
+            let description = descriptions.get(&entry.queue_item_id).cloned();
+            history_entry_dto(entry, description)
+        })
+        .collect())
+}
+
+/// Writes the rename history to `path` as RFC 4180 CSV and reports how many
+/// operations were written.
+///
+/// The path comes from the native save dialog, so it is expected to be
+/// absolute with an existing parent folder; anything else is refused before a
+/// byte is written rather than being resolved against whatever the process's
+/// working directory happens to be.
+#[tauri::command]
+pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize, CommandError> {
+    let destination = Path::new(&path);
+    if !destination.is_absolute() {
+        return Err(history_export_failed("the export path must be absolute"));
+    }
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| history_export_failed("the export path has no parent folder"))?;
+    if !parent.is_dir() {
+        return Err(history_export_failed("the export folder does not exist"));
+    }
+    let entries = state
+        .history
+        .list_operation_history(HISTORY_LIMIT)
+        .map_err(history_read_error)?;
+    let descriptions = descriptions_by_item(&state)?;
+    std::fs::write(destination, history_csv(&entries, &descriptions))
+        .map_err(|_| history_export_failed("the history CSV could not be written"))?;
+    Ok(entries.len())
+}
+
+/// Renders history entries as RFC 4180 CSV: CRLF row endings, and any field
+/// containing a comma, quote, or line break is quoted with quotes doubled.
+/// The description column is last, so a spreadsheet opened from this export
+/// can be pasted straight into a SharePoint grid view beside the filenames.
+fn history_csv(
+    entries: &[HistoryEntry],
+    descriptions: &std::collections::HashMap<i64, String>,
+) -> String {
+    let mut csv = String::from("at,direction,kind,stage,originalPath,newPath,description\r\n");
+    for entry in entries {
+        let fields = [
+            iso8601_utc(entry.at),
+            match entry.direction {
+                OperationDirection::Apply => "apply".into(),
+                OperationDirection::Undo => "undo".into(),
+            },
+            match entry.kind {
+                OperationKind::Rename => "rename".into(),
+                OperationKind::VerifiedCopy => "verified_copy".into(),
+            },
+            match entry.stage {
+                OperationStage::Complete => "complete".to_owned(),
+                OperationStage::RolledBack => "rolled_back".to_owned(),
+                // Unreachable for listed history (terminal stages only), but a
+                // receipt must never be silently mislabeled if that changes.
+                other => format!("{other:?}").to_lowercase(),
+            },
+            display_path(&entry.original_path),
+            display_path(&entry.new_path),
+            descriptions
+                .get(&entry.queue_item_id)
+                .cloned()
+                .unwrap_or_default(),
+        ];
+        let row = fields
+            .iter()
+            .map(|field| csv_field(field))
+            .collect::<Vec<_>>()
+            .join(",");
+        csv.push_str(&row);
+        csv.push_str("\r\n");
+    }
+    csv
+}
+
+fn csv_field(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
+
+/// Formats unix seconds as ISO-8601 UTC ("2024-04-12T09:30:00Z") without
+/// pulling in a date-time dependency (days-from-civil inverse, Howard
+/// Hinnant's algorithm).
+fn iso8601_utc(unix_seconds: i64) -> String {
+    let days = unix_seconds.div_euclid(86_400);
+    let seconds = unix_seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        seconds / 3600,
+        (seconds / 60) % 60,
+        seconds % 60
+    )
+}
+
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
+    let year = if month <= 2 { year + 1 } else { year };
+    (year, month as u32, day as u32)
+}
+
 /// Abandons every item still waiting, for a folder chosen by mistake.
 ///
 /// Returns the number dropped so the interface can say what it did rather than
@@ -1108,8 +1702,8 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
                 && receipt.stage == OperationStage::Published
         })
         .map(|receipt| ReconciliationDto {
-            source_path: receipt.source.to_string_lossy().into_owned(),
-            destination_path: receipt.destination.to_string_lossy().into_owned(),
+            source_path: display_path(&receipt.source),
+            destination_path: display_path(&receipt.destination),
             error_code: "SOURCE_DELETE_FAILED".into(),
         });
     Ok(QueueItemDto {
@@ -1127,7 +1721,15 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
         evidence,
         reason: proposal
             .filter(|record| !record.reasons.is_empty())
-            .map(|record| record.reasons.join(", ")),
+            .map(|record| record.reasons.join(", "))
+            // A DUPLICATE flag is raised before analysis, so no proposal
+            // carries its reason; name the file the content is already
+            // filed under.
+            .or_else(|| {
+                item.duplicate_of
+                    .as_deref()
+                    .map(|name| format!("Duplicate of {name}"))
+            }),
         error_code: item.error_code.map(|code| code.as_str().to_owned()),
         undoable: item.status == QueueStatus::Completed
             && item.receipt.as_ref().is_some_and(|receipt| {
@@ -1136,7 +1738,33 @@ fn queue_item_dto(item: PipelineItem) -> Result<QueueItemDto, CommandError> {
             }),
         proposal_revision: proposal.map(|record| record.revision.to_string()),
         reconciliation,
+        suggested_date: proposal.and_then(|record| suggested_date(&record.analysis)),
+        dates_in_document: proposal
+            .map(|record| record.analysis.stated_dates.clone())
+            .unwrap_or_default(),
+        // One stat per reviewable item per listing; a settled item's source
+        // is gone or no longer of interest.
+        file_modified_date: matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready)
+            .then(|| file_modified_date(&item.source_path))
+            .flatten(),
+        house_rules: proposal
+            .map(|record| record.house_rules.iter().map(HouseRuleDto::from).collect())
+            .unwrap_or_default(),
+        near_duplicate_of: proposal.and_then(|record| record.near_duplicate_of.clone()),
     })
+}
+
+/// The calendar date, in this machine's time zone, that a file was last
+/// modified - or `None` when the file cannot be read.
+fn file_modified_date(path: &Path) -> Option<String> {
+    let modified = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()?;
+    Some(
+        chrono::DateTime::<chrono::Local>::from(modified)
+            .format("%Y-%m-%d")
+            .to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -1149,7 +1777,7 @@ mod intake_tests {
     use intern_intake::{CloudProviderKind, DoneOutcome, ItemState, MachineIdentity};
     use intern_queue::AppSettings;
 
-    use super::validate_intake_settings;
+    use super::{validate_description_settings, validate_intake_settings};
     use crate::intake::{CloudProviderDto, item_fate, presence_active, status_dto};
 
     /// A fake folder canonicalizer: pairs of (as-entered, canonical form).
@@ -1190,6 +1818,20 @@ mod intake_tests {
             error_code(validate_intake_settings(&mut missing, &fs)),
             "INTAKE_FOLDER_MISSING"
         );
+    }
+
+    #[test]
+    fn description_records_require_a_destination_to_live_in() {
+        let mut wanted = settings(false, "", "");
+        wanted.record_descriptions = true;
+        assert_eq!(
+            error_code(validate_description_settings(&wanted)),
+            "DESCRIPTIONS_NEED_DESTINATION"
+        );
+        wanted.destination = "/out".into();
+        assert!(validate_description_settings(&wanted).is_ok());
+        let unwanted = settings(false, "", "");
+        assert!(validate_description_settings(&unwanted).is_ok());
     }
 
     #[test]
@@ -1360,10 +2002,16 @@ mod intake_tests {
             (CloudProviderKind::OneDrivePersonal, "onedrive_personal"),
             (CloudProviderKind::OneDriveBusiness, "onedrive_business"),
             (CloudProviderKind::SharePoint, "sharepoint"),
+            (CloudProviderKind::NetworkShare, "network_share"),
         ] {
             assert_eq!(
                 serde_json::to_value(CloudProviderDto::from(kind)).unwrap(),
                 serde_json::Value::String(expected.into())
+            );
+            assert_eq!(
+                kind.as_str(),
+                expected,
+                "the record format spells it the same way"
             );
         }
     }
@@ -1378,12 +2026,23 @@ mod intake_tests {
         let dto = status_dto(false, &identity, "", None, None, 1_755_850_000);
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["enabled"], false);
+        assert_eq!(json["folder"], "");
+        let verbatim = status_dto(
+            true,
+            &identity,
+            r"\\?\C:\Users\pat\Scans",
+            None,
+            None,
+            1_755_850_000,
+        );
+        assert_eq!(verbatim.folder, r"C:\Users\pat\Scans");
         assert_eq!(json["watching"], false);
         assert_eq!(json["machineId"], "0123456789abcdef0123456789abcdef");
         assert_eq!(json["machineName"], "Front desk");
         assert_eq!(json["cloud"], serde_json::Value::Null);
         assert_eq!(json["machines"], serde_json::json!([]));
         assert_eq!(json["heldForOthers"], 0);
+        assert_eq!(json["unreadableFolders"], 0);
         assert_eq!(json["claimedByOthers"], 0);
         assert_eq!(json["processedHere"], 0);
         assert_eq!(json["lastScanAt"], serde_json::Value::Null);
@@ -1442,5 +2101,184 @@ mod scheduler_tests {
             }))
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use std::path::PathBuf;
+
+    use intern_core::{HistoryEntry, OperationDirection, OperationKind, OperationStage};
+
+    use std::collections::HashMap;
+
+    use super::{history_csv, history_entry_dto, iso8601_utc};
+
+    fn entry(at: i64, original: &str, new: &str) -> HistoryEntry {
+        HistoryEntry {
+            receipt_id: 3,
+            queue_item_id: 7,
+            at,
+            direction: OperationDirection::Apply,
+            kind: OperationKind::Rename,
+            stage: OperationStage::Complete,
+            original_path: PathBuf::from(original),
+            new_path: PathBuf::from(new),
+        }
+    }
+
+    #[test]
+    fn timestamps_render_as_iso_8601_utc_from_unix_seconds() {
+        assert_eq!(iso8601_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso8601_utc(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(iso8601_utc(1_713_173_696), "2024-04-15T09:34:56Z");
+        assert_eq!(iso8601_utc(1_755_849_600), "2025-08-22T08:00:00Z");
+        // Before the epoch still renders a real calendar date, not garbage.
+        assert_eq!(iso8601_utc(-1), "1969-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn history_csv_is_rfc_4180_with_quoting_only_where_needed() {
+        let plain = entry(0, "C:\\drop\\scan.pdf", "C:\\filed\\2024 Agreement.pdf");
+        let awkward = HistoryEntry {
+            direction: OperationDirection::Undo,
+            kind: OperationKind::VerifiedCopy,
+            stage: OperationStage::RolledBack,
+            ..entry(
+                1_713_173_696,
+                "C:\\drop\\comma, quote \" and\nnewline.pdf",
+                "C:\\filed\\plain.pdf",
+            )
+        };
+
+        let descriptions = HashMap::from([(
+            7,
+            "Lease agreement for a twelve-month term, beginning January 22, 2024.".to_owned(),
+        )]);
+        let csv = history_csv(&[awkward, plain], &descriptions);
+
+        let mut lines = csv.split("\r\n");
+        assert_eq!(
+            lines.next(),
+            Some("at,direction,kind,stage,originalPath,newPath,description")
+        );
+        assert_eq!(
+            lines.next(),
+            Some(
+                "2024-04-15T09:34:56Z,undo,verified_copy,rolled_back,\
+                 \"C:\\drop\\comma, quote \"\" and\nnewline.pdf\",C:\\filed\\plain.pdf,\
+                 \"Lease agreement for a twelve-month term, beginning January 22, 2024.\""
+            )
+        );
+        assert_eq!(
+            lines.next(),
+            Some(
+                "1970-01-01T00:00:00Z,apply,rename,complete,C:\\drop\\scan.pdf,C:\\filed\\2024 Agreement.pdf,\
+                 \"Lease agreement for a twelve-month term, beginning January 22, 2024.\""
+            )
+        );
+        assert_eq!(lines.next(), Some(""));
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn history_dto_serializes_the_camel_case_wire_contract() {
+        let json = serde_json::to_value(history_entry_dto(
+            entry(
+                1_713_173_696,
+                "C:/drop/scan.pdf",
+                "C:/filed/2024 Agreement.pdf",
+            ),
+            Some("A sentence.".to_owned()),
+        ))
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "receiptId": "3",
+                "queueItemId": "7",
+                "at": 1_713_173_696i64,
+                "direction": "apply",
+                "kind": "rename",
+                "stage": "complete",
+                "originalPath": "C:/drop/scan.pdf",
+                "newPath": "C:/filed/2024 Agreement.pdf",
+                "description": "A sentence.",
+            })
+        );
+        // Verbatim Windows paths are shown the way a person reads them.
+        let json = serde_json::to_value(history_entry_dto(
+            entry(
+                0,
+                r"\\?\C:\drop\scan.pdf",
+                r"\\?\UNC\server\share\filed\a.pdf",
+            ),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(json["originalPath"], r"C:\drop\scan.pdf");
+        assert_eq!(json["newPath"], r"\\server\share\filed\a.pdf");
+        assert_eq!(json["description"], serde_json::Value::Null);
+    }
+}
+
+#[cfg(test)]
+mod file_date_tests {
+    use super::file_modified_date;
+
+    #[test]
+    fn a_files_date_is_todays_local_date_for_a_file_just_written_and_none_when_missing() {
+        let temp = std::env::temp_dir().join(format!("intern-file-date-{}", std::process::id()));
+        std::fs::write(&temp, b"x").unwrap();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let yesterday = (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let date = file_modified_date(&temp).unwrap();
+        // Written a moment ago; a midnight between the write and the check is
+        // the one legitimate reason for "yesterday".
+        assert!(date == today || date == yesterday, "{date}");
+        let _ = std::fs::remove_file(&temp);
+        assert_eq!(file_modified_date(&temp), None);
+    }
+}
+
+#[cfg(test)]
+mod duplicate_reason_tests {
+    use std::path::PathBuf;
+
+    use intern_core::{ErrorCode, QueueStatus};
+    use intern_queue::PipelineItem;
+
+    use super::queue_item_dto;
+
+    fn duplicate_item(duplicate_of: Option<&str>) -> PipelineItem {
+        PipelineItem {
+            id: 7,
+            source_path: PathBuf::from("C:/drop/copy.pdf"),
+            source_hash: "hash".into(),
+            status: QueueStatus::NeedsReview,
+            processing_failures: 0,
+            error_code: Some(ErrorCode::Duplicate),
+            proposal: None,
+            receipt: None,
+            duplicate_of: duplicate_of.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn duplicate_review_items_surface_the_filed_name_as_their_reason() {
+        let dto = queue_item_dto(duplicate_item(Some("2024 - Filed Agreement.pdf"))).unwrap();
+        assert_eq!(
+            dto.reason.as_deref(),
+            Some("Duplicate of 2024 - Filed Agreement.pdf")
+        );
+        assert_eq!(dto.error_code.as_deref(), Some("DUPLICATE"));
+
+        // A cleared history leaves the flag without a referent: no fabricated
+        // reason, and the item stays actionable through its error code.
+        let stale = queue_item_dto(duplicate_item(None)).unwrap();
+        assert_eq!(stale.reason, None);
+        assert_eq!(stale.error_code.as_deref(), Some("DUPLICATE"));
     }
 }

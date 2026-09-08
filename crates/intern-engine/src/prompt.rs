@@ -58,6 +58,9 @@ document_type: what the document is, in a filing clerk's words - "Notice of Term
 "Statement of Work", "First Amendment to Consulting Agreement", "Invoice", "Settlement
 Agreement", "Meeting Minutes", "Purchase Order". Never "Document", "Agreement", "Letter", or
 "Correspondence" on their own. Always answer this; a document with a title has a type.
+Use the document's own words for it, whole: a document headed "Quarterly Operations Review"
+is a "Quarterly Operations Review", not "Meeting Minutes", and a "Mutual Non-Disclosure
+Agreement" keeps the "Mutual". Never substitute a label the document does not contain.
 
 document_date: the ONE date that defines THIS document. Read every date line listed above
 and decide what each one means before you choose.
@@ -67,30 +70,51 @@ and decide what each one means before you choose.
   agreement, statement of work, or order form -> its own effective, start, or commencement date
   notice -> its notice date, or the termination date the notice exists to bring about
   invoice -> the invoice date, never the payment due date
+  email -> the date it was sent; an email is defined by its sent date
   amendment -> the amendment's own date
   filing or certificate -> its filing or issue date
 Never a payment due date, deadline, renewal date, return-by date, or end date. A signature or
 "signed on" date loses to a stated effective or start date in the same document.
-date_evidence is the line the date appears on, copied exactly. date_role says which kind of
-date it is.
+date_evidence is the line the date appears on, copied exactly.
+date_role names which kind of date document_date is - pick the one that matches how the
+document presents it, never a default:
+  invoice -> an invoice's own date
+  issuance -> the date a report, journal, minutes, or packing slip was itself written or
+  put out
+  notice -> the date a notice is given or takes effect
+  termination -> a termination taking effect
+  amendment -> an amendment's own date
+  execution -> a signature or "signed on" date, when that is all the document offers
+  filing -> a court or agency filing or certificate date
+  effective -> ONLY a stated effective, start, or commencement date of an agreement
+  other -> none of these fit
+Whatever the role: a date this document is "issued under", "pursuant to", "dated as of" in a
+reference to another agreement, or "as amended by" belongs to that OTHER document and is
+never this document's date.
 
 parties: the one or two names a person would use to tell this file apart from other files of
 the same type. Fill this in whenever the document names them. Leave out lawyers copied on a
 notice, people merely mentioned, addresses, signatories who are not themselves a party, and
 companies named only in an exhibit. For a notice, the party is the person or company the
-notice is ABOUT, not the manager or assistant who signed and sent it. For an invoice, the
-party is whoever issued it, not who is billed.
+notice is ABOUT, not the manager or assistant who signed and sent it. An invoice or packing
+slip has exactly ONE party: the company that issued it. The bill-to or ship-to name is never
+a party. A first name on its own is never a party; a party is the full name of a person or
+company as the document writes it.
 party_evidence is the line those names appear on, copied exactly.
 party_relation is how they read in a name: "between" for two sides of an agreement, "for"
 the person a notice is about, "with" a counterparty, "from" a sender or invoice issuer, "to"
 a recipient, "none" to keep names out of the filename.
 
-description: ONE sentence under 30 words saying what the document is and what it concerns -
-the subject, the work, the amount, the term. Not "Agreement between two companies."
+description: ONE sentence, roughly 10 to 30 words, saying what the document is, who it
+involves, and what it concerns - the subject, the work, the amount, the term. Not "Agreement
+between two companies", and never a bare "An invoice for $1,248." Names the parties rules
+above keep OUT of the parties list still belong IN the description: an invoice's description
+names both the issuer and the bill-to company. A description under about ten words is
+missing something the document says.
 
 Answer in exactly this shape, replacing every angle-bracket slot with something from the
 document below:
-{{"type_evidence":"<line copied from the document>","document_type":"<what this document is>","date_evidence":"<the line the chosen date is on, copied>","document_date":"YYYY-MM-DD","date_role":"effective","parties":["<name as written>"],"party_evidence":["<the line that name is on, copied>"],"party_relation":"between","description":"<one sentence>","confidence":0.9,"needs_review":false}}
+{{"type_evidence":"<line copied from the document>","document_type":"<what this document is>","date_evidence":"<the line the chosen date is on, copied>","document_date":"YYYY-MM-DD","date_role":"<which kind of date>","parties":["<name as written>"],"party_evidence":["<the line that name is on, copied>"],"party_relation":"<how the names read>","description":"<one sentence>","confidence":0.9,"needs_review":false}}
 
 Every value must come from the document below. If it does not say something, answer null or
 []. Set needs_review true only when the document contradicts itself.
@@ -127,6 +151,76 @@ mod tests {
         let digest = distill(&source_from_text(long), DigestBudget::default());
         assert!(digest.compressed);
         assert!(build_prompt(&digest).contains("[...] marks removed text"));
+    }
+
+    /// The corpus showed the model parroting the skeleton's literal
+    /// "effective" for every document; these pin the fixes that stopped it.
+    #[test]
+    fn the_prompt_explains_every_date_role_and_leaves_the_skeleton_unbiased() {
+        let digest = distill(
+            &source_from_text("Invoice date: May 1, 2025"),
+            DigestBudget::default(),
+        );
+        let prompt = build_prompt(&digest);
+        assert!(prompt.contains("date_role names which kind of date"));
+        for role in [
+            "invoice",
+            "issuance",
+            "notice",
+            "termination",
+            "amendment",
+            "execution",
+            "filing",
+            "effective",
+            "other",
+        ] {
+            assert!(
+                prompt.contains(&format!(
+                    "
+  {role} ->"
+                )) || prompt.contains(&format!("  {role} ->")),
+                "role {role} is not explained"
+            );
+        }
+        assert!(
+            prompt.contains("\"date_role\":\"<which kind of date>\""),
+            "the skeleton must not pre-answer the role"
+        );
+        assert!(!prompt.contains("\"date_role\":\"effective\""));
+        assert!(prompt.contains("\"party_relation\":\"<how the names read>\""));
+    }
+
+    #[test]
+    fn the_prompt_pins_invoice_parties_and_the_documents_own_type_words() {
+        let digest = distill(
+            &source_from_text("Invoice date: May 1, 2025"),
+            DigestBudget::default(),
+        );
+        let prompt = build_prompt(&digest);
+        assert!(prompt.contains("exactly ONE party: the company that issued it"));
+        assert!(prompt.contains("A first name on its own is never a party"));
+        assert!(prompt.contains("Use the document's own words for it, whole"));
+        assert!(prompt.contains("Never substitute a label the document does not contain"));
+        // The first corpus run after the party exclusions showed the model
+        // shrinking descriptions to match - "An invoice for $1,248." - so the
+        // description rules explicitly reclaim the names the parties list drops.
+        assert!(prompt.contains("still belong IN the description"));
+        assert!(prompt.contains("names both the issuer and the bill-to company"));
+    }
+
+    /// The first issuance wording said "anything simply issued", and the model
+    /// matched it onto "Issued under the Master Services Agreement dated June
+    /// 2, 2023" - filing a statement of work under another contract's date.
+    #[test]
+    fn the_role_list_cannot_hand_another_documents_date_to_issuance() {
+        let digest = distill(
+            &source_from_text("Invoice date: May 1, 2025"),
+            DigestBudget::default(),
+        );
+        let prompt = build_prompt(&digest);
+        assert!(!prompt.contains("anything simply issued"));
+        assert!(prompt.contains("was itself written or"));
+        assert!(prompt.contains("belongs to that OTHER document"));
     }
 
     #[test]

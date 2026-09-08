@@ -11,9 +11,11 @@ interface SetupScreenProps {
   onStart(): void;
   onCancel(): void;
   onChooseExisting(): void;
+  /** Open Settings to configure a hosted model instead of the download. */
+  onUseHostedModel?(): void;
 }
 
-export function SetupScreen({ setup, busy, canChooseExisting, operationError, onStart, onCancel, onChooseExisting }: SetupScreenProps) {
+export function SetupScreen({ setup, busy, canChooseExisting, operationError, onStart, onCancel, onChooseExisting, onUseHostedModel }: SetupScreenProps) {
   if (!setup) return <main className="setup-screen" aria-label="Intern setup"><section><p role="status" aria-label="Loading setup" aria-live="polite">Loading setup</p></section></main>;
   const failed = setup.state === 'failed';
   const downloading = setup.state === 'downloading';
@@ -40,5 +42,12 @@ export function SetupScreen({ setup, busy, canChooseExisting, operationError, on
       {downloading && <button type="button" onClick={onCancel} disabled={busy}>Cancel setup</button>}
       <button type="button" onClick={onChooseExisting} disabled={downloading || busy || !canChooseExisting}>Choose existing model files</button>
     </div>
+    {/*
+      The other way in. A hosted model needs no download, but it sends the
+      text of every document to the service named in Settings - the one
+      thing the paragraph above promises Intern does not do - so it is
+      offered as the smaller, plainly-labelled choice, never the default.
+    */}
+    {onUseHostedModel && <p className="setup-alternative">Or use a hosted model with your own API key — no download, but document text is sent to that service. <button type="button" className="link-button" disabled={downloading || busy} onClick={onUseHostedModel}>Set up a hosted model</button></p>}
   </section></main>;
 }

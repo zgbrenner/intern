@@ -52,7 +52,7 @@ describe('queue interactions', () => {
     render(<App bridge={createInMemoryBridge()} />);
 
     const zone = await screen.findByRole('region', { name: /drag files/i });
-    expect(zone).toHaveTextContent('Supports PDF, DOCX, TXT, Markdown, PNG, JPEG (JPG), and TIFF');
+    expect(zone).toHaveTextContent('Supports PDF, DOCX, XLSX, EML, TXT, Markdown, PNG, JPEG (JPG), and TIFF');
     expect(zone).not.toHaveAttribute('tabindex');
   });
 

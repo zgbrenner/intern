@@ -19,7 +19,11 @@ use std::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
-use crate::{fsatomic, identity::MachineIdentity};
+use crate::{
+    filed::{FILED_RETENTION_SECONDS, FiledMarker},
+    fsatomic,
+    identity::MachineIdentity,
+};
 
 pub const CLAIM_LEASE_SECONDS: i64 = 900;
 pub const CLAIM_RENEW_THRESHOLD_SECONDS: i64 = 450;
@@ -37,9 +41,11 @@ This .intern folder is maintained by Intern.
 It coordinates multiple machines that watch the same intake folder through a
 sync client (OneDrive/SharePoint). It contains only small JSON bookkeeping
 files — claims/ (which machine is processing which document), origins/ (which
-machine uploaded a document), machines/ (recent machine presence) — and never
-any document content. Deleting it is safe, but two machines may then briefly
-pick up the same document before their claims re-converge.
+machine uploaded a document), machines/ (recent machine presence), filed/
+(which document contents have already been filed, and under what name) — and
+never any document content. Deleting it is safe, but two machines may then
+briefly pick up the same document before their claims re-converge, and a
+document filed before may be filed a second time if it is uploaded again.
 ";
 
 /// Injectable time source so tests never wait out real lease durations.
@@ -160,13 +166,13 @@ pub enum AcquireOutcome {
     Failed(io::Error),
 }
 
-enum Stored<T> {
+pub(crate) enum Stored<T> {
     Missing,
     Unreadable,
     Parsed(T),
 }
 
-trait Versioned {
+pub(crate) trait Versioned {
     fn version(&self) -> u32;
 }
 
@@ -191,7 +197,7 @@ impl Versioned for MachinePresence {
 /// A malformed or future-version file is indistinguishable from sync-conflict
 /// garbage, so it reads as `Unreadable` rather than an error or a panic;
 /// `prune` clears such files once they are a day old.
-fn load<T: DeserializeOwned + Versioned>(path: &Path) -> Stored<T> {
+pub(crate) fn load<T: DeserializeOwned + Versioned>(path: &Path) -> Stored<T> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Stored::Missing,
@@ -227,7 +233,7 @@ impl ClaimStore {
         clock: Arc<dyn Clock>,
     ) -> io::Result<Self> {
         let root = intake_root.join(".intern");
-        for subdir in ["claims", "origins", "machines"] {
+        for subdir in ["claims", "origins", "machines", "filed"] {
             fs::create_dir_all(root.join(subdir))?;
         }
         match fsatomic::create_exclusive(&root.join("README.txt"), README_TEXT.as_bytes()) {
@@ -483,18 +489,31 @@ impl ClaimStore {
     /// Removes done tombstones past `DONE_RETENTION_SECONDS`, claimed leases
     /// whose heartbeat has been silent that long (their machine is gone for
     /// good and nothing else ever deletes them), origin markers past the same
-    /// retention, and — after a one-day grace so in-flight sync writes are
-    /// never eaten — malformed files, sync conflict copies (valid JSON under
-    /// the wrong filename), and leaked dot-prefixed temp files.
+    /// retention, filed markers past `FILED_RETENTION_SECONDS`, and — after
+    /// a one-day grace so in-flight sync writes are never eaten — malformed
+    /// files, sync conflict copies (valid JSON under the wrong filename), and
+    /// leaked dot-prefixed temp files.
     pub fn prune(&self) {
         let now = self.clock.now();
         self.prune_claims(now);
-        self.prune_named_dir::<OriginInfo>(&self.root.join("origins"), now, |origin| {
-            (origin.key.clone(), origin.observed_at)
-        });
-        self.prune_named_dir::<MachinePresence>(&self.root.join("machines"), now, |presence| {
-            (presence.machine_id.clone(), presence.last_seen_at)
-        });
+        self.prune_named_dir::<OriginInfo>(
+            &self.root.join("origins"),
+            now,
+            DONE_RETENTION_SECONDS,
+            |origin| (origin.key.clone(), origin.observed_at),
+        );
+        self.prune_named_dir::<MachinePresence>(
+            &self.root.join("machines"),
+            now,
+            DONE_RETENTION_SECONDS,
+            |presence| (presence.machine_id.clone(), presence.last_seen_at),
+        );
+        self.prune_named_dir::<FiledMarker>(
+            &self.root.join("filed"),
+            now,
+            FILED_RETENTION_SECONDS,
+            |marker| (marker.content_hash.clone(), marker.filed_at),
+        );
     }
 
     fn prune_claims(&self, now: i64) {
@@ -527,6 +546,7 @@ impl ClaimStore {
         &self,
         dir: &Path,
         now: i64,
+        retention: i64,
         identity_of: fn(&T) -> (String, i64),
     ) {
         let Ok(entries) = fs::read_dir(dir) else {
@@ -539,7 +559,7 @@ impl ClaimStore {
                     let (name, seen_at) = identity_of(&value);
                     if stem_of(&path) != Some(name.as_str()) {
                         remove_if_older(&path, now, MALFORMED_RETENTION_SECONDS);
-                    } else if now - seen_at >= DONE_RETENTION_SECONDS {
+                    } else if now - seen_at >= retention {
                         let _ = fs::remove_file(&path);
                     }
                 }

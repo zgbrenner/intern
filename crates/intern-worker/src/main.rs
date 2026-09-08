@@ -67,7 +67,10 @@ fn extract_path(
         .unwrap_or_default()
         .to_ascii_lowercase();
     match extension.as_str() {
-        "docx" | "docm" => extract_anydoc(path, &limits, &cancel),
+        "docx" | "docm" | "pptx" | "pptm" | "ppsx" => extract_anydoc(path, &limits, &cancel),
+        "xlsx" => intern_worker::sheet::extract_xlsx(path, &limits, &cancel),
+        "eml" => intern_worker::email::extract_eml(path, &limits, &cancel),
+        "msg" => intern_worker::email::extract_msg(path, &limits, &cancel),
         "txt" | "md" | "markdown" => extract_text(path, &limits, &cancel),
         "pdf" => extract_pdf(path, &pdf_backend()?, &LAZY_OCR, &limits, &cancel),
         "png" | "jpg" | "jpeg" | "tif" | "tiff" => {
@@ -98,7 +101,7 @@ fn extract_path(
             })
         }
         _ => Err(ExtractionError::unsupported(
-            "supported formats are PDF, DOCX, TXT, Markdown, PNG, JPEG, and TIFF",
+            "supported formats are PDF, DOCX, PPTX, XLSX, EML, MSG, TXT, Markdown, PNG, JPEG, and TIFF",
         )),
     }
 }

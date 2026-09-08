@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppHeader } from './components/AppHeader';
 import { DropZone } from './components/DropZone';
+import { HistoryDialog } from './components/HistoryDialog';
 import { QueueTable } from './components/QueueTable';
 import { ReviewInspector } from './components/ReviewInspector';
 import { SettingsDialog } from './components/SettingsDialog';
 import { SetupScreen } from './components/SetupScreen';
 import { Sidebar } from './components/Sidebar';
+import { ViewEmpty } from './components/ViewEmpty';
+import { GUIDE_URL } from './lib/bridge';
 import type { DesktopBridge, SelectionBoundary, SelectionResult } from './lib/bridge';
 import { createInMemoryBridge } from './lib/inMemoryBridge';
 import type { SetupEventSource } from './lib/tauriBridge';
@@ -17,18 +20,22 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const bridgeRef = useRef<DesktopBridge>(suppliedBridge ?? createInMemoryBridge());
   const seededSelection = useRef(false);
   const settingsTrigger = useRef<HTMLElement | null>(null);
+  const historyTrigger = useRef<HTMLElement | null>(null);
   const reviewTrigger = useRef<{ element: HTMLButtonElement; itemId: string } | null>(null);
   const focusRestoreVersion = useRef(0);
   const bridge = suppliedBridge ?? bridgeRef.current;
-  const { items, paused, setPaused, refresh, execute } = useQueue(bridge);
+  const { items, paused, setPaused, refresh, error: queueError, reconnect } = useQueue(bridge);
   const [view, setView] = useState<QueueView>('queue');
+  const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string>();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>({ destination: '', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '' });
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>({ destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' });
   const [setup, setSetup] = useState<SetupState | undefined>(suppliedBridge ? undefined : { state: 'ready', downloadedBytes: 0, totalBytes: 0 });
   const [setupAction, setSetupAction] = useState<'start' | 'cancel' | 'choose'>();
   const [setupError, setSetupError] = useState('');
   const [actionPending, setActionPending] = useState(false);
+  const actionInFlight = useRef(false);
   const [actionMessage, setActionMessage] = useState('');
   const [actionError, setActionError] = useState('');
   const narrowInspector = useMediaQuery('(max-width: 1100px)');
@@ -73,6 +80,12 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     }
   }, [items]);
   const filtered = items.filter((item) => view === 'queue' ? item.status !== 'completed' : view === 'review' ? item.status === 'review' : item.status === 'completed');
+  // A folder of four hundred documents is a wall of rows. The filter narrows
+  // the current view by anything a person is likely to remember: the name the
+  // file arrived with, the name it was given, or a word from its description.
+  const query = filter.trim().toLowerCase();
+  const visible = query ? filtered.filter((item) => matchesQuery(item, query)) : filtered;
+  const filterShown = filtered.length > FILTER_THRESHOLD || query.length > 0;
   const selected = items.find((item) => item.id === selectedId);
   const drawerOpen = Boolean(selected && narrowInspector);
   const readyItems = items.filter((item) => item.status === 'ready' && item.proposedFilename);
@@ -113,7 +126,8 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   // Promise<unknown>: some commands report what they did - discardWaiting
   // resolves with a count - and the result is not needed here.
   const runQueueAction = async (run: () => Promise<unknown>, success: string) => {
-    if (actionPending) return false;
+    if (actionInFlight.current) return false;
+    actionInFlight.current = true;
     setActionPending(true);
     setActionError('');
     setActionMessage('');
@@ -127,6 +141,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
       setActionError(describeActionError(error));
       return false;
     } finally {
+      actionInFlight.current = false;
       setActionPending(false);
     }
   };
@@ -138,7 +153,8 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     restoreQueueFocus();
   };
   const applyAllReady = async () => {
-    if (actionPending) return;
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
     const selectionVersion = focusRestoreVersion.current;
     const selectedAtStart = selected;
     setActionPending(true);
@@ -165,27 +181,54 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     } catch (error) {
       setActionError(`The queue could not refresh. ${describeActionError(error)}`);
     } finally {
+      actionInFlight.current = false;
       setActionPending(false);
     }
   };
+  // Help leaves the app on purpose. Inside Tauri the webview has nowhere to
+  // put a new tab, so the bridge hands the address to the system browser; if
+  // that hand-off is refused the address itself is shown, because a person can
+  // always type it.
+  const openGuide = async () => {
+    setActionError('');
+    try { await bridge.openGuide(); }
+    catch { setActionError(`The guide could not be opened. You can reach it at ${GUIDE_URL}.`); }
+  };
   const openSettings = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; settingsTrigger.current = trigger; setSettingsOpen(true); };
   const closeSettings = () => { setSettingsOpen(false); settingsTrigger.current?.focus(); };
-  const applySelection = (result: SelectionResult) => {
-    const focusAfter = async (run: () => Promise<void>, displayName: string) => {
-      await run();
-      const refreshed = await bridge.listItems();
-      const target = [...refreshed].reverse().find((item) => item.originalFilename === displayName);
-      if (target) { focusRestoreVersion.current += 1; reviewTrigger.current = null; setSelectedId(target.id); }
-    };
-    if (result.folder) {
-      const focused = result.folder.files?.at(-1)?.displayName ?? `${result.folder.displayName}/`;
-      void execute(() => focusAfter(() => bridge.addFolder(result.folder!), focused));
+  const openHistory = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; historyTrigger.current = trigger; setHistoryOpen(true); };
+  const closeHistory = () => { setHistoryOpen(false); historyTrigger.current?.focus(); };
+  // Keep picker, drop resolution, import, and refresh in the same error and
+  // busy boundary. A state-only lock misses two events before React rerenders.
+  const importSelection = async (choose: () => Promise<SelectionResult>) => {
+    if (actionInFlight.current) {
+      setActionError('Another queue action is still running. Add these files again when it finishes.');
       return;
     }
-    if (result.files?.length) {
-      const focused = result.files[result.files.length - 1];
-      void execute(() => focusAfter(() => bridge.addFiles(result.files!), focused.displayName));
-    }
+    const selectionVersion = focusRestoreVersion.current;
+    let targetId: string | undefined;
+    const imported = await runQueueAction(async () => {
+      const result = await choose();
+      let displayName: string;
+      if (result.folder) {
+        displayName = result.folder.files?.at(-1)?.displayName ?? `${result.folder.displayName}/`;
+        await bridge.addFolder(result.folder);
+      } else if (result.files?.length) {
+        displayName = result.files[result.files.length - 1].displayName;
+        await bridge.addFiles(result.files);
+      } else {
+        return; // Canceling a picker is not an import and needs no success notice.
+      }
+      const refreshed = await bridge.listItems();
+      targetId = [...refreshed].reverse().find((item) => item.originalFilename === displayName)?.id;
+    }, '');
+    // Select only after the queue contains the imported row, and never over
+    // a different document the reviewer chose while the import was running.
+    if (!imported || !targetId || focusRestoreVersion.current !== selectionVersion) return;
+    seededSelection.current = true;
+    focusRestoreVersion.current += 1;
+    reviewTrigger.current = null;
+    setSelectedId(targetId);
   };
   const runSetupAction = async (action: 'start' | 'cancel' | 'choose', run: () => Promise<boolean | void>) => {
     if (setupAction) return;
@@ -205,22 +248,38 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     if (!files) return false;
     await bridge.setupChooseExisting(files);
   });
-  if (!setup || setup.state !== 'ready') return <SetupScreen
-    setup={setup}
-    busy={setupAction !== undefined}
-    canChooseExisting={Boolean(selection)}
-    operationError={setupError || (setup?.state === 'failed' ? describeSetupError(setup.error) : undefined)}
-    onStart={() => void runSetupAction('start', () => bridge.startModelDownload())}
-    onCancel={() => void runSetupAction('cancel', () => bridge.setupCancel())}
-    onChooseExisting={chooseExistingModel}
-  />;
+  // A hosted model, once chosen and configured, stands in for the local one:
+  // the download can be skipped entirely, or finished later from Settings.
+  if (!setup || (setup.state !== 'ready' && !setup.hostedModelReady)) return <>
+    <SetupScreen
+      setup={setup}
+      busy={setupAction !== undefined}
+      canChooseExisting={Boolean(selection)}
+      operationError={setupError || (setup?.state === 'failed' ? describeSetupError(setup.error) : undefined)}
+      onStart={() => void runSetupAction('start', () => bridge.startModelDownload())}
+      onCancel={() => void runSetupAction('cancel', () => bridge.setupCancel())}
+      onChooseExisting={chooseExistingModel}
+      onUseHostedModel={() => setSettingsOpen(true)}
+    />
+    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={() => setSettingsOpen(false)} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); setSettingsOpen(false); setSetup(await bridge.getSetup()); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
+  </>;
   return <main className="app-shell" aria-label="Intern">
     <p className="sr-only" role="status" aria-label="Queue status" aria-live="polite" aria-atomic="true">{queueStatus}</p>
     <p className="sr-only" role="status" aria-label="Action status" aria-live="polite" aria-atomic="true">{actionMessage}</p>
     {actionError && <p className="operation-feedback" role="status" aria-label="Action error" aria-live="polite" aria-atomic="true">{actionError}</p>}
-    <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} onAddFiles={() => { void selection?.pickFiles().then((files) => applySelection({ files })); }} onAddFolder={() => { void selection?.pickFolder().then((folder) => { if (folder) applySelection({ folder }); }); }} onTogglePause={() => void (async () => { if (await runQueueAction(paused ? bridge.resumeQueue : bridge.pauseQueue, `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
-    <Sidebar inert={drawerOpen} active={view} items={items} onChange={(next) => { focusRestoreVersion.current += 1; reviewTrigger.current = null; setView(next); setSelectedId(undefined); }} onSettings={openSettings} />
-    <div className="workspace"><section className="queue-panel" aria-label="Queue items" inert={drawerOpen || undefined}><DropZone onDrop={(payload) => { void selection?.resolveDrop(payload).then(applySelection); }} />
+    <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} hosted={settings.modelSource === 'hosted'} onAddFiles={() => { if (selection) void importSelection(async () => ({ files: await selection.pickFiles() })); }} onAddFolder={() => { if (selection) void importSelection(async () => ({ folder: await selection.pickFolder() })); }} onTogglePause={() => void (async () => { if (await runQueueAction(paused ? bridge.resumeQueue : bridge.pauseQueue, `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
+    <Sidebar inert={drawerOpen} active={view} items={items} onChange={(next) => { focusRestoreVersion.current += 1; reviewTrigger.current = null; setView(next); setSelectedId(undefined); }} onSettings={openSettings} onHelp={() => void openGuide()} />
+    <div className="workspace"><section className="queue-panel" aria-label="Queue items" inert={drawerOpen || undefined}>
+      {queueError && <div className="note note--failed" role="alert" aria-label="Queue connection error">
+        <p>{queueError.kind === 'subscription' ? 'Live queue updates are unavailable.' : 'The queue could not be refreshed.'} {describeActionError(queueError.cause)} {items.length > 0 ? 'Showing the last loaded items.' : 'Queue contents may not be available yet.'}</p>
+        <button type="button" disabled={actionPending} onClick={reconnect}>Retry queue connection</button>
+      </div>}
+      {/*
+        An empty queue is the first thing a new user sees, and it used to be
+        four column headings with nothing under them. The same drop target
+        grows into the whole panel and says what to do with it.
+      */}
+      <DropZone variant={items.length === 0 ? 'hero' : 'bar'} onDrop={(payload) => { if (selection) void importSelection(() => selection.resolveDrop(payload)); }} />
       {/*
         The way out of a folder chosen by mistake. Pointing the queue at a large
         directory used to be unrecoverable from inside the app: pausing stops it
@@ -233,15 +292,40 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
         {waitingItems.length > 0 && <button type="button" aria-label="Discard waiting items" disabled={actionPending} onClick={() => void (async () => { const dropped = waitingItems.length; await runQueueAction(() => bridge.discardWaiting(), `Discarded ${dropped} waiting ${dropped === 1 ? 'item' : 'items'}.`); })()}>Discard waiting <span>{waitingItems.length}</span></button>}
         {readyItems.length > 0 && <button type="button" className="primary" aria-label="Apply all ready" disabled={actionPending} onClick={() => void applyAllReady()}>Apply all ready <span>{readyItems.length}</span></button>}
       </div>}
-      {view === 'completed' && filtered.length > 0 && <div className="queue-actions"><button type="button" disabled={actionPending} onClick={() => void (async () => { if (await runQueueAction(() => bridge.clearHistory(), 'History cleared.')) queueMicrotask(() => document.querySelector<HTMLButtonElement>('.sidebar button[aria-label="Completed"]')?.focus()); })()}>Clear history</button></div>}
-      <QueueTable items={filtered} selectedId={selectedId} onSelect={select} /><p className="item-count">{filtered.length} items</p></section>
+      {view === 'completed' && filtered.length > 0 && <div className="queue-actions">
+        <button type="button" disabled={actionPending} onClick={(event) => openHistory(event.currentTarget)}>History</button>
+        <button type="button" disabled={actionPending} onClick={() => void (async () => { if (await runQueueAction(() => bridge.clearHistory(), 'History cleared.')) queueMicrotask(() => document.querySelector<HTMLButtonElement>('.sidebar button[aria-label="Completed"]')?.focus()); })()}>Clear history</button>
+      </div>}
+      {filterShown && <div className="queue-filter" role="search">
+        <input type="search" aria-label="Filter queue" placeholder="Filter by filename or description" value={filter} onChange={(event) => setFilter(event.target.value)} onKeyDown={(event) => {
+          // Escape clears the filter first; only an already-empty box lets the
+          // key through to whatever else listens for it.
+          if (event.key === 'Escape' && filter) { event.stopPropagation(); setFilter(''); }
+        }} />
+      </div>}
+      {items.length > 0 && (visible.length > 0
+        ? <QueueTable items={visible} selectedId={selectedId} onSelect={select} />
+        : query
+          ? <p className="queue-filter-empty" role="status">No items match “{filter.trim()}”.</p>
+          : <ViewEmpty view={view} />)}
+      <p className="item-count">{query ? `${visible.length} of ${filtered.length} ${filtered.length === 1 ? 'item' : 'items'}` : `${filtered.length} ${filtered.length === 1 ? 'item' : 'items'}`}</p></section>
       {selected && <ReviewInspector busy={actionPending} drawer={drawerOpen} item={selected} onClose={closeReview} onApprove={(filename, description) => void refreshAndClear(() => bridge.approve(selected.id, filename, description), 'Rename applied.')} onKeep={() => void refreshAndClear(() => bridge.keepOriginal(selected.id), 'Original filename kept.')} onCancel={() => void refreshAndClear(() => bridge.cancel(selected.id), 'Processing canceled.')} onRetry={() => void refreshAndClear(() => bridge.retry(selected.id), 'Item queued for retry.')} onRemove={() => void refreshAndClear(() => bridge.remove(selected.id), 'Item removed.')} onUndo={() => void refreshAndClear(() => bridge.undo(selected.id), 'Operation undone.')} />}
     </div>
+    {historyOpen && <HistoryDialog bridge={bridge} selection={selection} onClose={closeHistory} />}
     {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={closeSettings} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); closeSettings(); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
   </main>;
 }
 
+/** Views with this many items or fewer are short enough to read; the filter box appears above longer ones. */
+const FILTER_THRESHOLD = 6;
+
+function matchesQuery(item: QueueItem, query: string) {
+  return [item.originalFilename, item.proposedFilename, item.description]
+    .some((text) => text !== undefined && text.toLowerCase().includes(query));
+}
+
 function describeActionError(error: unknown) {
+  if (typeof error === 'string' && error.trim()) return error.trim();
   if (error instanceof Error && error.message.trim()) return error.message.trim();
   if (typeof error === 'object' && error && 'message' in error && typeof error.message === 'string' && error.message.trim()) return error.message.trim();
   return 'The operation could not be completed.';

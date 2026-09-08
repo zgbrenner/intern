@@ -33,6 +33,18 @@ button, neither carrying anything about your documents:
    manifest. There is no background poll and no timer. An update is installed
    only if it is signed by this project's key; anything else is refused.
 
+There is one optional exception, and it is a choice, never a default. Settings
+can point Intern at a **hosted model** — Anthropic's, OpenAI's, or any service
+that speaks the OpenAI chat-completions shape, including a local server such as
+Ollama or LM Studio — under your own API key. With that on, the condensed text
+of every document is sent to that service to be named. Nothing else changes:
+the same distillation goes out, the same evidence checks are applied to what
+comes back, and the file itself never leaves. The header badge stops saying
+*On this device* for as long as it is on, the key lives in the operating
+system's credential store rather than in any Intern file, and **Test
+connection** sends only Intern's own calibration document. If the promise
+above is why you use Intern, leave it off.
+
 Intern reads documents as text: native PDF text first, OCR when a page has none,
 and no vision model. The projector for this model is 668,227,264 bytes — 637 MiB,
 a second download larger than half the model itself, before anyone names a
@@ -41,7 +53,7 @@ extraction nor OCR can read goes to review rather than being guessed at.
 
 ## Install and first run
 
-Windows 10 or 11, x86-64. Download `Intern_0.1.0-alpha.2_x64-setup.exe` from the
+Windows 10 or 11, x86-64. Download `Intern_0.1.0-alpha.6_x64-setup.exe` from the
 [latest release](https://github.com/zgbrenner/intern/releases/latest) and run it.
 It installs per-user, so it does not ask for administrator rights, and
 uninstalling it leaves your documents and Intern's own data alone.
@@ -55,7 +67,7 @@ installer carries a keyless Sigstore build-provenance attestation naming the
 repository, workflow, and commit that produced those exact bytes:
 
 ```sh
-gh attestation verify Intern_0.1.0-alpha.2_x64-setup.exe --repo zgbrenner/intern
+gh attestation verify Intern_0.1.0-alpha.6_x64-setup.exe --repo zgbrenner/intern
 ```
 
 `SHA256SUMS.txt` is published beside the installer and catches a corrupted or
@@ -65,17 +77,48 @@ attestation is the part that establishes where the file came from.
 
 On first launch Intern shows a setup screen and asks to download the one thing
 the installer deliberately leaves out: the pinned model file, 1.19 GiB. That
-download is resumable, it is the only network request Intern ever makes, and the
-file becomes active only after its exact length and SHA-256 match the manifest
+download is resumable, it is the only network request Intern makes on its own
+behalf, and the file becomes active only after its exact length and SHA-256 match the manifest
 built into the installer. If you already have the file, **Choose existing model
 files** points Intern at it and skips the download. Nothing else needs
 installing — PDF text extraction, OCR, and inference all ship inside the app.
 
-Then drag documents or a folder onto the window. Names Intern can support with
-verbatim text from the document appear ready to apply; anything else goes to
-review with the reason shown. Nothing on disk is renamed until you approve it,
-either one item at a time or with **Apply all ready**, and a rename can be
-undone.
+Then drag documents or a folder onto the window — PDFs, Word documents, Excel
+workbooks, PowerPoint decks, `.eml` and Outlook `.msg` emails, plain text,
+Markdown, and scanned images. Names
+Intern can support with verbatim text from the document appear ready to apply;
+anything else goes to review with the reason shown. Nothing on disk is renamed
+until you approve it, either one item at a time or with **Apply all ready**,
+and a rename can be undone. A document whose content Intern has already filed
+is flagged as a duplicate of the filed name instead of being renamed into a
+second copy, and the **History** view in Completed lists every rename and undo
+Intern has ever applied, exportable as CSV. A long queue has a filter box
+above it that narrows the rows by original name, proposed name, or a word
+from the description.
+
+Every rename carries a date. A name that does not start with the document's
+date as `YYYY-MM-DD` is refused, in the inspector and again in the queue, so
+nothing undated is ever filed. When the model read a date that Intern could
+not find written in the document, review shows the date, says it is
+unverified, and accepts it in one click — into the name to edit, or straight
+through to the rename. When the model offered none, every date the document
+states is one click away, and the file's own last-modified date is the last,
+labelled resort. The date a reviewer gives a name is the date the document
+is filed under: the year folder and the description record follow it.
+
+Filed documents can be **arranged into subfolders** of the destination —
+by year, by year and document type, by type, or by first party — with
+**Arrange filed documents** in Settings. Folders are created as documents
+arrive and removed again when an undo empties them, and a document missing
+the fact a layout keys on goes into `Undated` or `Unsorted` rather than the
+root, so what still needs a hand stays visible.
+
+Intern can also **run in the background**: with the setting on, closing the
+window keeps Intern in the system tray — watched folders keep working — and
+**Start Intern when you sign in** makes it a quiet always-on service. Both are
+off by default. The tray icon's tooltip says how many documents need review
+or are ready to rename, so a glance answers whether the window is worth
+opening.
 
 ## Watched intake folders, OneDrive, and SharePoint
 
@@ -102,8 +145,37 @@ is taken over after its lease lapses, and nothing needs a server. By default
 each machine only processes documents uploaded from that machine; enabling
 **"Also process documents uploaded by others"** turns the folder into a shared
 work queue, with a courtesy delay so the uploader's own machine gets first
-claim. The design, its guarantees, and its failure behavior are documented in
-[`docs/shared-intake.md`](docs/shared-intake.md).
+claim. The same directory keeps a **filed index**: a marker, named by the
+document's content hash, for every document any machine filed out of the
+folder, so a teammate who re-uploads last month's agreement under a new name
+sees it flagged as a duplicate of the filed name — and which machine filed it —
+rather than filed a second time. The design, its guarantees, and its failure
+behavior are documented in [`docs/shared-intake.md`](docs/shared-intake.md).
+
+Settings lists the **synced locations** the sync client keeps on the machine
+— each SharePoint library and OneDrive account, with its local folder — so
+the folder a library syncs to (`C:\Users\pat\Contoso\Legal - Documents`, a
+name nobody chose) is one click away instead of a hunt through a folder
+dialog. A folder on a **network share** — a UNC path or a mapped drive — is
+recognised and labelled too, and the same `.intern/` claim files coordinate
+machines watching a share. A subfolder the account cannot read is counted and
+skipped rather than stopping the scan.
+
+### The description in a SharePoint column
+
+Alongside the filename, Intern writes one sentence saying what the document
+concerns. With **Write a description record for each filed document** turned
+on, every rename into the destination folder also writes a small JSON record
+under `<destination>\.intern\descriptions\` — the filename, its path in the
+library, the sentence, and the date, type, and parties behind the name; never
+document text. The sync client uploads the record like any other file, and a
+Power Automate flow (the recipe is in
+[`docs/sharepoint-descriptions.md`](docs/sharepoint-descriptions.md)) copies
+the sentence into a **Description** column of the library. Intern still makes
+no network request for this; the flow runs under the SharePoint account of
+whoever creates it. Records for documents filed before the setting was turned
+on can be written from Settings, and the rename history's CSV export carries
+the same sentence in its last column for anyone who would rather paste.
 
 ## How a document becomes a filename
 
@@ -142,11 +214,46 @@ easiest one to find: an agreement's effective date, a notice's notice date, an
 invoice's invoice date, an amendment's own date rather than the date of the
 agreement it amends. Payment due dates, renewal deadlines, and response
 deadlines are never used. If no defining date can be established, the document
-goes to review rather than getting an invented one.
+goes to review rather than getting an invented one — and it is renamed only
+once a person has given it one, typed or accepted from the model's unverified
+reading. What *kind* of date it is
+is read from the document's own wording around it (`Effective Date:`,
+`Invoice date`, `Notice is hereby given ... on`) rather than taken from the
+model's habit, and a document the model could not type but whose title names
+a type (`MUTUAL NON-DISCLOSURE AGREEMENT`, `Board Meeting Minutes`) is named
+from the title and sent to review with the reason shown.
 
 Names are sanitised for Windows, keep the original extension, shed the least
 identifying detail first when they would be too long to scan, and get a numeric
 suffix on collision.
+
+### The same document twice
+
+Identical bytes are caught before analysis and flagged as a duplicate of the
+filed name. A second scan of the same page, a PDF exported twice, or a copy
+saved again with new metadata is not identical bytes, so Intern also
+fingerprints the text it extracted and holds every new document against what
+it has filed - on this machine and, through the shared filed index, on
+teammates' machines. Two documents that share their words are not always one
+document: this month's statement and last month's differ in a date and a few
+figures, so the dates must agree too. A near-duplicate waits in review, named
+after the filing it repeats, and is never filed on its own; a person can file
+it anyway, keep the original, or remove it.
+[`docs/prior-art.md`](docs/prior-art.md) says where the idea came from and
+what was left on the table.
+
+### Spellings Intern learns from you
+
+The document says "Vistage Worldwide, Inc."; you call it "Vistage". Respell a
+party or a document type in review and Intern remembers it. The second time
+you make the same change it becomes the spelling Intern uses, in the name, the
+layout folder, and the description record, for every later document that
+names the same thing. One edit is a decision about one document; two are a
+preference. Settings lists everything learned, with "Use now" for a spelling
+you want at once and "Forget" for one you do not, and the review panel says
+"Uses your spelling" whenever a name differs from the evidence under it. The
+evidence itself always keeps the document's own words: a learned spelling
+changes what Intern calls a thing, never what it found.
 
 ## Development
 
@@ -177,16 +284,30 @@ Run Rust tests with:
 cargo test --locked --workspace --all-targets
 ```
 
+Accuracy is a number, not a feeling. The corpus is scored on every push from a
+committed recording of what the parser read and what the model replied, and
+CI fails when a reviewed answer that used to be right is now wrong:
+
+```sh
+cargo run --locked -p intern-engine --bin intern-evaluate -- \
+  --fixtures fixtures/generated --expected fixtures/expected.json \
+  --replay fixtures/corpus-recording.json --baseline fixtures/corpus-baseline.json
+```
+
+A prompt change makes the recording stale and needs a live re-record;
+[`docs/evaluation.md`](docs/evaluation.md) has the workflow, and
+[`docs/model-bakeoff.md`](docs/model-bakeoff.md) the numbers.
+
 ### Crates
 
 | Crate | What it owns |
 | --- | --- |
-| `intern-engine` | Document understanding: distillation, prompt, local model client and server, evidence validation, filename composition, and model installation. |
+| `intern-engine` | Document understanding: distillation, prompt, local model client and server, the optional hosted-model client, evidence validation, house style learned from review, filename composition, model installation, and the corpus evaluator with its record-and-replay mode. |
 | `intern-intake` | Shared intake folders: the multi-machine claim protocol, cloud sync-root detection, and the polling watcher. |
-| `intern-queue` | The durable queue: ordering, leases, retries, and the review/apply workflow. |
+| `intern-queue` | The durable queue: ordering, leases, retries, the review/apply workflow, and the spellings it learns from approvals. |
 | `intern-core` | Crash-safe queue storage and journalled file operations. |
-| `intern-worker` | The out-of-process parser: PDFium, OCR, and Office extraction. |
-| `intern-app` | The Tauri desktop shell. |
+| `intern-worker` | The out-of-process parser: PDFium, OCR, Office, and Outlook message extraction. |
+| `intern-app` | The Tauri desktop shell, including the switch between the local and hosted models and the credential store the hosted key lives in. |
 
 The engine is usable without the desktop app:
 
@@ -223,7 +344,7 @@ digest for every file in `src-tauri/resources/runtime-assets.json`.
 Tauri produces a per-user NSIS installer. To smoke-test a clean installer:
 
 ```powershell
-./scripts/smoke-installer.ps1 -InstallerPath target/release/bundle/nsis/Intern_0.1.0-alpha.2_x64-setup.exe
+./scripts/smoke-installer.ps1 -InstallerPath target/release/bundle/nsis/Intern_0.1.0-alpha.6_x64-setup.exe
 ```
 
 The installer includes third-party notices and the generated `licenses/`
@@ -246,3 +367,19 @@ as a trap, and on the review rate. Publishing is a deliberate
 `workflow_dispatch` against a chosen main commit, never a side effect of
 merging; the release job still refuses any commit but the one it was dispatched
 for.
+
+## License
+
+Intern is © 2026 Vistage Worldwide, Inc., and is **source-available** under the
+[Elastic License 2.0](LICENSE) — not an OSI-approved open-source license.
+
+Read, audit, build, run, modify, and redistribute it freely. Intern makes
+strong claims about what it does and does not do with your documents; the
+source is published so those claims can be checked rather than taken on faith.
+What the license reserves to Vistage Worldwide, Inc. is providing Intern to
+third parties as a hosted or managed service, and circumventing its license or
+functionality restrictions.
+
+Third-party components keep their own licenses: see
+[`THIRD_PARTY_NOTICES.md`](src-tauri/resources/THIRD_PARTY_NOTICES.md) and the
+`licenses/` directory in the installed application.

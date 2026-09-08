@@ -2,6 +2,8 @@
 //!
 //! The endpoint is required to be loopback HTTP with no proxy and no redirects,
 //! so a misconfiguration cannot silently send document text off the machine.
+//! Sending it off the machine on purpose is [`crate::hosted`]'s job, behind
+//! an explicit setting.
 
 use std::time::Duration;
 
@@ -44,11 +46,23 @@ impl ModelRequest {
     }
 }
 
+/// Anything that can turn the prompt for one document into a proposal: the
+/// local server, or a hosted model standing in for it.
+pub trait Proposer: Send + Sync {
+    fn propose(&self, request: &ModelRequest) -> EngineResult<ModelProposal>;
+}
+
 pub struct ModelClient {
     endpoint: Url,
     api_key: String,
     model_id: String,
     http: Client,
+}
+
+impl Proposer for ModelClient {
+    fn propose(&self, request: &ModelRequest) -> EngineResult<ModelProposal> {
+        ModelClient::propose(self, request)
+    }
 }
 
 impl ModelClient {
@@ -132,7 +146,9 @@ impl ModelClient {
     }
 }
 
-fn decode(completion: ChatCompletion) -> Result<ModelProposal, AttemptError> {
+/// Reads a proposal out of a chat-completion reply: the local server's, or
+/// any OpenAI-compatible service's.
+pub(crate) fn decode(completion: ChatCompletion) -> Result<ModelProposal, AttemptError> {
     let choice = completion
         .choices
         .into_iter()
@@ -146,8 +162,14 @@ fn decode(completion: ChatCompletion) -> Result<ModelProposal, AttemptError> {
         .content
         .into_text()
         .ok_or(AttemptError(EngineErrorCode::ModelResponseInvalid))?;
+    proposal_from_text(&content)
+}
+
+/// Reads a proposal out of the text a model replied with, fences and
+/// chatter tolerated.
+pub(crate) fn proposal_from_text(content: &str) -> Result<ModelProposal, AttemptError> {
     let json =
-        extract_json_object(&content).ok_or(AttemptError(EngineErrorCode::ModelResponseInvalid))?;
+        extract_json_object(content).ok_or(AttemptError(EngineErrorCode::ModelResponseInvalid))?;
     let wire: WireProposal = serde_json::from_str(json)
         .map_err(|_| AttemptError(EngineErrorCode::ModelResponseInvalid))?;
     wire.into_domain()
@@ -170,7 +192,7 @@ pub fn extract_json_object(content: &str) -> Option<&str> {
 }
 
 #[derive(Deserialize)]
-struct ChatCompletion {
+pub(crate) struct ChatCompletion {
     choices: Vec<Choice>,
 }
 
@@ -279,6 +301,7 @@ impl WireProposal {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct AttemptError(pub(crate) EngineErrorCode);
 
 impl AttemptError {

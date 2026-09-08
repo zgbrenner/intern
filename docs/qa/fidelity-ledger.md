@@ -1,37 +1,74 @@
-# Intern primary-screen fidelity ledger
+# Intern alpha.6 rendered-fidelity ledger
 
-**Rendered sign-off status: accepted**, recorded in `docs/qa/rendered-fidelity-signoff.json` on 2026-08-12 against the committed 1536×1024 capture. What was reviewed is the implementation capture itself; it was not pixel-diffed against the concept art, and this ledger's per-area rows below remain code-backed expectations rather than pixel measurements.
+**Rendered sign-off status: accepted.** The accepted record is
+`docs/qa/rendered-fidelity-signoff.json`, reviewed on 2026-09-02 and bound to
+the final non-QA release-input digest
+`fe016f3944a190dd932d001367fdcc44a360b5cb6fd2030d6fe233e290a1c05c`.
 
 ## Evidence inspected
 
-- Accepted concept: `docs/design/intern-primary-screen.png`, 1536×1024, SHA-256 `c8cf322da777d77bc490b855fd18c5a70fe24192a343505e677d34d925a30de8`.
-- Concept inspection: performed with `view_image` at original detail. The screen contains native chrome, a 72-pixel-style product header, left navigation, compact queue list, selected review row, and right inspector.
-- Implementation sources inspected: `src/App.tsx`, components under `src/components`, `src/styles/tokens.css`, `src/styles/app.css`, and the in-memory browser adapter.
-- Latest implementation capture: `docs/qa/latest-implementation.png`, produced by Playwright at exactly 1536×1024, SHA-256 `aedb8798c512332d5a79e8194ae3075234eaa01a3a3b8e15c5c66911fd6a1b5c`. Regenerating it from the current tree reproduces the same bytes, so the reviewed image is the one the release ships.
+- Accepted concept: `docs/design/intern-primary-screen.png`, 1536×1024,
+  SHA-256 `c8cf322da777d77bc490b855fd18c5a70fe24192a343505e677d34d925a30de8`.
+- Fresh implementation capture: hosted Whole-product QA evidence run
+  `33572364279`, Windows/X64, commit
+  `9e91511c12ad9a3e727e3fa56e15b7197de191d2`. The capture is 1536×1024 and
+  SHA-256 `1bc7bb1707c743fc87106eb3a2a914d234128cefdc20e92a77c88fa7a6b7fb76`.
+- The capture differs substantially from alpha.5's: alpha.6 rebuilds the review
+  panel. Evidence is now attributed quotations under labelled DATE, TYPE, and
+  PARTIES headings, each party on its own line so it can be checked separately;
+  the model's confidence appears in the panel at all, with an exact percentage
+  beside a proportional track; the approve and keep actions sit in a pinned bar
+  at the foot of the panel; the selected row carries an accent bar as well as a
+  tint, so it is no longer confusable with hover; and a help affordance sits
+  beside the settings gear. The run's automated contrast assertions passed.
+- That run completed every substantive automated gate: 19 Vitest files / 146
+  tests, four Playwright tests, `cargo fmt --check`, `cargo clippy -D
+  warnings`, workspace Rust tests, native fixture tests, verified pinned
+  Windows assets, an NSIS build, installed-app smoke, and an accepted
+  whole-corpus evaluation with real inference - dates 76.5%, types 88.2%,
+  every gate above its floor and zero documents filed under a forbidden
+  date, with the new reference-date guard converging the hardware-dependent
+  model picks. Its final evidence binding correctly failed closed because the
+  prior sign-off was bound to the alpha.5
+  `f338fbbe5532f18175dff9d95b2d8fe8f225dba30c2f2da775239b4ca7ef0b89` digest;
+  this post-run review supplies the accepted replacement record.
 
-## Comparison ledger
+## Review conclusion
 
-| Area | Accepted reference | Code-backed implementation | Status / required rendered check |
-|---|---|---|---|
-| Copy | Intern; Private · On this device; Add files/folder; Queue/Needs Review/Completed; compact table and review labels | Matching primary labels and headings are present. Waiting rows render em dashes. The duplicate product wordmark from native chrome is not added by the web surface. | code-aligned; rendered check pending |
-| Structure | Product header above left navigation, center queue, right review inspector | CSS grid uses header across both columns, 230px sidebar, flex queue workspace, and 370px inspector. | runtime geometry assertions prepared; pending |
-| Typography | Segoe-like hierarchy with larger product wordmark and compact 12–14px metadata/body/control text | Segoe UI Variable/Segoe UI stack; product 34px; body/table 14px; controls/header cells 13px; metadata 12px. | code-aligned; raster hierarchy pending |
-| Palette | True white/cool gray surfaces, charcoal text, restrained indigo, amber review, muted green ready | Tokens are `#fff`, `#171a1f`, `#0b5cff`, `#b66a00`, and `#14804a`; no gradient rule exists. | code-aligned; color rendering pending |
-| List density | Compact document rows with single-pixel separators | Cells declare 46px height and 7px vertical padding with 1px borders. Actual browser row boxes must be measured because table layout may exceed the declared height. | potential fidelity risk; pending screenshot measurement |
-| Inspector width | Narrow fixed right inspector | 370px flex basis at desktop; fixed right drawer at widths at or below 1100px. | exact 370px Playwright assertion prepared; pending |
-| Icon treatment | Consistent thin outline document/status/action icons | Lucide icons are globally 20px with stroke width 1.75. | code-aligned; optical comparison pending |
-| Focus / selection | Selected review row has restrained blue treatment; editable filename is visibly focused in concept | Selected row uses `#f2f6ff` plus `#cbd9f8` boundaries. All buttons, inputs, textareas, rows, and drop zone have a 2px accent `:focus-visible` outline. | automated focus-style assertion prepared; pending execution |
-| 1024px responsiveness | Compact laptop layout retains usable queue and review surface | At ≤1100px sidebar becomes 64px icon navigation with accessible button labels; inspector becomes a fixed right drawer. | 1024px width/no-overflow/accessibility assertions prepared; pending execution |
-| Motion | No decorative motion requirement | Reduced-motion media query collapses animation and transition durations; only processing status spinner animates normally. | code-aligned; browser check pending |
+The fresh capture was inspected against the accepted concept. Core hierarchy
+and interaction emphasis align: sidebar counts, queue table, and review drawer
+read as three distinct planes, and the header states the privacy posture in the
+chrome beside the new brand tag. Date-first proposed filenames, right-aligned
+confidence, and em-dashes for absent values stay consistent down the column.
+Ready, Needs review, Processing, and Waiting are each distinguishable by icon
+as well as colour, and this run's automated contrast assertions for the review
+and waiting statuses passed at 4.5:1 on the brand-tinted selection.
 
-## Prepared objective browser checks
+No clipping, collisions, illegible copy, excessive density, or ambiguous
+focus/selection were observed. Focus is a ring on the filename input and
+selection is a tint on the row the drawer describes, so neither is in doubt.
+The filename field's right-edge truncation is an input scrolled to offset zero,
+which the capture test arranges deliberately so the head of the proposed name
+is visible rather than its tail.
 
-`tests/e2e/qa.spec.ts` fixes the primary viewport at 1536×1024 and asserts 72px header, 230px sidebar, 370px inspector, no page-level horizontal overflow, accessible main/navigation/inspector/control names, visible form labels, and a nontransparent 2px focus outline. With `INTERN_QA_CAPTURE=1` it writes the real viewport to `docs/qa/latest-implementation.png`.
+This is not a pixel-equality assertion: the reference and implementation can
+differ where alpha.6's supported behavior requires it. The native title bar,
+1024-pixel layout, hover states, and motion remain supported by the hosted
+automated browser and installed-app gates rather than an assertion that the
+single 1536×1024 frame captures every state.
 
-The same spec switches to 1024×768 and asserts a 64px accessible icon navigation, 370px right-edge inspector drawer, no page-level horizontal overflow, and a reachable keyboard focus target. `tests/e2e/queue.spec.ts` separately covers the mixed-batch review/edit/approve/undo path.
+## Reviewer
 
-## Sign-off procedure still required
+Reviewed by Claude Opus 5 (Claude Code) at the maintainer's direction, who
+inspected the capture named above. The reviewer field in the sign-off record
+names the same, so a later reader can tell who looked and with what standing.
 
-After the workflow produces the screenshot, inspect the accepted concept and implementation capture side by side with `view_image`. Record actual differences in copy, structure, typography, palette, row density, inspector width, icon optical weight, selection/focus state, and the 1024px layout. Any Critical or Important discrepancy must be fixed and recaptured before this ledger may change to accepted.
+## Freshness boundary and residuals
 
-Acceptance is machine-gated through `docs/qa/rendered-fidelity-signoff.json`. The reviewer must record the accepted screenshot SHA-256, the model report's `release_inputs_sha256`, their identity, review time, and useful notes. The tagged release recaptures the same screenshot and fails closed if either digest no longer matches.
+The sign-off is accepted only for the digest above and its exact screenshot.
+`scripts/hash-release-inputs.mjs` derives that digest from the committed
+non-QA release inputs; a relevant source change invalidates the sign-off and
+requires a new QA capture and review. The remaining release work is not a
+fidelity discrepancy: exact-main validation and the deliberately dispatched
+release workflow must still reproduce and accept their own evidence before a
+tag or publication is allowed.

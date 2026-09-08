@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 
 export function requireValue(condition, message) {
   if (!condition) throw new Error(message);
@@ -97,4 +97,47 @@ export async function deriveSignoffs(root, paths, artifacts, context) {
 export function exactKeys(value, keys, label) {
   requireValue(value && typeof value === 'object' && !Array.isArray(value), `${label} must be an object`);
   requireValue(JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort()), `${label} has an unexpected field or omits a required field`);
+}
+
+export async function validateSpdx(root, entry, { kind, releaseVersion }) {
+  const sbom = await readJsonArtifact(root, entry.path);
+  requireValue(typeof sbom.spdxVersion === 'string' && sbom.spdxVersion.startsWith('SPDX-'), `${entry.path} is not an SPDX document`);
+  requireValue(typeof sbom.SPDXID === 'string' && sbom.SPDXID.startsWith('SPDXRef-'), `${entry.path} has no SPDX document identity`);
+  requireValue(typeof sbom.name === 'string' && sbom.name.trim().length > 0, `${entry.path} has no SPDX document name`);
+  requireValue(typeof sbom.documentNamespace === 'string' && sbom.documentNamespace.length > 0, `${entry.path} has no SPDX document namespace`);
+  requireValue((Array.isArray(sbom.packages) && sbom.packages.length > 0) || (Array.isArray(sbom.files) && sbom.files.length > 0), `${entry.path} has no SPDX package or file`);
+  if (kind === 'application') {
+    requireValue(sbom.name.includes(releaseVersion), `${entry.path} does not identify the release version`);
+  } else {
+    requireValue(Array.isArray(sbom.packages) && sbom.packages.some((pkg) => (
+      typeof pkg?.name === 'string' && pkg.name.trim().length > 0
+      && typeof pkg?.versionInfo === 'string' && pkg.versionInfo.trim().length > 0
+    )), `${entry.path} has no runtime component name and pinned version identity`);
+  }
+}
+
+export async function validateSha256Sums(root, checksums, excluded = ['SHA256SUMS.txt', 'release-evidence-manifest.json']) {
+  const absolute = safeArtifactPath(root, checksums.path);
+  requireValue(basename(absolute) === 'SHA256SUMS.txt', 'checksum artifact must be named SHA256SUMS.txt');
+  const releaseDirectory = dirname(absolute);
+  const lines = (await readFile(absolute, 'utf8')).split(/\r?\n/).filter(Boolean);
+  requireValue(lines.length > 0, 'SHA256SUMS.txt is empty');
+  const entries = new Map();
+  for (const line of lines) {
+    const match = /^([a-f0-9]{64})  ([^\\/:]+)$/.exec(line);
+    requireValue(match, `malformed SHA256SUMS entry: ${line}`);
+    const [, hash, leaf] = match;
+    requireValue(!excluded.includes(leaf), `SHA256SUMS must exclude ${leaf} to avoid a digest cycle`);
+    requireValue(!entries.has(leaf), `duplicate SHA256SUMS filename: ${leaf}`);
+    entries.set(leaf, hash);
+  }
+  const published = (await readdir(releaseDirectory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && !excluded.includes(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  requireValue(JSON.stringify([...entries.keys()].sort()) === JSON.stringify(published), `SHA256SUMS must cover every distributable release file exactly once (listed: ${[...entries.keys()].sort().join(', ')}; published: ${published.join(', ')})`);
+  for (const leaf of published) {
+    const current = await sha256File(resolve(releaseDirectory, leaf));
+    requireValue(entries.get(leaf) === current, `SHA256SUMS hash does not match ${leaf}`);
+  }
 }

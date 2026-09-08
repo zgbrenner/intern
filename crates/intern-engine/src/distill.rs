@@ -575,11 +575,30 @@ fn select(blocks: &[Block], max_characters: usize) -> Vec<usize> {
     // A contract repeats the same clause wording in a dozen places. Once one
     // instance is in the digest the others buy nothing, so they never compete
     // for budget with text that appears only once.
+    //
+    // Two keys. A block whose text is identical to one already kept (clause
+    // number aside) is dropped whether or not it is mandatory: the corpus
+    // statement of work names its parties and its type inside the very clauses
+    // it repeats, which made every copy mandatory and spent a third of the
+    // budget on four readings of the same assignment clause. A block that
+    // merely *shapes* like one already kept - digits masked, so page and
+    // clause numbers do not count - is dropped only when it is not mandatory,
+    // because two mandatory blocks that differ only in their digits may differ
+    // in exactly the date this digest exists to carry.
+    let mut exact = std::collections::HashSet::new();
     let mut shapes = std::collections::HashSet::new();
     for index in ranked {
         let block = &blocks[index];
-        let shape = digit_masked(&block.text.chars().take(80).collect::<String>());
-        if !block.mandatory && !shapes.insert(shape) {
+        let body = strip_enumerators(block.text.trim());
+        let repeated = !exact.insert(collapse_whitespace(body));
+        let (head, tail) = duplicate_shapes(block.kind, body);
+        let shaped_like_kept =
+            shapes.contains(&head) || tail.as_ref().is_some_and(|tail| shapes.contains(tail));
+        shapes.insert(head);
+        if let Some(tail) = tail {
+            shapes.insert(tail);
+        }
+        if repeated || (shaped_like_kept && !block.mandatory) {
             continue;
         }
         let cost = block.text.chars().count() + 2;
@@ -594,6 +613,83 @@ fn select(blocks: &[Block], max_characters: usize) -> Vec<usize> {
     }
     kept.sort_unstable();
     kept
+}
+
+/// The keys under which a block counts as a repeat of one already kept.
+///
+/// The head is the first 80 characters with digits masked and any leading
+/// clause number stripped, so `25. Assignment.` and `41. Assignment.` collapse
+/// onto each other and onto an unnumbered copy. Long body blocks also key on
+/// their last 80 characters: the statement of work in the corpus repeated its
+/// assignment and force-majeure clauses with some copies starting mid-clause,
+/// and those copies still end on the same words. Tables and headings never
+/// key on their tail, because a totals row or a short title legitimately ends
+/// many different blocks the same way.
+fn duplicate_shapes(kind: BlockKind, body: &str) -> (String, Option<String>) {
+    const WINDOW: usize = 80;
+    const TAIL_MINIMUM: usize = 3 * WINDOW;
+    let masked = digit_masked(body);
+    let head = masked.chars().take(WINDOW).collect::<String>();
+    let length = masked.chars().count();
+    let tail = (kind == BlockKind::Body && length >= TAIL_MINIMUM)
+        .then(|| masked.chars().skip(length - WINDOW).collect::<String>());
+    (head, tail)
+}
+
+/// Lowercased with runs of whitespace collapsed, so a clause re-flowed onto
+/// different line breaks still reads as the same text.
+fn collapse_whitespace(value: &str) -> String {
+    value
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Drops a leading clause label - `25.`, `4.2`, `(a)`, `(iv)`, `Section 4.`,
+/// `ARTICLE IV` - so the same clause under different numbers reads the same.
+fn strip_enumerators(text: &str) -> &str {
+    let mut rest = text.trim_start();
+    let mut after_word = false;
+    for _ in 0..3 {
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let token = &rest[..end];
+        if token.is_empty() || token.chars().count() > 12 {
+            break;
+        }
+        let lowered = token.to_ascii_lowercase();
+        let word = matches!(
+            lowered.trim_end_matches('.'),
+            "section" | "article" | "clause" | "part" | "§" | "item" | "paragraph"
+        );
+        let core =
+            token.trim_matches(|character: char| matches!(character, '(' | ')' | '.' | ':' | '-'));
+        let punctuated = token.ends_with('.') || token.ends_with(')') || token.ends_with(':');
+        let numeric = !core.is_empty()
+            && core
+                .chars()
+                .all(|character| character.is_ascii_digit() || character == '.')
+            && core.chars().any(|character| character.is_ascii_digit());
+        let roman = !core.is_empty()
+            && core.len() <= 5
+            && core
+                .chars()
+                .all(|character| matches!(character, 'i' | 'v' | 'x' | 'I' | 'V' | 'X'));
+        let letter = core.len() == 1
+            && core
+                .chars()
+                .all(|character| character.is_ascii_alphabetic());
+        let label = numeric || ((roman || letter) && (punctuated || after_word));
+        if !(word || label) {
+            break;
+        }
+        after_word = word;
+        rest = rest[end..].trim_start();
+        if label {
+            after_word = false;
+        }
+    }
+    rest
 }
 
 /// Collects every kept line that carries a date, trimmed and deduplicated.
@@ -854,6 +950,138 @@ mod tests {
             "{:?}",
             digest.date_lines
         );
+    }
+
+    /// The corpus statement of work repeats its assignment clause several
+    /// times: numbered, renumbered, and as a copy that starts mid-clause. The
+    /// first two collapsed already; the third cost budget for nothing.
+    #[test]
+    fn a_clause_repeated_under_new_numbers_or_from_mid_clause_is_kept_once() {
+        let clause = "The Contractor may not assign this engagement or any of its rights or \
+                      obligations under it without prior written consent, and any purported \
+                      assignment without that consent is void and of no effect. Any permitted \
+                      assignee must first agree in writing to be bound by every term of this \
+                      engagement, must confirm that agreement to each other signatory, and must \
+                      do so before the assignment takes effect.";
+        let partial = &clause[clause.find("without prior written").unwrap()..];
+        assert!(
+            partial.chars().count() >= 240,
+            "{}",
+            partial.chars().count()
+        );
+        let digest = distill(
+            &repeated_clause_document(&[
+                format!("25. Assignment. {clause}"),
+                format!("41. Assignment. {clause}"),
+                clause.to_owned(),
+                partial.to_owned(),
+            ]),
+            DigestBudget::default(),
+        );
+        assert!(digest.compressed);
+        assert_eq!(
+            digest
+                .text
+                .matches("before the assignment takes effect")
+                .count(),
+            1,
+            "{}",
+            digest.text
+        );
+        assert!(digest.text.contains("effective as of April 1, 2026"));
+    }
+
+    /// A clause that names the parties and the type is mandatory, and the
+    /// corpus statement of work repeats such clauses verbatim under new
+    /// numbers. Identical text is kept once even when mandatory; text that
+    /// differs in its digits is not the same text, because the digits may be
+    /// the date.
+    #[test]
+    fn identical_mandatory_clauses_collapse_but_digit_differences_do_not() {
+        let clause = "Acme Corporation and Vistage Worldwide, Inc. agree that this Statement of \
+                      Work governs the assignment of every deliverable listed in it.";
+        let digest = distill(
+            &repeated_clause_document(&[
+                format!("12. Scope. {clause}"),
+                format!("30. Scope. {clause}"),
+                format!("31. Scope. {clause}"),
+            ]),
+            DigestBudget::default(),
+        );
+        assert_eq!(
+            digest.text.matches("governs the assignment").count(),
+            1,
+            "{}",
+            digest.text
+        );
+
+        let digest = distill(
+            &repeated_clause_document(&[
+                "This Statement of Work between Acme Corporation and Vistage Worldwide, Inc. commences on April 1, 2026.".to_owned(),
+                "This Statement of Work between Acme Corporation and Vistage Worldwide, Inc. commences on April 5, 2026.".to_owned(),
+            ]),
+            DigestBudget::default(),
+        );
+        assert!(digest.text.contains("April 1, 2026"), "{}", digest.text);
+        assert!(digest.text.contains("April 5, 2026"), "{}", digest.text);
+    }
+
+    /// A long document whose first page names the agreement and whose later
+    /// pages each carry one of `clauses` between runs of filler prose.
+    fn repeated_clause_document(clauses: &[String]) -> DocumentSource {
+        let filler = "The parties shall perform their obligations in good faith and in \
+                      accordance with the terms set forth in this section. ";
+        let mut pages = Vec::new();
+        let mut body = String::from(
+            "STATEMENT OF WORK\n\nThis Statement of Work is effective as of April 1, 2026 by and between Acme Corporation and Vistage Worldwide, Inc.\n\n",
+        );
+        for _ in 0..40 {
+            body.push_str(filler);
+        }
+        pages.push(page(1, &body));
+        for (offset, clause) in clauses.iter().enumerate() {
+            let mut body = String::new();
+            for _ in 0..20 {
+                body.push_str(filler);
+            }
+            body.push_str("\n\n");
+            body.push_str(clause);
+            body.push_str("\n\n");
+            for _ in 0..20 {
+                body.push_str(filler);
+            }
+            pages.push(page(offset + 2, &body));
+        }
+        let source = DocumentSource::from_pages(pages);
+        assert!(source.character_count() > PASSTHROUGH_CHARACTERS);
+        source
+    }
+
+    #[test]
+    fn clause_labels_are_stripped_from_the_duplicate_key_only() {
+        assert_eq!(
+            strip_enumerators("25. Assignment. The Contractor"),
+            "Assignment. The Contractor"
+        );
+        assert_eq!(
+            strip_enumerators("4.2 Fees. The Company"),
+            "Fees. The Company"
+        );
+        assert_eq!(strip_enumerators("(a) the first item"), "the first item");
+        assert_eq!(strip_enumerators("(iv) the fourth item"), "the fourth item");
+        assert_eq!(strip_enumerators("Section 4. Term."), "Term.");
+        assert_eq!(strip_enumerators("ARTICLE IV DELIVERABLES"), "DELIVERABLES");
+        assert_eq!(strip_enumerators("A. Definitions"), "Definitions");
+        assert_eq!(
+            strip_enumerators("A party may terminate"),
+            "A party may terminate",
+            "a bare article is prose, not a label"
+        );
+        assert_eq!(
+            strip_enumerators("I agree to the terms"),
+            "I agree to the terms"
+        );
+        assert_eq!(strip_enumerators("Invoice 2026-001"), "Invoice 2026-001");
     }
 
     #[test]

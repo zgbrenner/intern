@@ -1,4 +1,4 @@
-import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, IntakeStatus, LearnedRule, QueueItem, SetupState } from '../types';
 
 /** A JSON-safe local document reference that Task 6 can pass to Tauri. */
 export interface FileSelection {
@@ -28,7 +28,23 @@ export interface SelectionBoundary {
   pickFolder(): Promise<FolderSelection | undefined>;
   pickExistingModelFiles(): Promise<ExistingModelFiles | undefined>;
   resolveDrop(payload: unknown): Promise<SelectionResult>;
+  /**
+   * Native "save as" for the history CSV. Resolves with the chosen path, or
+   * undefined when the dialog is canceled. Optional: the browser boundary has
+   * no native save dialog, and the in-memory export ignores the path anyway.
+   */
+  pickHistoryExportPath?(): Promise<string | undefined>;
 }
+
+/**
+ * The published user guide. It lives here, on the bridge, rather than in a
+ * component: the desktop build hands this exact string to the operating
+ * system's browser, and the Tauri capability in
+ * `src-tauri/capabilities/default.json` is scoped to this origin alone. One
+ * constant keeps the two in step, and keeps every caller from being able to
+ * ask the shell to open something else.
+ */
+export const GUIDE_URL = 'https://zgbrenner.github.io/intern/guide.html';
 
 export interface DesktopBridge {
   listItems(): Promise<QueueItem[]>;
@@ -49,6 +65,14 @@ export interface DesktopBridge {
   setupCancel(): Promise<void>;
   setupChooseExisting(files: ExistingModelFiles): Promise<void>;
   clearHistory(): Promise<void>;
+  /** Finished rename/undo operations, newest first (capped at 500). */
+  historyList(): Promise<HistoryEntry[]>;
+  /**
+   * Write the rename history to `path` as CSV. Resolves with the number of
+   * operations written. The path must be absolute in the desktop app; the
+   * in-memory bridge ignores it.
+   */
+  historyExport(path: string): Promise<number>;
   /**
    * Abandon every item still waiting, for a folder chosen by mistake.
    *
@@ -60,7 +84,8 @@ export interface DesktopBridge {
    * Ask GitHub whether a newer signed release exists.
    *
    * This is the only network request Intern makes apart from the one-off model
-   * download, it happens only when someone presses the button in Settings, and
+   * download (and a hosted model, only if a person chose one in Settings),
+   * it happens only when someone presses the button in Settings, and
    * it sends nothing but a request for the release manifest. No filenames, no
    * document contents, no identifier of any kind.
    */
@@ -78,6 +103,56 @@ export interface DesktopBridge {
    * network request is made and nothing about the folder leaves the machine.
    */
   classifyFolder(path: string): Promise<CloudLocation | null>;
+  /**
+   * The OneDrive accounts and SharePoint libraries the sync client keeps on
+   * this computer, so Settings can offer them instead of making a person hunt
+   * for the folder under their profile. A local lookup of the sync client's
+   * own configuration; no network request is made.
+   */
+  cloudRoots(): Promise<CloudRoot[]>;
+  /** What the description records are doing: on or off, where, and the last failure. */
+  descriptionsStatus(): Promise<DescriptionsStatus>;
+  /**
+   * Write a description record for every document already filed and not
+   * undone, for a records folder switched on after the fact. Rejected with
+   * DESCRIPTIONS_DISABLED until the setting is saved on.
+   */
+  descriptionsBackfill(): Promise<BackfillResult>;
+  /**
+   * Open the published guide (`GUIDE_URL`) in the user's own browser.
+   *
+   * Deliberately takes no URL. Inside Tauri a bare `<a target="_blank">` has
+   * nowhere to go, so this has to reach the shell - and a method that accepted
+   * any address would hand the webview a general-purpose "open anything"
+   * capability for the sake of one help link.
+   */
+  openGuide(): Promise<void>;
+  /** Whether a hosted-model key is stored, and each provider's defaults. */
+  hostedModelStatus(): Promise<HostedModelStatus>;
+  /**
+   * Store the hosted model's API key in the operating system's credential
+   * store. It never enters the settings file. Rejected with
+   * HOSTED_MODEL_KEY_EMPTY for a blank key.
+   */
+  hostedModelSetKey(key: string): Promise<void>;
+  hostedModelClearKey(): Promise<void>;
+  /**
+   * Send the calibration document to the hosted model described by
+   * `settings` (the dialog's draft, so what is tested is what is on screen)
+   * with the stored key. This is the one deliberate network request to a
+   * third party Intern makes, and it carries no document of the user's.
+   */
+  hostedModelTest(settings: AppSettings): Promise<HostedModelTestResult>;
+  /**
+   * The spellings review has taught Intern, newest first: a party or a
+   * document type respelled in review, remembered, and applied on its own
+   * once the same change has been made twice.
+   */
+  houseRulesList(): Promise<LearnedRule[]>;
+  /** Stop applying a learned spelling. Documents still waiting go back to the document's own words. */
+  houseRuleForget(id: string): Promise<void>;
+  /** Apply a learned spelling from now on without waiting for a second edit. */
+  houseRuleUse(id: string): Promise<void>;
 }
 
 /**
@@ -86,6 +161,14 @@ export interface DesktopBridge {
  */
 export interface IntakeEventSource {
   subscribeIntake(handler: (status: IntakeStatus) => void): () => void;
+}
+
+/**
+ * Optional capability, duck-typed like IntakeEventSource: bridges that can
+ * push description-record status changes expose it.
+ */
+export interface DescriptionsEventSource {
+  subscribeDescriptions(handler: (status: DescriptionsStatus) => void): () => void;
 }
 
 export type UpdateStatus =

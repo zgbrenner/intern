@@ -8,14 +8,20 @@ use std::{
 };
 
 use intern_core::{
-    ErrorCode, FileApplier, InternError, OperationReceipt, QueueItem, QueueStatus, QueueStore,
-    StdFileSystem,
+    ErrorCode, FileApplier, InternError, OperationDirection, OperationReceipt, OperationStage,
+    QueueItem, QueueStatus, QueueStore, StdFileSystem, source_path_key,
 };
-use intern_engine::{DocumentAnalysis, DocumentSource, ExtractProgress, ProposalStatus};
+use intern_engine::{
+    DocumentAnalysis, DocumentSource, ExtractProgress, HouseRule, HouseStyle, ProposalStatus,
+    RuleKind, ValidatedProposal, compose_filename,
+    evidence::is_valid_iso_date,
+    fingerprint::{self, NEAR_DUPLICATE_DISTANCE},
+    lesson_from_edit, sanitize_folder_name,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{AppSettings, SettingsStore};
+use crate::settings::{AppSettings, DestinationLayout, SettingsStore};
 
 const LEASE_RENEWAL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
 const LEASE_RENEWAL_ATTEMPTS: usize = 3;
@@ -329,6 +335,128 @@ pub trait PipelineEventSink: Send + Sync {
     fn progress(&self, progress: PipelineProgress);
 }
 
+/// A document the queue has just filed, as reported to whoever keeps records
+/// beside filed documents (the description ledger and the shared filed index,
+/// in the desktop app).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FiledDocument {
+    pub item_id: i64,
+    /// Where the document was before the rename.
+    pub source_path: PathBuf,
+    /// The SHA-256 of the document's bytes, lowercase hex - the fingerprint
+    /// the rename was verified against.
+    pub source_hash: String,
+    /// Where it is now - the receipt's destination, suffix and all.
+    pub destination: PathBuf,
+    /// The sentence that was applied: the model's, or the reviewer's edit.
+    pub description: String,
+    /// The validated facts behind the name.
+    pub proposal: ValidatedProposal,
+    /// Unix seconds when the apply completed.
+    pub filed_at: i64,
+    /// The text fingerprint the analysis carried, for a near-duplicate check
+    /// on other machines. Absent for a text too short to fingerprint.
+    pub text_fingerprint: Option<String>,
+}
+
+/// A filing the queue has just undone: the document is back at
+/// `source_path`, and `destination` is empty again.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnfiledDocument {
+    pub item_id: i64,
+    pub source_path: PathBuf,
+    pub source_hash: String,
+    pub destination: PathBuf,
+}
+
+/// Where the queue reports filed documents to.
+///
+/// Filing has already succeeded when `filed` is called and cannot be undone
+/// by it: an implementation that fails records its own failure and says so
+/// elsewhere, and the rename stands. `unfiled` is the mirror image, called
+/// after an undo has put the document back.
+pub trait FilingSink: Send + Sync {
+    fn filed(&self, document: &FiledDocument);
+    fn unfiled(&self, document: &UnfiledDocument);
+}
+
+/// The default: nobody is listening.
+struct NoFilingSink;
+
+impl FilingSink for NoFilingSink {
+    fn filed(&self, _document: &FiledDocument) {}
+    fn unfiled(&self, _document: &UnfiledDocument) {}
+}
+
+/// Several listeners behind one sink, told in order. A sink cannot fail, so
+/// none of them can keep the others from hearing.
+pub struct FilingSinks(pub Vec<Arc<dyn FilingSink>>);
+
+impl FilingSink for FilingSinks {
+    fn filed(&self, document: &FiledDocument) {
+        for sink in &self.0 {
+            sink.filed(document);
+        }
+    }
+
+    fn unfiled(&self, document: &UnfiledDocument) {
+        for sink in &self.0 {
+            sink.unfiled(document);
+        }
+    }
+}
+
+/// A filing the queue has no record of: one made by another machine sharing
+/// an intake folder, or one this machine made before its history was cleared.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KnownFiling {
+    /// The name the content was filed under.
+    pub filename: String,
+    /// The machine that filed it, when it was not this one.
+    pub filed_by: Option<String>,
+}
+
+impl KnownFiling {
+    /// How the queue names the filing to a person: the filename, and the
+    /// machine when there is one to name.
+    pub fn describe(&self) -> String {
+        match &self.filed_by {
+            Some(machine) => format!("{} (filed from {machine})", self.filename),
+            None => self.filename.clone(),
+        }
+    }
+}
+
+/// Where the queue asks whether a document's content has already been filed
+/// somewhere its own history cannot see. Asked once per enqueued document,
+/// before any analysis; a positive answer routes the document to review as
+/// a duplicate, where "process anyway" is one click.
+pub trait DuplicateOracle: Send + Sync {
+    fn filed_elsewhere(&self, source_hash: &str, source_path: &Path) -> Option<KnownFiling>;
+    /// A filing whose text fingerprint is within [`NEAR_DUPLICATE_DISTANCE`]
+    /// of `fingerprint`: the closest one, when there is one.
+    fn similar_elsewhere(&self, _fingerprint: u64) -> Option<SimilarFiling> {
+        None
+    }
+}
+
+/// A filing whose text is nearly the text of the document at hand.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimilarFiling {
+    pub filing: KnownFiling,
+    /// How many fingerprint bits apart the two texts are.
+    pub distance: u32,
+}
+
+/// The default: the queue's own history is all there is.
+struct NoDuplicateOracle;
+
+impl DuplicateOracle for NoDuplicateOracle {
+    fn filed_elsewhere(&self, _source_hash: &str, _source_path: &Path) -> Option<KnownFiling> {
+        None
+    }
+}
+
 /// What the queue stores about one proposal.
 ///
 /// `analysis` is exactly what the engine produced and never changes; `filename`
@@ -344,6 +472,57 @@ pub struct ProposalRecord {
     pub description: String,
     pub reasons: Vec<String>,
     pub revision: u64,
+    /// The reviewer's spellings applied when `filename` was composed. The
+    /// analysis keeps the document's own words; these say how the name
+    /// differs from them, and why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub house_rules: Vec<HouseRule>,
+    /// The name a document with nearly this text was already filed under -
+    /// a second scan, a re-export, a copy saved again - when there is one.
+    /// Such a document waits for a person rather than being filed twice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub near_duplicate_of: Option<String>,
+}
+
+/// The review reason for a document whose text is nearly the text of one
+/// already filed. The record's `near_duplicate_of` names that filing.
+pub const NEAR_DUPLICATE: &str = "NEAR_DUPLICATE";
+
+impl ProposalRecord {
+    /// The validated facts as the name carries them: the document's words,
+    /// respelled the way the reviewer has taught Intern to.
+    pub fn styled_proposal(&self) -> ValidatedProposal {
+        HouseStyle::new(self.house_rules.clone())
+            .apply(&self.analysis.proposal)
+            .0
+    }
+}
+
+/// How many times the same respelling must be made in review before Intern
+/// applies it on its own. One edit is a decision about one document; the
+/// second is a preference.
+pub const EDITS_TO_LEARN: u32 = 2;
+
+/// A spelling Intern has learned from review, and how settled it is.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnedRule {
+    pub id: i64,
+    pub kind: RuleKind,
+    pub from: String,
+    pub to: String,
+    /// How many times a reviewer has made exactly this change.
+    pub seen: u32,
+    /// Whether Intern applies it: made often enough, or told to use it now.
+    pub active: bool,
+    /// Unix seconds of the latest edit that taught it.
+    pub learned_at: i64,
+}
+
+impl LearnedRule {
+    pub fn rule(&self) -> HouseRule {
+        HouseRule::new(self.kind, self.from.clone(), self.to.clone())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -356,6 +535,11 @@ pub struct PipelineItem {
     pub error_code: Option<ErrorCode>,
     pub proposal: Option<ProposalRecord>,
     pub receipt: Option<OperationReceipt>,
+    /// For an item flagged DUPLICATE: the name its content is already filed
+    /// under (the completed apply's destination leaf, or the completed item's
+    /// original filename for keep-original completions). `None` once the
+    /// completed row is gone, e.g. after the history was cleared.
+    pub duplicate_of: Option<String>,
 }
 
 pub struct Pipeline {
@@ -365,6 +549,8 @@ pub struct Pipeline {
     model: Arc<dyn AnalyzerBoundary>,
     files: Arc<dyn FileActions>,
     events: Arc<dyn PipelineEventSink>,
+    filing: Arc<dyn FilingSink>,
+    duplicates: Arc<dyn DuplicateOracle>,
     settings: SettingsStore,
     paused: AtomicBool,
     active_item: AtomicI64,
@@ -399,6 +585,8 @@ impl Pipeline {
             model,
             files,
             events,
+            filing: Arc::new(NoFilingSink),
+            duplicates: Arc::new(NoDuplicateOracle),
             settings,
             paused: AtomicBool::new(false),
             active_item: AtomicI64::new(0),
@@ -427,6 +615,8 @@ impl Pipeline {
             model,
             files,
             events,
+            filing: Arc::new(NoFilingSink),
+            duplicates: Arc::new(NoDuplicateOracle),
             settings,
             paused: AtomicBool::new(false),
             active_item: AtomicI64::new(0),
@@ -435,6 +625,21 @@ impl Pipeline {
             lease_renewal_interval: LEASE_RENEWAL_INTERVAL,
             run_lock: Mutex::new(()),
         })
+    }
+
+    /// Reports every completed rename (and every undo of one) to `sink`.
+    #[must_use]
+    pub fn with_filing_sink(mut self, sink: Arc<dyn FilingSink>) -> Self {
+        self.filing = sink;
+        self
+    }
+
+    /// Asks `oracle` about every enqueued document whose content the queue's
+    /// own history has not already filed.
+    #[must_use]
+    pub fn with_duplicate_oracle(mut self, oracle: Arc<dyn DuplicateOracle>) -> Self {
+        self.duplicates = oracle;
+        self
     }
 
     #[doc(hidden)]
@@ -453,7 +658,14 @@ impl Pipeline {
         let mut queued = Vec::with_capacity(paths.len());
         for path in paths {
             let fingerprint = self.files.fingerprint(path)?;
-            queued.push(self.store.enqueue(path, &fingerprint)?);
+            let mut item = self.store.enqueue(path, &fingerprint)?;
+            if item.status == QueueStatus::Queued {
+                item = self.flag_if_completed_duplicate(item)?;
+            }
+            if item.status == QueueStatus::Queued {
+                item = self.flag_if_filed_elsewhere(item)?;
+            }
+            queued.push(item);
         }
         if !queued.is_empty() {
             self.events.queue_changed();
@@ -461,25 +673,137 @@ impl Pipeline {
         Ok(queued)
     }
 
+    /// Flags a just-queued item whose content is already filed as completed.
+    ///
+    /// Enqueue holds no run lock, so the flag is a compare-and-swap on the
+    /// Queued status: if the scheduler claimed the item between the lookup and
+    /// the transition, the claim wins and the item analyzes normally.
+    fn flag_if_completed_duplicate(&self, item: QueueItem) -> PipelineResult<QueueItem> {
+        let duplicate = self
+            .store
+            .find_completed_duplicate(&item.source_hash, &source_path_key(&item.source_path))?;
+        if duplicate.is_none() {
+            return Ok(item);
+        }
+        self.flag_duplicate(item)
+    }
+
+    /// Flags a just-queued item whose content the duplicate oracle knows to be
+    /// filed already - by a teammate, typically. Same compare-and-swap as the
+    /// local check.
+    fn flag_if_filed_elsewhere(&self, item: QueueItem) -> PipelineResult<QueueItem> {
+        if self
+            .duplicates
+            .filed_elsewhere(&item.source_hash, &item.source_path)
+            .is_none()
+        {
+            return Ok(item);
+        }
+        self.flag_duplicate(item)
+    }
+
+    fn flag_duplicate(&self, item: QueueItem) -> PipelineResult<QueueItem> {
+        match self.store.transition(
+            item.id,
+            QueueStatus::Queued,
+            QueueStatus::NeedsReview,
+            Some(ErrorCode::Duplicate),
+        ) {
+            Ok(flagged) => Ok(flagged),
+            Err(error) if error.code() == ErrorCode::StateConflict => Ok(item),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     pub fn list(&self) -> PipelineResult<Vec<PipelineItem>> {
         self.store
             .list()?
             .into_iter()
-            .map(|item| {
-                let proposal = self.repository.load_proposal(item.id)?;
-                let receipt = self.store.load_receipt(item.id)?;
-                Ok(PipelineItem {
-                    id: item.id,
-                    source_path: item.source_path,
-                    source_hash: item.source_hash,
-                    status: item.status,
-                    processing_failures: item.processing_failures,
-                    error_code: item.error_code,
-                    proposal,
-                    receipt,
-                })
-            })
+            .map(|item| self.pipeline_item(item))
             .collect()
+    }
+
+    /// The newest item enqueued from `path` - as given, or as it
+    /// canonicalizes now - with its proposal and receipt, or `None` when the
+    /// queue has never seen the path.
+    ///
+    /// A path that no longer canonicalizes (the apply already renamed it away)
+    /// still matches as given, which is what lets a finished intake document
+    /// report its fate instead of `Unknown`.
+    pub fn find_by_source_path(&self, path: &Path) -> PipelineResult<Option<PipelineItem>> {
+        let canonical = fs::canonicalize(path).ok();
+        let mut candidates = vec![path];
+        if let Some(canonical) = canonical.as_deref()
+            && canonical != path
+        {
+            candidates.push(canonical);
+        }
+        self.store
+            .find_newest_by_source_path(&candidates)?
+            .map(|item| self.pipeline_item(item))
+            .transpose()
+    }
+
+    fn pipeline_item(&self, item: QueueItem) -> PipelineResult<PipelineItem> {
+        let proposal = self.repository.load_proposal(item.id)?;
+        let receipt = self.store.load_receipt(item.id)?;
+        let duplicate_of = if item.status == QueueStatus::NeedsReview
+            && item.error_code == Some(ErrorCode::Duplicate)
+        {
+            self.store
+                .find_completed_duplicate(&item.source_hash, &source_path_key(&item.source_path))?
+                .map(|duplicate| {
+                    duplicate.filed_as.unwrap_or_else(|| {
+                        duplicate
+                            .source_path
+                            .file_name()
+                            .unwrap_or(duplicate.source_path.as_os_str())
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+                })
+                .or_else(|| {
+                    self.duplicates
+                        .filed_elsewhere(&item.source_hash, &item.source_path)
+                        .map(|known| known.describe())
+                })
+        } else {
+            None
+        };
+        Ok(PipelineItem {
+            id: item.id,
+            source_path: item.source_path,
+            source_hash: item.source_hash,
+            status: item.status,
+            processing_failures: item.processing_failures,
+            error_code: item.error_code,
+            proposal,
+            receipt,
+            duplicate_of,
+        })
+    }
+
+    /// Every document the queue has filed and not undone: completed items
+    /// whose latest receipt is a finished apply, with the sentence and facts
+    /// that were applied. What a records keeper replays when it is switched
+    /// on after documents were already filed.
+    pub fn filed_documents(&self) -> PipelineResult<Vec<FiledDocument>> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .filter(|item| item.status == QueueStatus::Completed)
+            .filter_map(|item| {
+                let receipt = item.receipt?;
+                let proposal = item.proposal?;
+                filed_document(
+                    item.id,
+                    &item.source_hash,
+                    &receipt,
+                    &proposal,
+                    receipt_time(&receipt),
+                )
+            })
+            .collect())
     }
 
     pub fn run_until_idle(&self) -> PipelineResult<()> {
@@ -643,12 +967,19 @@ impl Pipeline {
                 }
                 self.store
                     .record_processing_failure(item.id, model_error_code(&error))?;
+                // Failures that would repeat for every document - a model
+                // that cannot be reached, a key that was refused - pause the
+                // queue rather than fail the backlog one item at a time.
                 if matches!(
                     error.code.as_str(),
                     "MODEL_CANCEL_FAILED"
                         | "MODEL_RECOVERY_FAILED"
                         | "MODEL_REQUEST_FAILED"
                         | "MODEL_RESPONSE_INVALID"
+                        | "HOSTED_MODEL_MISCONFIGURED"
+                        | "HOSTED_MODEL_UNAUTHORIZED"
+                        | "HOSTED_MODEL_UNREACHABLE"
+                        | "HOSTED_MODEL_RATE_LIMITED"
                 ) {
                     self.paused.store(true, Ordering::SeqCst);
                 }
@@ -657,17 +988,35 @@ impl Pipeline {
             }
         };
         self.ensure_lease(&lease)?;
+        // The document's words, respelled the way review has taught Intern
+        // to. Applied here, after validation, so the evidence stayed the
+        // document's and only the name is the reviewer's.
+        let (styled, house_rules) = self.repository.active_style()?.apply(&analysis.proposal);
+        let filename = self.compose_for_target(&item.source_path, &styled, &extension, &existing);
+        // The exact-bytes check ran before analysis. This one needs the text
+        // and the date, so it runs after: a second scan, a re-export, or a
+        // copy saved again with new metadata says what a filed document
+        // says, and is not filed on its own.
+        let near_duplicate_of = self.near_duplicate_of(item.id, &analysis);
+        let mut reasons = analysis
+            .review_reasons
+            .iter()
+            .map(|reason| reason.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let mut status = analysis.status;
+        if near_duplicate_of.is_some() {
+            reasons.push(NEAR_DUPLICATE.to_owned());
+            status = ProposalStatus::NeedsReview;
+        }
         let record = ProposalRecord {
-            status: analysis.status,
-            filename: analysis.filename.clone(),
+            status,
+            filename,
             description: analysis.description.clone(),
-            reasons: analysis
-                .review_reasons
-                .iter()
-                .map(|reason| reason.as_str().to_owned())
-                .collect(),
+            reasons,
             analysis,
             revision: 1,
+            house_rules,
+            near_duplicate_of,
         };
         let next = match record.status {
             ProposalStatus::Ready => QueueStatus::Ready,
@@ -755,6 +1104,166 @@ impl Pipeline {
         Ok(())
     }
 
+    /// The filing whose text this analysis nearly repeats, if any: first the
+    /// queue's own history, then whatever the duplicate oracle knows from
+    /// other machines.
+    fn near_duplicate_of(&self, item_id: i64, analysis: &DocumentAnalysis) -> Option<String> {
+        let fingerprint = fingerprint::decode(analysis.text_fingerprint.as_deref()?)?;
+        let date = analysis.proposal.document_date.clone().or_else(|| {
+            analysis
+                .model_proposal
+                .as_ref()
+                .and_then(|reply| reply.document_date.clone())
+        });
+        let local = self
+            .repository
+            .find_similar(fingerprint, item_id)
+            .ok()
+            .flatten()
+            .filter(|similar| {
+                same_document(similar.distance, &similar.filing.filename, date.as_deref())
+            })
+            .map(|similar| similar.filing.describe());
+        local.or_else(|| {
+            self.duplicates
+                .similar_elsewhere(fingerprint)
+                .filter(|similar| {
+                    same_document(similar.distance, &similar.filing.filename, date.as_deref())
+                })
+                .map(|similar| similar.filing.describe())
+        })
+    }
+
+    /// The name a proposal will be applied under. The engine composed its
+    /// name against the source folder, which is the only folder it knows;
+    /// the name that is actually applied must not collide in the folder the
+    /// document is going to. Without readable settings the source folder's
+    /// names (`fallback`) stand in.
+    fn compose_for_target(
+        &self,
+        source_path: &Path,
+        proposal: &ValidatedProposal,
+        extension: &str,
+        fallback: &[String],
+    ) -> String {
+        let named = compose_filename(proposal, extension, &[]).value;
+        let existing = match self.settings.load() {
+            Ok(settings) => existing_names(&target_folder(
+                &settings,
+                source_path,
+                &proposal_as_applied(proposal, &named),
+            )),
+            Err(_) => fallback.to_vec(),
+        };
+        compose_filename(
+            proposal,
+            extension,
+            &existing.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .value
+    }
+
+    /// The spellings review has taught Intern, newest first.
+    pub fn learned_rules(&self) -> PipelineResult<Vec<LearnedRule>> {
+        self.repository.list_rules()
+    }
+
+    /// Stop applying a learned spelling. Names already applied keep it;
+    /// documents still waiting go back to the document's own words.
+    pub fn forget_rule(&self, id: i64) -> PipelineResult<()> {
+        if !self.repository.forget_rule(id)? {
+            return Err(PipelineError::new(
+                "RULE_NOT_FOUND",
+                "learned spelling does not exist",
+            ));
+        }
+        self.restyle_waiting()
+    }
+
+    /// Apply a learned spelling from now on without waiting for a second
+    /// edit, including to documents still waiting.
+    pub fn use_rule(&self, id: i64) -> PipelineResult<()> {
+        if !self.repository.use_rule(id)? {
+            return Err(PipelineError::new(
+                "RULE_NOT_FOUND",
+                "learned spelling does not exist",
+            ));
+        }
+        self.restyle_waiting()
+    }
+
+    /// Recomposes the proposed name of every document still waiting under
+    /// the spellings now in force, so a rule that just changed shows in the
+    /// queue at once rather than only on the next document.
+    fn restyle_waiting(&self) -> PipelineResult<()> {
+        let style = self.repository.active_style()?;
+        let mut changed = false;
+        for item in self.store.list()? {
+            if !matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready) {
+                continue;
+            }
+            let Some(mut record) = self.repository.load_proposal(item.id)? else {
+                continue;
+            };
+            let (styled, house_rules) = style.apply(&record.analysis.proposal);
+            if house_rules == record.house_rules {
+                continue;
+            }
+            let extension = item
+                .source_path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            let existing =
+                existing_names(item.source_path.parent().unwrap_or_else(|| Path::new(".")));
+            record.filename =
+                self.compose_for_target(&item.source_path, &styled, &extension, &existing);
+            record.house_rules = house_rules;
+            record.revision += 1;
+            self.repository.replace_proposal(item.id, &record)?;
+            changed = true;
+        }
+        if changed {
+            self.events.queue_changed();
+        }
+        Ok(())
+    }
+
+    /// What an approved edit teaches, if anything: a respelled party or
+    /// type, remembered, and applied on its own once the same change has
+    /// been made twice. A spelling Intern itself applied that the reviewer
+    /// changed again is a change of mind about the document's word, not
+    /// about Intern's; restoring the document's own spelling retracts the
+    /// rule.
+    fn learn_from_edit(
+        &self,
+        record: &ProposalRecord,
+        extension: &str,
+        approved: &str,
+    ) -> PipelineResult<()> {
+        let Some(lesson) = lesson_from_edit(
+            &record.styled_proposal(),
+            extension,
+            &record.filename,
+            approved,
+        ) else {
+            return Ok(());
+        };
+        let lesson = match record.house_rules.iter().find(|applied| {
+            applied.kind == lesson.kind && HouseRule::key(&applied.to) == lesson.from_key()
+        }) {
+            Some(applied) => HouseRule::new(lesson.kind, applied.from.clone(), lesson.to),
+            None => lesson,
+        };
+        if HouseRule::key(&lesson.to) == lesson.from_key() {
+            self.repository.forget_rule_for(lesson.kind, &lesson.from)?;
+        } else if lesson.is_meaningful() {
+            self.repository.learn(&lesson)?;
+        }
+        self.restyle_waiting()
+    }
+
     fn analyze_with_deadline(
         &self,
         source: &DocumentSource,
@@ -823,15 +1332,33 @@ impl Pipeline {
             self.events.queue_changed();
             return Ok(());
         }
-        let destination_root = if settings.destination.trim().is_empty() {
-            item.source_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf()
-        } else {
-            PathBuf::from(&settings.destination)
+        if leading_date(filename).is_none() {
+            self.repository.mark_needs_review(item.id, DATE_REQUIRED)?;
+            self.events.queue_changed();
+            return Ok(());
+        }
+        let proposal = self.repository.load_proposal(item.id)?;
+        let target = match proposal.as_ref() {
+            Some(record) => target_folder(
+                settings,
+                &item.source_path,
+                &proposal_as_applied(&record.styled_proposal(), filename),
+            ),
+            None => destination_root(settings, &item.source_path),
         };
-        if let Err(error) = self.files.apply(item, &destination_root.join(filename)) {
+        // A layout subfolder exists only once a document is filed into it; a
+        // folder that cannot be created is the same failure a missing
+        // destination would be, and is reported the same way.
+        if let Err(error) = fs::create_dir_all(&target) {
+            let failure = PipelineError::new(
+                "DESTINATION_UNAVAILABLE",
+                format!("the destination folder could not be created ({error})"),
+            );
+            self.repository.mark_needs_review(item.id, &failure.code)?;
+            self.events.queue_changed();
+            return Err(failure);
+        }
+        if let Err(error) = self.files.apply(item, &target.join(filename)) {
             // Core file operations journal ambiguous failures in Applying. Try to settle
             // them now; the scheduler also retries reconciliation periodically.
             let _ = self.files.reconcile(item);
@@ -846,8 +1373,41 @@ impl Pipeline {
             self.events.queue_changed();
             return Err(error);
         }
+        self.report_filed(item);
         self.events.queue_changed();
         Ok(())
+    }
+
+    /// Tells the filing sink about a rename that just completed. Read back
+    /// from the store rather than assumed: the receipt carries the destination
+    /// the applier actually chose, suffix and all, and the proposal carries
+    /// the sentence a reviewer may have edited.
+    fn report_filed(&self, item: &QueueItem) {
+        let Ok(Some(receipt)) = self.store.load_receipt(item.id) else {
+            return;
+        };
+        let Ok(Some(proposal)) = self.repository.load_proposal(item.id) else {
+            return;
+        };
+        if let Some(document) =
+            filed_document(item.id, &item.source_hash, &receipt, &proposal, unix_now())
+        {
+            if let Some(fingerprint) = document
+                .text_fingerprint
+                .as_deref()
+                .and_then(fingerprint::decode)
+            {
+                let filed_name = document
+                    .destination
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let _ = self
+                    .repository
+                    .remember_fingerprint(item.id, fingerprint, &filed_name);
+            }
+            self.filing.filed(&document);
+        }
     }
 
     pub fn pause(&self) {
@@ -942,6 +1502,15 @@ impl Pipeline {
             self.events.queue_changed();
             return result;
         }
+        if item.status == QueueStatus::NeedsReview && item.error_code == Some(ErrorCode::Duplicate)
+        {
+            // "Process anyway": the duplicate flag was set before any
+            // analysis, so clearing it simply returns the item to the queue
+            // for a normal run.
+            self.store.retry_duplicate(id)?;
+            self.events.queue_changed();
+            return Ok(());
+        }
         match item.status {
             QueueStatus::Failed => {
                 self.store.manual_retry(id)?;
@@ -968,6 +1537,12 @@ impl Pipeline {
 
     pub fn approve(&self, id: i64, filename: &str, description: &str) -> PipelineResult<()> {
         let filename = validate_leaf_filename(filename)?;
+        if leading_date(&filename).is_none() {
+            return Err(PipelineError::new(
+                DATE_REQUIRED,
+                "the filename must start with the document's date as YYYY-MM-DD",
+            ));
+        }
         let item = self
             .store
             .list()?
@@ -1002,8 +1577,14 @@ impl Pipeline {
                 "proposal is not reviewable",
             ));
         }
+        let proposed = self.repository.load_proposal(id)?;
         self.repository
             .approve_user_edit(id, item.status, &filename, description)?;
+        // A preference store, not a filing step: a lesson that cannot be
+        // written must not stop the rename that was just approved.
+        if let Some(record) = proposed.as_ref() {
+            let _ = self.learn_from_edit(record, source_extension, &filename);
+        }
         let ready = self
             .store
             .list()?
@@ -1059,6 +1640,19 @@ impl Pipeline {
             )
         })?;
         self.files.undo(&item, &receipt)?;
+        let _ = self.repository.forget_fingerprint(id);
+        self.filing.unfiled(&UnfiledDocument {
+            item_id: item.id,
+            source_path: item.source_path.clone(),
+            source_hash: item.source_hash.clone(),
+            destination: receipt.destination.clone(),
+        });
+        if let Ok(settings) = self.settings.load() {
+            prune_empty_layout_folders(
+                &destination_root(&settings, &item.source_path),
+                &receipt.destination,
+            );
+        }
         self.events.queue_changed();
         Ok(())
     }
@@ -1150,7 +1744,26 @@ impl PipelineRepository {
             .busy_timeout(std::time::Duration::from_secs(5))
             .map_err(database_error)?;
         connection
-            .execute_batch("PRAGMA foreign_keys=ON;")
+            .execute_batch(
+                "PRAGMA foreign_keys=ON;
+                 CREATE TABLE IF NOT EXISTS house_rules (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   kind TEXT NOT NULL,
+                   from_key TEXT NOT NULL,
+                   from_value TEXT NOT NULL,
+                   to_value TEXT NOT NULL,
+                   seen INTEGER NOT NULL DEFAULT 1,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL,
+                   UNIQUE(kind, from_key)
+                 );
+                 CREATE TABLE IF NOT EXISTS fingerprints (
+                   queue_item_id INTEGER PRIMARY KEY REFERENCES queue_items(id) ON DELETE CASCADE,
+                   fingerprint INTEGER NOT NULL,
+                   filed_name TEXT NOT NULL,
+                   filed_at INTEGER NOT NULL
+                 );",
+            )
             .map_err(database_error)?;
         let legacy_exists = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_proposals')",
@@ -1223,6 +1836,206 @@ impl PipelineRepository {
                 .map_err(|_| PipelineError::new("INVALID_DATA", "stored proposal is invalid"))
         })
         .transpose()
+    }
+
+    /// Stores a record over the one a queue item already has.
+    fn replace_proposal(&self, id: i64, record: &ProposalRecord) -> PipelineResult<()> {
+        let json = serde_json::to_string(record)
+            .map_err(|_| PipelineError::new("INVALID_DATA", "proposal could not be stored"))?;
+        let updated = self
+            .lock()?
+            .execute(
+                "UPDATE proposals SET proposal_json = ?1 WHERE queue_item_id = ?2",
+                params![json, id],
+            )
+            .map_err(database_error)?;
+        if updated != 1 {
+            return Err(PipelineError::new("INVALID_DATA", "proposal is missing"));
+        }
+        Ok(())
+    }
+
+    fn list_rules(&self) -> PipelineResult<Vec<LearnedRule>> {
+        let connection = self.lock()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, kind, from_value, to_value, seen, updated_at FROM house_rules
+                 ORDER BY updated_at DESC, id DESC",
+            )
+            .map_err(database_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u32>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })
+            .map_err(database_error)?;
+        let mut rules = Vec::new();
+        for row in rows {
+            let (id, kind, from, to, seen, learned_at) = row.map_err(database_error)?;
+            let Some(kind) = RuleKind::parse(&kind) else {
+                continue;
+            };
+            rules.push(LearnedRule {
+                id,
+                kind,
+                from,
+                to,
+                seen,
+                active: seen >= EDITS_TO_LEARN,
+                learned_at,
+            });
+        }
+        Ok(rules)
+    }
+
+    /// The rules in force: learned often enough, or told to be used.
+    fn active_style(&self) -> PipelineResult<HouseStyle> {
+        Ok(HouseStyle::new(
+            self.list_rules()?
+                .into_iter()
+                .filter(|rule| rule.active)
+                .map(|rule| rule.rule())
+                .collect(),
+        ))
+    }
+
+    /// Records one respelling. The same change again counts it up; a
+    /// different spelling for the same word starts the count over.
+    fn learn(&self, rule: &HouseRule) -> PipelineResult<LearnedRule> {
+        let connection = self.lock()?;
+        connection
+            .execute(
+                "INSERT INTO house_rules(kind, from_key, from_value, to_value, seen, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, unixepoch(), unixepoch())
+                 ON CONFLICT(kind, from_key) DO UPDATE SET
+                   seen = CASE WHEN to_value = excluded.to_value THEN seen + 1 ELSE 1 END,
+                   to_value = excluded.to_value,
+                   from_value = excluded.from_value,
+                   updated_at = unixepoch()",
+                params![rule.kind.as_str(), rule.from_key(), rule.from, rule.to],
+            )
+            .map_err(database_error)?;
+        connection
+            .query_row(
+                "SELECT id, from_value, to_value, seen, updated_at FROM house_rules
+                 WHERE kind = ?1 AND from_key = ?2",
+                params![rule.kind.as_str(), rule.from_key()],
+                |row| {
+                    Ok(LearnedRule {
+                        id: row.get(0)?,
+                        kind: rule.kind,
+                        from: row.get(1)?,
+                        to: row.get(2)?,
+                        seen: row.get(3)?,
+                        active: row.get::<_, u32>(3)? >= EDITS_TO_LEARN,
+                        learned_at: row.get(4)?,
+                    })
+                },
+            )
+            .map_err(database_error)
+    }
+
+    /// Keeps the text fingerprint of a document just filed, under the name
+    /// it was filed as, so a later document saying the same thing can be
+    /// told so. Cleared with the item when the history is cleared.
+    fn remember_fingerprint(
+        &self,
+        item_id: i64,
+        fingerprint: u64,
+        filed_name: &str,
+    ) -> PipelineResult<()> {
+        self.lock()?
+            .execute(
+                "INSERT INTO fingerprints(queue_item_id, fingerprint, filed_name, filed_at)
+                 VALUES (?1, ?2, ?3, unixepoch())
+                 ON CONFLICT(queue_item_id) DO UPDATE SET
+                   fingerprint = excluded.fingerprint,
+                   filed_name = excluded.filed_name,
+                   filed_at = excluded.filed_at",
+                params![item_id, fingerprint as i64, filed_name],
+            )
+            .map_err(database_error)?;
+        Ok(())
+    }
+
+    fn forget_fingerprint(&self, item_id: i64) -> PipelineResult<()> {
+        self.lock()?
+            .execute(
+                "DELETE FROM fingerprints WHERE queue_item_id = ?1",
+                params![item_id],
+            )
+            .map_err(database_error)?;
+        Ok(())
+    }
+
+    /// The closest filing to `fingerprint` within the near-duplicate
+    /// distance, other than `except_item`'s own.
+    fn find_similar(
+        &self,
+        fingerprint: u64,
+        except_item: i64,
+    ) -> PipelineResult<Option<SimilarFiling>> {
+        let connection = self.lock()?;
+        let mut statement = connection
+            .prepare("SELECT fingerprint, filed_name FROM fingerprints WHERE queue_item_id <> ?1")
+            .map_err(database_error)?;
+        let rows = statement
+            .query_map(params![except_item], |row| {
+                Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?))
+            })
+            .map_err(database_error)?;
+        let mut closest: Option<SimilarFiling> = None;
+        for row in rows {
+            let (stored, filed_name) = row.map_err(database_error)?;
+            let distance = fingerprint::hamming(fingerprint, stored);
+            if distance <= NEAR_DUPLICATE_DISTANCE
+                && closest.as_ref().is_none_or(|best| distance < best.distance)
+            {
+                closest = Some(SimilarFiling {
+                    filing: KnownFiling {
+                        filename: filed_name,
+                        filed_by: None,
+                    },
+                    distance,
+                });
+            }
+        }
+        Ok(closest)
+    }
+
+    fn forget_rule_for(&self, kind: RuleKind, from: &str) -> PipelineResult<()> {
+        self.lock()?
+            .execute(
+                "DELETE FROM house_rules WHERE kind = ?1 AND from_key = ?2",
+                params![kind.as_str(), HouseRule::key(from)],
+            )
+            .map_err(database_error)?;
+        Ok(())
+    }
+
+    fn forget_rule(&self, id: i64) -> PipelineResult<bool> {
+        let removed = self
+            .lock()?
+            .execute("DELETE FROM house_rules WHERE id = ?1", params![id])
+            .map_err(database_error)?;
+        Ok(removed == 1)
+    }
+
+    fn use_rule(&self, id: i64) -> PipelineResult<bool> {
+        let changed = self
+            .lock()?
+            .execute(
+                "UPDATE house_rules SET seen = MAX(seen, ?2), updated_at = unixepoch() WHERE id = ?1",
+                params![id, EDITS_TO_LEARN],
+            )
+            .map_err(database_error)?;
+        Ok(changed == 1)
     }
 
     fn delete_proposal(&self, id: i64) -> PipelineResult<()> {
@@ -1366,12 +2179,190 @@ impl PipelineRepository {
     }
 }
 
-fn model_error_code(error: &ModelFailure) -> ErrorCode {
-    if error.code == "MODEL_RESPONSE_INVALID" {
-        ErrorCode::ModelOutputInvalid
-    } else {
-        ErrorCode::IoError
+/// The folder a document is filed into: the destination (or, with none set,
+/// the document's own folder) plus the layout's subfolder for its facts.
+pub fn target_folder(
+    settings: &AppSettings,
+    source_path: &Path,
+    proposal: &ValidatedProposal,
+) -> PathBuf {
+    let root = destination_root(settings, source_path);
+    match layout_subfolder(settings.destination_layout, proposal) {
+        Some(subfolder) => root.join(subfolder),
+        None => root,
     }
+}
+
+fn destination_root(settings: &AppSettings, source_path: &Path) -> PathBuf {
+    if settings.destination.trim().is_empty() {
+        source_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    } else {
+        PathBuf::from(settings.destination.trim())
+    }
+}
+
+/// The subfolder a layout puts a document in, relative to the destination.
+///
+/// A document missing the fact a layout keys on goes in a named catch-all
+/// ("Undated", "Unsorted") rather than the root, so the root stays a set of
+/// folders and a person can see what still needs a hand.
+pub fn layout_subfolder(
+    layout: DestinationLayout,
+    proposal: &ValidatedProposal,
+) -> Option<PathBuf> {
+    let year = || {
+        proposal
+            .document_date
+            .as_deref()
+            .and_then(|date| date.get(..4))
+            .filter(|year| year.bytes().all(|byte| byte.is_ascii_digit()))
+            .map(str::to_owned)
+            .unwrap_or_else(|| "Undated".to_owned())
+    };
+    let kind = || {
+        proposal
+            .document_type
+            .as_deref()
+            .and_then(sanitize_folder_name)
+            .unwrap_or_else(|| "Unsorted".to_owned())
+    };
+    match layout {
+        DestinationLayout::Flat => None,
+        DestinationLayout::Year => Some(PathBuf::from(year())),
+        DestinationLayout::YearType => Some(PathBuf::from(year()).join(kind())),
+        DestinationLayout::Type => Some(PathBuf::from(kind())),
+        DestinationLayout::Party => Some(PathBuf::from(
+            proposal
+                .parties
+                .first()
+                .and_then(|party| sanitize_folder_name(party))
+                .unwrap_or_else(|| "Unsorted".to_owned()),
+        )),
+    }
+}
+
+/// After an undo, removes the layout folders the vacated document was alone
+/// in, walking up from its folder to (but never including) the destination
+/// root. A folder holding anything else is left where it is; so is a folder
+/// outside the root.
+fn prune_empty_layout_folders(root: &Path, vacated: &Path) {
+    let mut folder = vacated.parent();
+    while let Some(current) = folder {
+        if current == root || !current.starts_with(root) {
+            break;
+        }
+        let empty = fs::read_dir(current).is_ok_and(|mut entries| entries.next().is_none());
+        if !empty || fs::remove_dir(current).is_err() {
+            break;
+        }
+        folder = current.parent();
+    }
+}
+
+/// The filed-document report for a completed apply receipt, or `None` when
+/// the receipt is not one (an undo, or an apply that never completed).
+fn filed_document(
+    item_id: i64,
+    source_hash: &str,
+    receipt: &OperationReceipt,
+    proposal: &ProposalRecord,
+    filed_at: i64,
+) -> Option<FiledDocument> {
+    (receipt.direction == OperationDirection::Apply && receipt.stage == OperationStage::Complete)
+        .then(|| FiledDocument {
+            item_id,
+            source_path: receipt.source.clone(),
+            source_hash: source_hash.to_owned(),
+            destination: receipt.destination.clone(),
+            description: proposal.description.clone(),
+            proposal: proposal_as_applied(
+                &proposal.styled_proposal(),
+                &receipt
+                    .destination
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ),
+            filed_at,
+            text_fingerprint: proposal.analysis.text_fingerprint.clone(),
+        })
+}
+
+/// Whether a fingerprint match is one document filed twice, or two
+/// documents that share their words: this month's statement and last
+/// month's differ in a date and a few figures, which a fingerprint barely
+/// sees. Dates settle it when both sides have one; without a date on one
+/// side only a near-identical text may say duplicate.
+fn same_document(distance: u32, filed_name: &str, date: Option<&str>) -> bool {
+    if distance > NEAR_DUPLICATE_DISTANCE {
+        return false;
+    }
+    match (leading_date(filed_name), date) {
+        (Some(filed), Some(this)) => filed == this,
+        _ => distance <= 1,
+    }
+}
+
+/// The validated facts as the applied name carries them. A reviewer who
+/// types a date, or accepts the one the model read, puts it in the filename
+/// and nowhere else; the layout folder and the description record must
+/// follow that date, not the one validation withheld.
+pub fn proposal_as_applied(proposal: &ValidatedProposal, filename: &str) -> ValidatedProposal {
+    let mut applied = proposal.clone();
+    if let Some(date) = leading_date(filename) {
+        applied.document_date = Some(date.to_owned());
+    }
+    applied
+}
+
+/// When a completed rename happened, as best the receipt can say: the
+/// destination's modification time is the rename itself on most filesystems,
+/// and a missing file (deleted since) falls back to now.
+fn receipt_time(receipt: &OperationReceipt) -> i64 {
+    fs::metadata(&receipt.destination)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or_else(unix_now, |duration| duration.as_secs() as i64)
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs() as i64)
+}
+
+fn model_error_code(error: &ModelFailure) -> ErrorCode {
+    match error.code.as_str() {
+        "MODEL_RESPONSE_INVALID" => ErrorCode::ModelOutputInvalid,
+        "HOSTED_MODEL_REFUSED" => ErrorCode::ModelDeclined,
+        _ => ErrorCode::IoError,
+    }
+}
+
+/// The review reason and error code for a rename that carries no date.
+pub const DATE_REQUIRED: &str = "DATE_REQUIRED";
+
+/// The date a filename begins with - `YYYY-MM-DD`, a real calendar date,
+/// standing on its own before whatever follows - or `None`.
+///
+/// Every rename must carry one. A name without a date sorts nowhere and
+/// says nothing about when, so the engine never proposes one as ready, and
+/// a person approving a name types the date in (or takes the one the model
+/// suggested) rather than filing an undated document.
+pub fn leading_date(filename: &str) -> Option<&str> {
+    let date = filename.get(..10)?;
+    if !is_valid_iso_date(date) {
+        return None;
+    }
+    let follows_cleanly = filename[10..]
+        .chars()
+        .next()
+        .is_none_or(|next| !next.is_alphanumeric());
+    follows_cleanly.then_some(date)
 }
 
 fn worker_error(error: WorkerFailure) -> PipelineError {
@@ -1403,6 +2394,285 @@ fn existing_names(directory: &Path) -> Vec<String> {
         .filter_map(Result::ok)
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect()
+}
+
+#[cfg(test)]
+mod date_gate_tests {
+    use intern_engine::{Evidence, PartyRelation, ValidatedProposal};
+
+    use super::{leading_date, proposal_as_applied};
+
+    #[test]
+    fn the_applied_name_lends_its_date_to_the_facts_but_never_takes_one_away() {
+        let withheld = ValidatedProposal {
+            document_type: Some("Invoice".into()),
+            document_date: None,
+            date_role: None,
+            parties: Vec::new(),
+            party_relation: PartyRelation::None,
+            description: "An invoice.".into(),
+            confidence: 0.8,
+            evidence: Evidence::default(),
+        };
+        assert_eq!(
+            proposal_as_applied(&withheld, "2026-03-02 Invoice.pdf")
+                .document_date
+                .as_deref(),
+            Some("2026-03-02")
+        );
+        let dated = ValidatedProposal {
+            document_date: Some("2026-01-01".into()),
+            ..withheld.clone()
+        };
+        assert_eq!(
+            proposal_as_applied(&dated, "2026-03-02 Invoice.pdf")
+                .document_date
+                .as_deref(),
+            Some("2026-03-02"),
+            "a reviewer's date wins over the model's"
+        );
+        assert_eq!(
+            proposal_as_applied(&dated, "Invoice.pdf")
+                .document_date
+                .as_deref(),
+            Some("2026-01-01"),
+            "a name without a date changes nothing"
+        );
+    }
+
+    #[test]
+    fn a_filename_carries_a_date_only_when_it_starts_with_a_real_one() {
+        assert_eq!(
+            leading_date("2026-03-02 Invoice from Acme.pdf"),
+            Some("2026-03-02")
+        );
+        assert_eq!(leading_date("2026-03-02.pdf"), Some("2026-03-02"));
+        assert_eq!(leading_date("2026-03-02-invoice.pdf"), Some("2026-03-02"));
+        assert_eq!(leading_date("2026-03-02"), Some("2026-03-02"));
+        assert_eq!(leading_date("Invoice from Acme.pdf"), None);
+        assert_eq!(leading_date("Invoice 2026-03-02 from Acme.pdf"), None);
+        assert_eq!(
+            leading_date("2026-02-30 Invoice.pdf"),
+            None,
+            "not a real day"
+        );
+        assert_eq!(
+            leading_date("2026-03-021 Invoice.pdf"),
+            None,
+            "digits run on"
+        );
+        assert_eq!(leading_date("2026-03-0"), None);
+        assert_eq!(leading_date(""), None);
+    }
+}
+
+#[cfg(test)]
+mod sink_tests {
+    use std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
+
+    use intern_engine::{Evidence, PartyRelation, ValidatedProposal};
+
+    use super::{FiledDocument, FilingSink, FilingSinks, KnownFiling, UnfiledDocument};
+
+    #[derive(Default)]
+    struct Heard(Mutex<Vec<String>>);
+
+    impl FilingSink for Heard {
+        fn filed(&self, document: &FiledDocument) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("filed {}", document.item_id));
+        }
+        fn unfiled(&self, document: &UnfiledDocument) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("unfiled {}", document.item_id));
+        }
+    }
+
+    #[test]
+    fn every_sink_behind_the_fan_out_hears_every_report_in_order() {
+        let first = Arc::new(Heard::default());
+        let second = Arc::new(Heard::default());
+        let sinks = FilingSinks(vec![first.clone(), second.clone()]);
+        sinks.filed(&FiledDocument {
+            item_id: 4,
+            source_path: PathBuf::from("/in/a.pdf"),
+            source_hash: "hash".into(),
+            destination: PathBuf::from("/out/a.pdf"),
+            description: "A sentence.".into(),
+            proposal: ValidatedProposal {
+                document_type: None,
+                document_date: None,
+                date_role: None,
+                parties: Vec::new(),
+                party_relation: PartyRelation::Between,
+                description: "A sentence.".into(),
+                confidence: 0.5,
+                evidence: Evidence::default(),
+            },
+            filed_at: 1,
+            text_fingerprint: None,
+        });
+        sinks.unfiled(&UnfiledDocument {
+            item_id: 4,
+            source_path: PathBuf::from("/in/a.pdf"),
+            source_hash: "hash".into(),
+            destination: PathBuf::from("/out/a.pdf"),
+        });
+        for sink in [&first, &second] {
+            assert_eq!(
+                *sink.0.lock().unwrap(),
+                vec!["filed 4".to_string(), "unfiled 4".to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn a_known_filing_names_the_machine_only_when_there_is_one_to_name() {
+        let teammate = KnownFiling {
+            filename: "2026-03-02 Agreement.pdf".into(),
+            filed_by: Some("Front desk".into()),
+        };
+        assert_eq!(
+            teammate.describe(),
+            "2026-03-02 Agreement.pdf (filed from Front desk)"
+        );
+        let own = KnownFiling {
+            filename: "2026-03-02 Agreement.pdf".into(),
+            filed_by: None,
+        };
+        assert_eq!(own.describe(), "2026-03-02 Agreement.pdf");
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use std::path::{Path, PathBuf};
+
+    use intern_engine::{DateRole, Evidence, PartyRelation, ValidatedProposal};
+
+    use super::{layout_subfolder, prune_empty_layout_folders, target_folder};
+    use crate::settings::{AppSettings, DestinationLayout};
+
+    fn proposal(date: Option<&str>, kind: Option<&str>, parties: &[&str]) -> ValidatedProposal {
+        ValidatedProposal {
+            document_type: kind.map(str::to_owned),
+            document_date: date.map(str::to_owned),
+            date_role: date.map(|_| DateRole::Effective),
+            parties: parties.iter().map(|party| (*party).to_owned()).collect(),
+            party_relation: PartyRelation::Between,
+            description: "A description.".into(),
+            confidence: 0.9,
+            evidence: Evidence::default(),
+        }
+    }
+
+    #[test]
+    fn each_layout_derives_its_folder_from_the_documents_facts() {
+        let full = proposal(
+            Some("2026-04-01"),
+            Some("Statement of Work"),
+            &["Ridgeline Cartography LLC", "Vistage Worldwide, Inc."],
+        );
+        assert_eq!(layout_subfolder(DestinationLayout::Flat, &full), None);
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Year, &full),
+            Some(PathBuf::from("2026"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::YearType, &full),
+            Some(PathBuf::from("2026").join("Statement of Work"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Type, &full),
+            Some(PathBuf::from("Statement of Work"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Party, &full),
+            Some(PathBuf::from("Ridgeline Cartography LLC"))
+        );
+    }
+
+    #[test]
+    fn a_missing_fact_goes_to_a_named_catch_all_never_the_root() {
+        let bare = proposal(None, None, &[]);
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Year, &bare),
+            Some(PathBuf::from("Undated"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::YearType, &bare),
+            Some(PathBuf::from("Undated").join("Unsorted"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Party, &bare),
+            Some(PathBuf::from("Unsorted"))
+        );
+        // Hostile characters in a fact never reach a folder name.
+        let hostile = proposal(Some("2026-04-01"), Some("Invoice: 3/4 <draft>"), &["CON"]);
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Type, &hostile),
+            Some(PathBuf::from("Invoice 34 draft"))
+        );
+        assert_eq!(
+            layout_subfolder(DestinationLayout::Party, &hostile),
+            Some(PathBuf::from("_CON"))
+        );
+    }
+
+    #[test]
+    fn the_target_folder_falls_back_to_the_documents_own_folder_without_a_destination() {
+        let mut settings = AppSettings {
+            destination_layout: DestinationLayout::Year,
+            ..AppSettings::default()
+        };
+        let source = Path::new("/inbox/scan.pdf");
+        let proposal = proposal(Some("2026-04-01"), None, &[]);
+        assert_eq!(
+            target_folder(&settings, source, &proposal),
+            PathBuf::from("/inbox").join("2026")
+        );
+        settings.destination = "/filed".into();
+        assert_eq!(
+            target_folder(&settings, source, &proposal),
+            PathBuf::from("/filed").join("2026")
+        );
+    }
+
+    #[test]
+    fn pruning_stops_at_the_root_and_at_the_first_folder_with_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("filed");
+        let vacated = root.join("2026").join("Invoice").join("a.pdf");
+        std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
+        prune_empty_layout_folders(&root, &vacated);
+        assert!(!root.join("2026").exists());
+        assert!(root.exists());
+
+        let sibling = root.join("2025").join("Invoice").join("b.pdf");
+        std::fs::create_dir_all(sibling.parent().unwrap()).unwrap();
+        std::fs::write(&sibling, b"x").unwrap();
+        let vacated = root.join("2025").join("Notice").join("c.pdf");
+        std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
+        prune_empty_layout_folders(&root, &vacated);
+        assert!(!root.join("2025").join("Notice").exists());
+        assert!(
+            root.join("2025").join("Invoice").exists(),
+            "a year folder with another document in it stays"
+        );
+
+        // A path outside the root is never touched.
+        let elsewhere = temp.path().join("elsewhere").join("d.pdf");
+        std::fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
+        prune_empty_layout_folders(&root, &elsewhere);
+        assert!(elsewhere.parent().unwrap().exists());
+    }
 }
 
 fn validate_leaf_filename(value: &str) -> PipelineResult<String> {

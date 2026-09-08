@@ -28,6 +28,25 @@ pub enum EngineErrorCode {
     ModelSelfTestFailed,
     #[serde(rename = "SETUP_BUSY")]
     SetupBusy,
+    /// The hosted model's endpoint, model name, or key is missing or malformed.
+    #[serde(rename = "HOSTED_MODEL_MISCONFIGURED")]
+    HostedModelMisconfigured,
+    /// The hosted service rejected the API key.
+    #[serde(rename = "HOSTED_MODEL_UNAUTHORIZED")]
+    HostedModelUnauthorized,
+    /// The hosted service could not be reached, or answered with a server error.
+    #[serde(rename = "HOSTED_MODEL_UNREACHABLE")]
+    HostedModelUnreachable,
+    /// The hosted service asked for a slower pace.
+    #[serde(rename = "HOSTED_MODEL_RATE_LIMITED")]
+    HostedModelRateLimited,
+    /// The hosted service refused the request itself - an unknown model
+    /// name, a request it considers malformed, or one too large for it.
+    #[serde(rename = "HOSTED_MODEL_REJECTED")]
+    HostedModelRejected,
+    /// The hosted model declined to answer about this document.
+    #[serde(rename = "HOSTED_MODEL_REFUSED")]
+    HostedModelRefused,
 }
 
 impl EngineErrorCode {
@@ -45,6 +64,12 @@ impl EngineErrorCode {
             Self::ModelResponseInvalid => "MODEL_RESPONSE_INVALID",
             Self::ModelSelfTestFailed => "MODEL_SELF_TEST_FAILED",
             Self::SetupBusy => "SETUP_BUSY",
+            Self::HostedModelMisconfigured => "HOSTED_MODEL_MISCONFIGURED",
+            Self::HostedModelUnauthorized => "HOSTED_MODEL_UNAUTHORIZED",
+            Self::HostedModelUnreachable => "HOSTED_MODEL_UNREACHABLE",
+            Self::HostedModelRateLimited => "HOSTED_MODEL_RATE_LIMITED",
+            Self::HostedModelRejected => "HOSTED_MODEL_REJECTED",
+            Self::HostedModelRefused => "HOSTED_MODEL_REFUSED",
         }
     }
 }

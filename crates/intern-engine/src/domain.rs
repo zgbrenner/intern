@@ -229,6 +229,9 @@ pub enum ReviewReason {
     TypeMissing,
     /// The document type was not literally present in the document.
     TypeUnsupported,
+    /// The model gave no usable type, so the document's own title was used;
+    /// a person should confirm it names the document.
+    TypeInferred,
     /// A named party could not be found in the document.
     PartyUnsupported,
     /// The description asserted something the document does not contain.
@@ -250,6 +253,7 @@ impl ReviewReason {
             Self::DateUnsupported => "DATE_UNSUPPORTED",
             Self::TypeMissing => "TYPE_MISSING",
             Self::TypeUnsupported => "TYPE_UNSUPPORTED",
+            Self::TypeInferred => "TYPE_INFERRED",
             Self::PartyUnsupported => "PARTY_UNSUPPORTED",
             Self::DescriptionUnsupported => "DESCRIPTION_UNSUPPORTED",
             Self::DescriptionInvalid => "DESCRIPTION_INVALID",
@@ -266,6 +270,10 @@ pub struct ValidationOutcome {
     pub proposal: ValidatedProposal,
     pub status: ProposalStatus,
     pub reasons: Vec<ReviewReason>,
+    /// The reply exactly as the model gave it, before any check. What
+    /// validation withheld from `proposal` is still here for a reviewer to
+    /// be offered - a date the document did not state verbatim, say.
+    pub candidate: ModelProposal,
 }
 
 /// A composed filename and the collision suffix it needed.
@@ -296,4 +304,18 @@ pub struct DocumentAnalysis {
     pub review_reasons: Vec<ReviewReason>,
     pub proposal: ValidatedProposal,
     pub telemetry: AnalysisTelemetry,
+    /// The model's reply before validation. Absent for analyses stored by
+    /// versions that did not keep it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_proposal: Option<ModelProposal>,
+    /// Every date the document states, in first-mention order, for a
+    /// reviewer who must give the document a date the model did not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stated_dates: Vec<String>,
+    /// A fingerprint of everything the extractor read (see
+    /// [`crate::fingerprint`]), for telling a second scan or a re-export of
+    /// a filed document from a new one. Absent for a text too short to
+    /// fingerprint, and for analyses stored by versions that kept none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_fingerprint: Option<String>,
 }

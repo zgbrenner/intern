@@ -12,7 +12,10 @@ pub mod pipeline;
 pub mod settings;
 
 pub use pipeline::{
-    AnalyzerBoundary, FileActions, ModelFailure, Pipeline, PipelineError, PipelineEventSink,
-    PipelineItem, PipelineProgress, PipelineResult, ProposalRecord, WorkerBoundary, WorkerFailure,
+    AnalyzerBoundary, DATE_REQUIRED, DuplicateOracle, EDITS_TO_LEARN, FileActions, FiledDocument,
+    FilingSink, FilingSinks, KnownFiling, LearnedRule, ModelFailure, NEAR_DUPLICATE, Pipeline,
+    PipelineError, PipelineEventSink, PipelineItem, PipelineProgress, PipelineResult,
+    ProposalRecord, SimilarFiling, UnfiledDocument, WorkerBoundary, WorkerFailure,
+    layout_subfolder, leading_date, proposal_as_applied, target_folder,
 };
-pub use settings::{AppSettings, SettingsStore};
+pub use settings::{AppSettings, DestinationLayout, ModelSource, SettingsStore};

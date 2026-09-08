@@ -1,0 +1,347 @@
+{
+  "schema_version": 1,
+  "fixtures": {
+    "ambiguous-note.pdf": {
+      "status": "completed",
+      "scores": {
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false
+      }
+    },
+    "board-deck.pptx": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "consulting-amendment.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "document-image.jpg": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "document-image.png": {
+      "status": "completed",
+      "scores": {
+        "date_correct": false,
+        "date_exact": false,
+        "date_forbidden": false,
+        "date_present": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": false,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "document-image.tiff": {
+      "status": "completed",
+      "scores": {
+        "date_correct": false,
+        "date_exact": false,
+        "date_forbidden": false,
+        "date_present": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "employment-agreement.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "encrypted.pdf": {
+      "status": "expected_error",
+      "scores": {
+        "expected_error": true
+      }
+    },
+    "long-document-100-pages.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": false,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "malformed.pdf": {
+      "status": "expected_error",
+      "scores": {
+        "expected_error": true
+      }
+    },
+    "meeting-minutes.md": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": false,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "mixed-signature.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "multi-date-invoice.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": false,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": false,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "nda.docx": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "order-form.docx": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "rotated-low-resolution-scan.png": {
+      "status": "completed",
+      "scores": {
+        "date_correct": false,
+        "date_exact": false,
+        "date_forbidden": false,
+        "date_present": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": false,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "scanned-lease.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": false,
+        "date_exact": false,
+        "date_forbidden": false,
+        "date_present": false,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": false,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": false,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "settlement-agreement.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": false,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "statement-of-work.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "termination-notice.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": false,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    },
+    "vendor-invoice.pdf": {
+      "status": "completed",
+      "scores": {
+        "date_correct": true,
+        "date_exact": true,
+        "date_forbidden": false,
+        "date_present": true,
+        "date_role_correct": true,
+        "description_covers_facts": true,
+        "description_specific": true,
+        "parties_correct": true,
+        "party_forbidden": false,
+        "readiness_match": true,
+        "ready": true,
+        "type_correct": true,
+        "type_present": true
+      }
+    }
+  }
+}

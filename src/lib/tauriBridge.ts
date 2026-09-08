@@ -1,7 +1,9 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import type { AppSettings, CloudLocation, IntakeStatus, QueueItem, SetupState } from '../types';
+import type { AppSettings, BackfillResult, CloudLocation, CloudRoot, DescriptionsStatus, HistoryEntry, HostedModelStatus, HostedModelTestResult, HouseRule, IntakeStatus, LearnedRule, QueueItem, SetupState } from '../types';
+import { GUIDE_URL } from './bridge';
 import type {
+  DescriptionsEventSource,
   DesktopBridge,
   ExistingModelFiles,
   FileSelection,
@@ -11,6 +13,7 @@ import type {
   SelectionResult,
   UpdateStatus,
 } from './bridge';
+import { humanizeReason } from './reasons';
 
 /**
  * The update found by the last check, held so that installing it cannot race a
@@ -58,6 +61,23 @@ interface QueueItemDto {
   progress?: number;
   undoable?: boolean;
   proposalRevision?: string | number;
+  suggestedDate?: string;
+  datesInDocument?: string[];
+  houseRules?: HouseRule[];
+  nearDuplicateOf?: string;
+  fileModifiedDate?: string;
+}
+
+interface HistoryEntryDto {
+  receiptId: string | number;
+  queueItemId: string | number;
+  at: number;
+  direction: HistoryEntry['direction'];
+  kind: HistoryEntry['kind'];
+  stage: HistoryEntry['stage'];
+  originalPath: string;
+  newPath: string;
+  description?: string | null;
 }
 
 interface ChangedPayload { paused?: boolean }
@@ -79,7 +99,7 @@ export interface TauriSelectionBoundary extends SelectionBoundary {
   subscribeDrops(listener: (selection: SelectionResult) => void): Promise<() => void>;
 }
 
-export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventSource, IntakeEventSource {
+export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventSource, IntakeEventSource, DescriptionsEventSource {
   constructor(private readonly transport: TauriTransport = defaultTransport) {}
 
   async listItems(): Promise<QueueItem[]> {
@@ -124,6 +144,20 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
   }
   clearHistory(): Promise<void> { return this.transport.invoke('history_clear'); }
 
+  async historyList(): Promise<HistoryEntry[]> {
+    const entries = await this.transport.invoke<HistoryEntryDto[]>('history_list');
+    return entries.map(({ description, ...entry }) => ({
+      ...entry,
+      receiptId: String(entry.receiptId),
+      queueItemId: String(entry.queueItemId),
+      ...(typeof description === 'string' && description.trim() ? { description } : {}),
+    }));
+  }
+
+  historyExport(path: string): Promise<number> {
+    return this.transport.invoke('history_export', { path });
+  }
+
   discardWaiting(): Promise<number> { return this.transport.invoke('queue_discard_waiting'); }
 
   intakeStatus(): Promise<IntakeStatus> { return this.transport.invoke('intake_status'); }
@@ -133,6 +167,50 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
     // The DTO is camelCase end to end; only guard against an absent value so
     // callers can rely on `null` rather than `undefined`.
     return await this.transport.invoke<CloudLocation | null | undefined>('folder_classify', { path }) ?? null;
+  }
+
+  async cloudRoots(): Promise<CloudRoot[]> {
+    return await this.transport.invoke<CloudRoot[] | null | undefined>('cloud_roots') ?? [];
+  }
+
+  descriptionsStatus(): Promise<DescriptionsStatus> { return this.transport.invoke('descriptions_status'); }
+  descriptionsBackfill(): Promise<BackfillResult> { return this.transport.invoke('descriptions_backfill'); }
+  hostedModelStatus(): Promise<HostedModelStatus> { return this.transport.invoke('hosted_model_status'); }
+  hostedModelSetKey(key: string): Promise<void> { return this.transport.invoke('hosted_model_set_key', { key }); }
+  hostedModelClearKey(): Promise<void> { return this.transport.invoke('hosted_model_clear_key'); }
+  hostedModelTest(settings: AppSettings): Promise<HostedModelTestResult> { return this.transport.invoke('hosted_model_test', { settings }); }
+  houseRulesList(): Promise<LearnedRule[]> { return this.transport.invoke('house_rules_list'); }
+  houseRuleForget(id: string): Promise<void> { return this.transport.invoke('house_rule_forget', { id }); }
+  houseRuleUse(id: string): Promise<void> { return this.transport.invoke('house_rule_use', { id }); }
+
+  // Same shape as subscribeIntake: synchronous unsubscribe over an async
+  // listen, dropping events until the listener is registered.
+  subscribeDescriptions(handler: (status: DescriptionsStatus) => void): () => void {
+    let active = true;
+    let stop: (() => void) | undefined;
+    void this.transport.listen<DescriptionsStatus>('descriptions://changed', ({ payload }) => {
+      if (active) handler(payload);
+    }).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    }).catch(() => { /* No event stream in this runtime; callers fall back to asking. */ });
+    return () => {
+      if (!active) return;
+      active = false;
+      stop?.();
+    };
+  }
+
+  /**
+   * Hands the guide's address to the operating system's browser through the
+   * opener plugin, the same way every other plugin command is reached here -
+   * `transport.invoke`, no npm plugin package, so the browser build never
+   * imports desktop-only code. The URL is the constant from the bridge
+   * contract, which is also what the capability scope names, so this cannot
+   * open anything else.
+   */
+  async openGuide(): Promise<void> {
+    await this.transport.invoke('plugin:opener|open_url', { url: GUIDE_URL });
   }
 
   // The updater plugin is loaded lazily so that importing this module never
@@ -232,6 +310,16 @@ export function createTauriSelectionBoundary(transport: TauriTransport = default
       const modelPath = await openGgufDialog(transport, 'Choose the model GGUF', 'GGUF model files');
       return modelPath ? { modelPath } : undefined;
     },
+    pickHistoryExportPath: async () => {
+      const result = await transport.invoke<unknown>('plugin:dialog|save', {
+        options: {
+          title: 'Export rename history',
+          defaultPath: 'intern-history.csv',
+          filters: [{ name: 'CSV', extensions: ['csv'] }],
+        },
+      });
+      return typeof result === 'string' ? result : undefined;
+    },
     resolveDrop: async (payload: unknown): Promise<SelectionResult> => {
       const drop = payload as { paths?: unknown; kind?: unknown };
       const paths = stringPaths(drop?.paths);
@@ -271,11 +359,18 @@ function normalizeItem(item: QueueItemDto): QueueItem {
     }),
     ...(item.description === undefined ? {} : { description: item.description }),
     ...(item.evidence === undefined ? {} : { evidence: item.evidence }),
-    ...(item.reason === undefined && item.errorCode === undefined ? {} : { reason: item.reason ?? item.errorCode }),
+    ...(item.reason === undefined && item.errorCode === undefined
+      ? {}
+      : { reason: humanizeReason(item.reason ?? item.errorCode ?? '') }),
     ...(item.progress === undefined ? {} : { progress: item.progress }),
     ...(status === 'processing' ? { cancelable: item.status !== 'applying' } : {}),
     ...(item.undoable === undefined ? {} : { undoable: item.undoable }),
     ...(item.proposalRevision === undefined ? {} : { proposalRevision: String(item.proposalRevision) }),
+    ...(item.suggestedDate === undefined ? {} : { suggestedDate: item.suggestedDate }),
+    ...(item.datesInDocument?.length ? { datesInDocument: [...item.datesInDocument] } : {}),
+    ...(item.houseRules?.length ? { houseRules: item.houseRules.map((rule) => ({ ...rule })) } : {}),
+    ...(item.nearDuplicateOf === undefined ? {} : { nearDuplicateOf: item.nearDuplicateOf }),
+    ...(item.fileModifiedDate === undefined ? {} : { fileModifiedDate: item.fileModifiedDate }),
   };
 }
 
