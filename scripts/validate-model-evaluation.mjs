@@ -98,7 +98,7 @@ function correct(summary, key) {
 
 export function validateEvaluation(report) {
   requireValue(report && typeof report === 'object', 'model evaluation report must be an object');
-  requireValue(report.schema_version === 2, 'model evaluation schema_version must be 2');
+  requireValue(report.schema_version === 3, 'model evaluation schema_version must be 3');
   requireValue(report.pipeline === 'new', 'the release gate only accepts the shipping pipeline');
   requireValue(typeof report.model_id === 'string' && report.model_id.length > 0, 'model evaluation must record the served model id');
   requireValue(Array.isArray(report.records) && report.records.length > 0, 'model evaluation must contain records');

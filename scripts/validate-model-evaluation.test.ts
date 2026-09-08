@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -14,7 +14,7 @@ function metric(rate: number, correct = Math.round(rate * 10), total = 10) {
 
 function report(overrides: Record<string, unknown> = {}, summaryOverrides: Record<string, unknown> = {}) {
   return {
-    schema_version: 2,
+    schema_version: 3,
     pipeline: 'new',
     model_id: 'intern-local',
     budget_characters: 12_000,
@@ -154,5 +154,22 @@ describe('model evaluation gate', () => {
     const path = join(directory, 'report.json');
     await writeFile(path, JSON.stringify(report({}, { review_rate: 0.9 })));
     await expect(exec(process.execPath, ['scripts/validate-model-evaluation.mjs', path])).rejects.toThrow();
+  });
+
+  // The gate only runs in the QA and release workflows, so a report schema
+  // bumped without the validators is invisible until a release is being cut and
+  // fails on the last evidence step. Read the version the evaluator actually
+  // writes and hold both validators to it here, where every PR runs.
+  it('accepts exactly the schema version intern-evaluate writes', async () => {
+    const source = await readFile('crates/intern-engine/src/bin/intern-evaluate.rs', 'utf8');
+    const emitted = /report\.insert\("schema_version"\.into\(\), json!\((\d+)\)\)/.exec(source);
+    expect(emitted, 'intern-evaluate must write a literal schema_version').not.toBeNull();
+    const version = Number(emitted![1]);
+
+    expect(() => validateEvaluation(report({ schema_version: version }))).not.toThrow();
+    expect(() => validateEvaluation(report({ schema_version: version - 1 }))).toThrow(/schema_version/);
+
+    const evidence = await readFile('scripts/release-evidence-lib.mjs', 'utf8');
+    expect(evidence).toContain(`report?.schema_version === ${version}`);
   });
 });
