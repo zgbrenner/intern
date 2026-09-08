@@ -6,26 +6,27 @@ on:
 permissions:
   contents: read
 jobs:
-  workspace:
+  rust-workspace:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 24.15.0
-          cache: npm
-      - run: npm ci
-      - name: Package tracked source and public test dependencies
+      - name: Install pinned verification toolchain
+        run: rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
+      - name: Fetch locked public crate sources
+        run: cargo +1.88.0 fetch --locked
+      - name: Package only public tools and crate cache
         shell: bash
         run: |
-          git archive --format=tar HEAD > "$RUNNER_TEMP/intern-workspace.tar"
-          tar -rf "$RUNNER_TEMP/intern-workspace.tar" node_modules
-          gzip "$RUNNER_TEMP/intern-workspace.tar"
+          mkdir -p "$RUNNER_TEMP/portable-rust"
+          cp -a "$HOME/.rustup/toolchains/1.88.0-x86_64-unknown-linux-gnu" "$RUNNER_TEMP/portable-rust/toolchain"
+          mkdir -p "$RUNNER_TEMP/portable-rust/cargo-home"
+          cp -a "$HOME/.cargo/registry" "$RUNNER_TEMP/portable-rust/cargo-home/registry"
+          tar -czf "$RUNNER_TEMP/intern-rust-workspace.tar.gz" -C "$RUNNER_TEMP/portable-rust" toolchain cargo-home
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: intern-verification-workspace
-          path: ${{ runner.temp }}/intern-workspace.tar.gz
+          name: intern-rust-verification-workspace
+          path: ${{ runner.temp }}/intern-rust-workspace.tar.gz
           retention-days: 1
