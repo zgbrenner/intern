@@ -39,7 +39,7 @@ export async function readJsonArtifact(root, path) {
 }
 
 function acceptedModel(report, context) {
-  return report?.schema_version === 2
+  return report?.schema_version === 3
     && report.pipeline === 'new'
     && report.status === 'completed'
     && report.commit === context.commit

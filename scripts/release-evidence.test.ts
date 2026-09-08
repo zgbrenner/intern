@@ -35,7 +35,7 @@ async function evidenceFixture() {
     installerLog: 'release/installer-smoke.log',
   };
   await writeFile(join(root, files.model), JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     pipeline: 'new',
     status: 'completed',
     commit,
