@@ -97,11 +97,17 @@ impl ModelClient {
         })
     }
 
-    /// One attempt, then one retry on a malformed reply.
+    /// One attempt, then one retry when the reply was malformed. A request
+    /// that failed outright is not retried: the second attempt fails the same
+    /// way, and against a server that has died or hung it turns one document
+    /// into two full request timeouts before anyone is told.
     pub fn propose(&self, request: &ModelRequest) -> EngineResult<ModelProposal> {
         match self.propose_once(request) {
             Ok(proposal) => Ok(proposal),
-            Err(_) => self.propose_once(request).map_err(AttemptError::into_error),
+            Err(AttemptError(EngineErrorCode::ModelResponseInvalid)) => {
+                self.propose_once(request).map_err(AttemptError::into_error)
+            }
+            Err(error) => Err(error.into_error()),
         }
     }
 
@@ -388,6 +394,61 @@ mod tests {
         let body = client.completion_request(&ModelRequest { prompt: "p".into() });
         assert!(body["messages"][1]["content"].is_string());
         assert!(!body.to_string().contains("image_url"));
+    }
+
+    /// A retry is for a reply that came back malformed. A request that failed
+    /// outright fails the same way twice, and against a dead or hung server
+    /// the second attempt only doubles a ten-minute wait for one document.
+    #[test]
+    fn a_failed_request_is_not_retried() {
+        use std::{
+            io::{BufRead, BufReader, Write},
+            net::TcpListener,
+            sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            },
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&attempts);
+        // Never joined: after the fix there is no second connection to accept,
+        // and the harness ends the process when the last test finishes.
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                counted.fetch_add(1, Ordering::SeqCst);
+                // Drain the request so closing the socket cannot reset it
+                // before the status line arrives.
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0_usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).is_err() || line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+                let _ = std::io::Read::read_exact(&mut reader, &mut vec![0_u8; length]);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+                let _ = stream.flush();
+            }
+        });
+
+        let client =
+            ModelClient::new(&format!("http://{address}/v1/chat/completions"), "k", "m").unwrap();
+        let error = client
+            .propose(&ModelRequest { prompt: "p".into() })
+            .unwrap_err();
+
+        assert_eq!(error.code(), EngineErrorCode::ModelRequestFailed);
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 
     #[test]
