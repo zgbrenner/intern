@@ -192,11 +192,11 @@
         "date_present": true,
         "date_role_correct": true,
         "description_covers_facts": true,
-        "description_specific": false,
+        "description_specific": true,
         "parties_correct": true,
         "party_forbidden": false,
-        "readiness_match": false,
-        "ready": false,
+        "readiness_match": true,
+        "ready": true,
         "type_correct": true,
         "type_present": true
       }

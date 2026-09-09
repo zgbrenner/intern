@@ -337,10 +337,17 @@ fn validate_description(
 ) -> String {
     let trimmed = description.trim();
     let mut sentence = trimmed.to_owned();
-    // Keep the first sentence; a small model sometimes keeps going.
+    // Keep the first sentence; a small model sometimes keeps going. A
+    // terminator only ends a sentence when a space follows it, because the
+    // period inside "$1,248.00" is a decimal point and cutting there left
+    // "An invoice for $1,248." - four words, which the sentence check then
+    // called invalid and sent a perfectly good invoice to review.
     for (index, character) in trimmed.char_indices() {
         if matches!(character, '.' | '!' | '?')
-            && index + character.len_utf8() < trimmed.len()
+            && trimmed[index + character.len_utf8()..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
             && !is_abbreviation_period(trimmed, index)
         {
             sentence = trimmed[..index + character.len_utf8()].to_owned();
@@ -920,6 +927,29 @@ Countersigned June 2, 2023.
                 .reasons
                 .contains(&ReviewReason::DescriptionUnsupported)
         );
+    }
+
+    /// The corpus invoice reads "An invoice for $1,248.00 from Nimbus
+    /// Orchard Supply Co. ..." and the first-sentence cut kept "An invoice
+    /// for $1,248." - four words, so the sentence check then called it
+    /// invalid and the whole document went to review over a decimal point.
+    #[test]
+    fn a_decimal_amount_does_not_end_the_description() {
+        let document = format!("{DOCUMENT}
+The total fee is $248,000.00 payable on delivery.
+");
+        let mut candidate = proposal();
+        candidate.description =
+            "Statement of work for Acme Corporation covering the 2026 CRM implementation at a fee of $248,000.00."
+                .into();
+        let outcome = validate(candidate, &digest_of(&document));
+        assert_eq!(
+            outcome.proposal.description,
+            "Statement of work for Acme Corporation covering the 2026 CRM implementation at a fee of $248,000.00.",
+            "{:?}",
+            outcome.reasons
+        );
+        assert!(!outcome.reasons.contains(&ReviewReason::DescriptionInvalid));
     }
 
     #[test]
