@@ -1331,12 +1331,6 @@ fn save_settings(state: &AppState, mut settings: AppSettings) -> Result<(), Comm
     if settings.model_source == ModelSource::Hosted {
         state.hosted.config(&settings)?;
     }
-    // Applied before anything persists so an operating system that refuses
-    // the login entry leaves the stored settings unchanged - the dialog shows
-    // the error against a state that is still true.
-    if previous.start_at_login != settings.start_at_login {
-        apply_autostart(&state.app, settings.start_at_login)?;
-    }
     state
         .app
         .state::<Arc<crate::microsoft_intake::MicrosoftIntake>>()
@@ -1345,7 +1339,12 @@ fn save_settings(state: &AppState, mut settings: AppSettings) -> Result<(), Comm
             code: "UPLOADER_UNVERIFIED".into(),
             message,
         })?;
-    state.settings.save(&settings)?;
+    save_settings_and_autostart(
+        &previous,
+        &settings,
+        |settings| state.settings.save(settings).map_err(CommandError::from),
+        |enabled| apply_autostart(&state.app, enabled),
+    )?;
     state.refresh_hosted_active(&settings);
     if previous.model_source != settings.model_source {
         state.schedule()?;
@@ -1369,6 +1368,32 @@ fn save_settings(state: &AppState, mut settings: AppSettings) -> Result<(), Comm
     {
         state.restart_intake(&settings)?;
         state.emit_intake_changed()?;
+    }
+    Ok(())
+}
+
+/// Stores the settings and brings the operating system's login entry into
+/// line with them.
+///
+/// The order matters in both directions. Toggling the entry first left it
+/// changed when the save that followed failed, so the login entry and the
+/// settings disagreed with nothing on screen to say so. Saving first and
+/// putting the previous settings back when registration is refused keeps the
+/// older promise as well - a refused login entry leaves the stored settings
+/// unchanged - and the refusal is what the dialog reports, because it is the
+/// thing that went wrong.
+fn save_settings_and_autostart(
+    previous: &AppSettings,
+    settings: &AppSettings,
+    save: impl Fn(&AppSettings) -> Result<(), CommandError>,
+    autostart: impl Fn(bool) -> Result<(), CommandError>,
+) -> Result<(), CommandError> {
+    save(settings)?;
+    if previous.start_at_login != settings.start_at_login
+        && let Err(error) = autostart(settings.start_at_login)
+    {
+        let _ = save(previous);
+        return Err(error);
     }
     Ok(())
 }
@@ -1893,7 +1918,9 @@ mod intake_tests {
     use intern_intake::{CloudProviderKind, DoneOutcome, ItemState, MachineIdentity};
     use intern_queue::AppSettings;
 
-    use super::{validate_description_settings, validate_intake_settings};
+    use super::{
+        save_settings_and_autostart, validate_description_settings, validate_intake_settings,
+    };
     use crate::intake::{CloudProviderDto, item_fate, presence_active, status_dto};
 
     /// A fake folder canonicalizer: pairs of (as-entered, canonical form).
@@ -2010,6 +2037,87 @@ mod intake_tests {
             error_code(validate_intake_settings(&mut disabled_missing, &fs)),
             "INTAKE_FOLDER_MISSING"
         );
+    }
+
+    fn login(previous: bool, next: bool) -> (AppSettings, AppSettings) {
+        (
+            AppSettings {
+                start_at_login: previous,
+                ..AppSettings::default()
+            },
+            AppSettings {
+                start_at_login: next,
+                ..AppSettings::default()
+            },
+        )
+    }
+
+    fn failure(code: &str) -> super::CommandError {
+        super::CommandError {
+            code: code.into(),
+            message: "no".into(),
+        }
+    }
+
+    #[test]
+    fn autostart_is_untouched_when_the_save_fails() {
+        let (previous, next) = login(false, true);
+        let toggles = std::cell::Cell::new(0);
+        let error = save_settings_and_autostart(
+            &previous,
+            &next,
+            |_| Err(failure("SETTINGS_WRITE_FAILED")),
+            |_| {
+                toggles.set(toggles.get() + 1);
+                Ok(())
+            },
+        )
+        .expect_err("a save that fails is an error");
+        assert_eq!(error.code, "SETTINGS_WRITE_FAILED");
+        assert_eq!(
+            toggles.get(),
+            0,
+            "the login entry must not be changed for settings that were never stored"
+        );
+    }
+
+    #[test]
+    fn a_refused_login_entry_leaves_the_stored_settings_unchanged() {
+        let (previous, next) = login(false, true);
+        let stored = std::cell::RefCell::new(Vec::new());
+        let error = save_settings_and_autostart(
+            &previous,
+            &next,
+            |settings: &AppSettings| {
+                stored.borrow_mut().push(settings.start_at_login);
+                Ok(())
+            },
+            |_| Err(failure("AUTOSTART_FAILED")),
+        )
+        .expect_err("a refused login entry is an error");
+        assert_eq!(error.code, "AUTOSTART_FAILED");
+        assert_eq!(
+            *stored.borrow(),
+            vec![true, false],
+            "the saved settings are rolled back to what is actually true"
+        );
+    }
+
+    #[test]
+    fn a_save_that_does_not_change_the_login_entry_never_touches_it() {
+        let (previous, next) = login(true, true);
+        let toggles = std::cell::Cell::new(0);
+        save_settings_and_autostart(
+            &previous,
+            &next,
+            |_| Ok(()),
+            |_| {
+                toggles.set(toggles.get() + 1);
+                Ok(())
+            },
+        )
+        .expect("a save with no login change succeeds");
+        assert_eq!(toggles.get(), 0);
     }
 
     fn receipt(
