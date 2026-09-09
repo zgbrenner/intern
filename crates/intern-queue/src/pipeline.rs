@@ -489,6 +489,10 @@ pub struct ProposalRecord {
 /// already filed. The record's `near_duplicate_of` names that filing.
 pub const NEAR_DUPLICATE: &str = "NEAR_DUPLICATE";
 
+/// The review reason for a rename a person took back. The document is where
+/// it started and waits for a decision; nothing files it again on its own.
+pub const UNDONE: &str = "UNDONE";
+
 impl ProposalRecord {
     /// The validated facts as the name carries them: the document's words,
     /// respelled the way the reviewer has taught Intern to.
@@ -1709,6 +1713,12 @@ impl Pipeline {
             )
         })?;
         self.files.undo(&item, &receipt)?;
+        // An undo returns the item to ready, which is the state the scheduler
+        // files from: with automatic renaming on it would apply the same name
+        // again within the minute and undo the person's undo. Taking the
+        // decision back is a decision, so the document waits for the next one.
+        // The undo itself has already succeeded and stands either way.
+        let _ = self.repository.mark_needs_review(id, UNDONE);
         let _ = self.repository.forget_fingerprint(id);
         self.filing.unfiled(&UnfiledDocument {
             item_id: item.id,

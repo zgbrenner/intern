@@ -287,7 +287,10 @@ subfolder the queue derives from the validated facts: the year, the year and
 type, the type, or the first party (`2026/Statement of Work/`). A fact the
 layout needs but the document lacks sends it to `Undated` or `Unsorted`, never
 the root. Folders are created on first use and removed by the undo that
-empties them; the destination itself is never removed.
+empties them; the destination itself is never removed. An undo puts the
+document back and leaves it waiting for a person, not ready to file: ready is
+the state the scheduler files from, and with automatic renaming on the same
+name would be applied again within the minute, undoing the undo.
 
 ### House style
 

@@ -19,7 +19,7 @@ use intern_queue::{
     pipeline::{
         AnalyzerBoundary, DuplicateOracle, FileActions, FiledDocument, FilingSink, KnownFiling,
         ModelFailure, NEAR_DUPLICATE, Pipeline, PipelineError, PipelineEventSink, PipelineProgress,
-        SimilarFiling, UnfiledDocument, WorkerBoundary, WorkerFailure,
+        SimilarFiling, UNDONE, UnfiledDocument, WorkerBoundary, WorkerFailure,
     },
     settings::{AppSettings, DestinationLayout, SettingsStore},
 };
@@ -1161,7 +1161,7 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
 
     pipeline.undo(completed.id).unwrap();
 
-    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::NeedsReview);
     assert!(path.exists());
     assert!(!receipt.destination.exists());
     assert_eq!(
@@ -1180,8 +1180,64 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
     );
     assert_eq!(
         pipeline.find_by_source_path(&path).unwrap().unwrap().status,
-        QueueStatus::Ready
+        QueueStatus::NeedsReview
     );
+}
+
+/// An undo is a decision, and the scheduler's next pass must respect it: with
+/// automatic renaming on, the queue used to file the document again within
+/// the minute, which undoes the person's undo.
+#[test]
+fn an_undone_rename_is_not_reapplied_automatically() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "undone.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("undone-queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+
+    pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+    pipeline.run_until_idle().unwrap();
+    let completed = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(completed.status, QueueStatus::Completed);
+    let destination = completed.receipt.clone().unwrap().destination;
+
+    pipeline.undo(completed.id).unwrap();
+    assert!(path.exists());
+
+    // The scheduler's next pass - the one that comes round every sixty-five
+    // seconds whether or not anything else happened.
+    pipeline.run_until_idle().unwrap();
+
+    let after = pipeline.list().unwrap().pop().unwrap();
+    let record = after.proposal.as_ref().unwrap();
+    assert_eq!(
+        after.status,
+        QueueStatus::NeedsReview,
+        "an undone rename waits for a person"
+    );
+    assert!(
+        record.reasons.iter().any(|reason| reason == UNDONE),
+        "{:?}",
+        record.reasons
+    );
+    assert!(path.exists(), "the document stays where the undo put it");
+    assert!(!destination.exists());
 }
 
 /// A year of contracts should not become one folder of a thousand files. The
@@ -1753,7 +1809,7 @@ fn undone_completion_is_not_flagged_as_a_duplicate_on_re_add() {
     assert_eq!(completed.status, QueueStatus::Completed);
 
     pipeline.undo(completed.id).unwrap();
-    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::NeedsReview);
 
     // The apply was undone, so the content is not filed anywhere: a new copy
     // must analyze normally instead of being flagged.
