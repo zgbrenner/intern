@@ -18,7 +18,7 @@
         "date_exact": true,
         "date_forbidden": false,
         "date_present": true,
-        "date_role_correct": false,
+        "date_role_correct": true,
         "description_covers_facts": true,
         "description_specific": true,
         "parties_correct": true,

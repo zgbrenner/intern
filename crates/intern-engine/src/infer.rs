@@ -94,6 +94,7 @@ const ISSUANCE_CUES: &[&str] = &[
     "delivered on",
     "receipt date",
     "prepared on",
+    "presented on",
     "published on",
     "publication date",
     "meeting date",
@@ -990,6 +991,18 @@ Invoice Date: April 30, 2025    Due Date: May 30, 2025",
         assert_eq!(
             infer_date_role(&digest, "2025-04-30", Some("Invoice")),
             Some(DateRole::Invoice)
+        );
+    }
+
+    /// Replay of the recorded corpus: the board deck is dated "Presented on
+    /// May 21, 2026", which is a deck being issued on a date, and the model
+    /// called it a notice date.
+    #[test]
+    fn a_deck_presented_on_a_date_was_issued_on_it() {
+        let digest = digest_of("QUARTERLY BUSINESS REVIEW\n\nPresented on May 21, 2026");
+        assert_eq!(
+            infer_date_role(&digest, "2026-05-21", Some("Quarterly Business Review")),
+            Some(DateRole::Issuance)
         );
     }
 
