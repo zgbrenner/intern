@@ -7,7 +7,8 @@ use std::thread::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
-use crate::extract::{CancellationToken, ExtractedDocument, ExtractionError};
+use crate::extract::{CancellationToken, ExtractedDocument, ExtractionError, ExtractionWarning};
+use crate::limits::MAX_PAGE_CHARS;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const WORKER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -210,9 +211,40 @@ struct JsonLineSink<'a, W: Write> {
 
 impl<W: Write> EventSink for JsonLineSink<'_, W> {
     fn emit(&mut self, response: &Response) -> io::Result<()> {
-        serde_json::to_writer(&mut self.writer, response).map_err(io::Error::other)?;
-        self.writer.write_all(b"\n")?;
+        // One event, one write. Serialising straight into the pipe writes a
+        // fragment at a time, and a serialisation that fails halfway leaves
+        // half a JSON line on the wire for the host to choke on.
+        let mut line = serde_json::to_vec(response).map_err(io::Error::other)?;
+        line.push(b'\n');
+        self.writer.write_all(&line)?;
         self.writer.flush()
+    }
+}
+
+/// Truncates any page that carries more than [`MAX_PAGE_CHARS`] characters.
+///
+/// Only the spreadsheet reader caps what one page may hold, and the host
+/// reads a response line without a bound of its own, so one degenerate file
+/// could put hundreds of megabytes through the pipe and into the queue's
+/// memory. Capping at this boundary rather than in each reader means the
+/// bound holds for every reader, including ones added later, and the document
+/// still arrives - marked truncated - rather than failing.
+fn bound_page_text(document: &mut ExtractedDocument) {
+    let mut truncated = false;
+    for page in &mut document.pages {
+        if let Some((end, _)) = page.text.char_indices().nth(MAX_PAGE_CHARS) {
+            page.text.truncate(end);
+            truncated = true;
+        }
+    }
+    if truncated {
+        document.truncated = true;
+        if !document
+            .warnings
+            .contains(&ExtractionWarning::TextTruncated)
+        {
+            document.warnings.push(ExtractionWarning::TextTruncated);
+        }
     }
 }
 
@@ -437,7 +469,8 @@ where
                     };
                     let response =
                         match catch_unwind(AssertUnwindSafe(|| thread_extractor(path, token))) {
-                            Ok(Ok(document)) => {
+                            Ok(Ok(mut document)) => {
+                                bound_page_text(&mut document);
                                 Response::new(request_id.clone(), Event::Parsed { document })
                             }
                             Ok(Err(error)) => Response::extraction_error(request_id.clone(), error),

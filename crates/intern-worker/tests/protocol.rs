@@ -3,6 +3,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use intern_worker::extract::ExtractedDocument;
+use intern_worker::limits::MAX_PAGE_CHARS;
 use intern_worker::protocol::{
     MAX_PROTOCOL_LINE_BYTES, handle_line, run_concurrent_worker, run_control_loop,
 };
@@ -388,4 +389,60 @@ fn nul_in_request_id_cannot_break_thread_start_or_leak_the_active_slot() {
     assert!(text.contains(r#""request_id":"nul\u0000id""#));
     assert!(!text.contains("WORKER_THREAD_START_FAILED"));
     assert!(!text.contains("WORKER_BUSY"));
+}
+
+/// Every extractor but the spreadsheet reader can hand back a page of any
+/// size at all, and the host reads a response line without a bound, so one
+/// degenerate file could put hundreds of megabytes through the pipe and into
+/// the queue's memory. The cap lives at the boundary so it holds for every
+/// reader, including ones added later.
+#[test]
+fn a_page_longer_than_the_cap_is_truncated_before_it_is_emitted() {
+    let output = SignalingWriter::default();
+    let captured = output.clone();
+    let reader = TerminalGatedReader {
+        chunks: vec![
+            parse_line("huge", "one.txt"),
+            joined_lines([shutdown_line()]),
+        ],
+        next: 0,
+        output,
+        first_terminal: b"\"type\":\"parsed\"",
+    };
+
+    run_concurrent_worker(reader, captured.clone(), Vec::new(), |_path, _cancel| {
+        Ok(ExtractedDocument {
+            pages: vec![intern_worker::extract::ExtractedPage {
+                page_number: 1,
+                text: "é".repeat(MAX_PAGE_CHARS + 1_000),
+                source: intern_worker::extract::PageSource::Text,
+                ocr_confidence: None,
+                vision_escalated: false,
+            }],
+            warnings: vec![],
+            truncated: false,
+            optional_image: None,
+        })
+    })
+    .unwrap();
+
+    let (bytes, _) = &*captured.0;
+    let bytes = bytes.lock().unwrap().clone();
+    let parsed = String::from_utf8(bytes)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|event| event["event"]["type"] == "parsed")
+        .unwrap();
+
+    assert_eq!(
+        parsed["event"]["document"]["pages"][0]["text"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count(),
+        MAX_PAGE_CHARS
+    );
+    assert_eq!(parsed["event"]["document"]["truncated"], true);
+    assert_eq!(parsed["event"]["document"]["warnings"][0], "TEXT_TRUNCATED");
 }
