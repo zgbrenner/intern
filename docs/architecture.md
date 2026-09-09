@@ -68,13 +68,13 @@ documented as intent:
   and OCR then returns a full page of gibberish with the same word count and
   shape as a real reading. Volume cannot tell those apart, so mean word
   confidence arbitrates: one corpus page scored 23, 14, 14, and 76 across the
-  four orientations, and a reading only displaces another if it read a
-  comparable amount: three confident tokens are not a better reading of a page
-  than three hundred words just under the bar. A page that reads well the
-  first time — every upright document — still costs exactly one pass, and so
-  does a page that reads as blank, which is every other sheet of a duplex
-  scan; only a page already headed for a low-confidence warning pays for the
-  search.
+  four orientations. Confidence is a mean, though, so a reading only displaces
+  another when it read a comparable amount; three confident tokens are not a
+  better reading of a page than three hundred words just under the bar. A page
+  that reads well the first time — every upright document — still costs exactly
+  one pass, and so does a page that reads as blank, which is every other sheet
+  of a duplex scan; only a page already headed for a low-confidence warning
+  pays for the search.
 
 ## Distillation
 
