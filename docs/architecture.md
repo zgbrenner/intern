@@ -248,7 +248,11 @@ YYYY-MM-DD <document type> <relation> <party>[ and <party>].<ext>
 `<relation>` is one of `between`, `for`, `with`, `from`, `to`, or — when the model
 declines to state one — a bare `-`, which keeps a validated party in the name
 without asserting a relationship the document never established. Only `between`
-takes two names; the others take the first. Real names from the scored corpus:
+takes two names; the others take the first, and a stated one-sided relation
+keeps only that one on the validated proposal too - `to John Smith and
+Northstar Lantern Works LLC` would assert a relationship the notice never
+stated. A declined relation asserts nothing about anybody, so it keeps every
+validated name for the reviewer to read. Real names from the scored corpus:
 
 ```text
 2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf

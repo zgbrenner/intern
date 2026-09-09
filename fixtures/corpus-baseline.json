@@ -317,7 +317,7 @@
         "date_role_correct": true,
         "description_covers_facts": true,
         "description_specific": true,
-        "parties_correct": false,
+        "parties_correct": true,
         "party_forbidden": false,
         "readiness_match": true,
         "ready": true,

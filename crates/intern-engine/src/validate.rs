@@ -90,8 +90,21 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
     } else {
         candidate.party_relation
     };
-    let (parties, party_relation) =
+    let (mut parties, party_relation) =
         repair_issued_relation(document_type.as_deref(), parties, party_relation, digest);
+    // A stated one-sided relation is about one party. "to [John Smith,
+    // Northstar Lantern Works LLC]" reads as a notice to both, which the
+    // document does not say and the filename does not carry - it names the
+    // first party only. So the relation the model stated decides how many
+    // names the proposal may keep. `none` is left alone: it asserts nothing
+    // about anybody, so a second validated name there is still just a name
+    // the document contains.
+    if matches!(
+        party_relation,
+        PartyRelation::For | PartyRelation::With | PartyRelation::From | PartyRelation::To
+    ) {
+        parties.truncate(1);
+    }
 
     let description = validate_description(&candidate.description, digest, &mut reasons);
 
@@ -901,6 +914,35 @@ Countersigned June 2, 2023.
         let outcome = validate(candidate, &digest_of(DOCUMENT));
         assert!(outcome.proposal.parties.is_empty());
         assert!(outcome.reasons.contains(&ReviewReason::PartyUnsupported));
+    }
+
+    /// The filename grammar gives a second name only to "between"; every
+    /// other connecting word takes the first party alone. Keeping the
+    /// second one on the proposal published a party the name never carries,
+    /// and the corpus scored the termination notice's "Northstar Lantern
+    /// Works LLC" as a spurious party for exactly that reason.
+    #[test]
+    fn a_one_sided_relation_keeps_one_party() {
+        let mut candidate = proposal();
+        candidate.party_relation = PartyRelation::To;
+        let outcome = validate(candidate, &digest_of(DOCUMENT));
+        assert_eq!(
+            outcome.proposal.parties,
+            vec!["Acme Corporation".to_owned()],
+            "{:?}",
+            outcome.reasons
+        );
+        assert_eq!(outcome.proposal.party_relation, PartyRelation::To);
+
+        // "between" still carries both, and so does an unstated relation,
+        // which asserts nothing about either name.
+        let outcome = validate(proposal(), &digest_of(DOCUMENT));
+        assert_eq!(outcome.proposal.parties.len(), 2);
+
+        let mut candidate = proposal();
+        candidate.party_relation = PartyRelation::None;
+        let outcome = validate(candidate, &digest_of(DOCUMENT));
+        assert_eq!(outcome.proposal.parties.len(), 2);
     }
 
     #[test]
