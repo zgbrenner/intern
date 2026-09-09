@@ -409,6 +409,14 @@ impl DocumentExtractor for SupervisedWorker {
             })) {
                 process.terminate();
                 self.clear_running(&process);
+                // A cancel that lands between the worker starting and this
+                // command reaching it kills the worker first, which is why the
+                // write failed. That is the cancellation the person asked for,
+                // not a crash: reporting a crash restarts the worker and puts
+                // the document they just cancelled back in the queue.
+                if self.was_canceled(request_id) {
+                    return Err(ExtractFailure::canceled());
+                }
                 return Err(error);
             }
             let deadline = Instant::now() + self.extraction_timeout;
@@ -734,6 +742,39 @@ mod tests {
                 "optional_image":{"page_number":9,"mime_type":"image/png","data_base64":"AAA="}}}}"#
         )
         .is_err());
+    }
+
+    /// A process that reads its standard input and stays there, standing in
+    /// for a worker that has started and is waiting for a command.
+    fn idle_helper() -> &'static str {
+        if cfg!(windows) { "cmd.exe" } else { "cat" }
+    }
+
+    #[test]
+    fn a_cancel_that_beats_the_parse_command_is_still_a_cancel() {
+        let worker = SupervisedWorker::new("already-running");
+        let process = Arc::new(launch(Path::new(idle_helper()), None).expect("a helper process"));
+        *worker.running.lock().unwrap() = Some(Arc::clone(&process));
+        *worker.active.lock().unwrap() = Some("r1".to_owned());
+
+        // The cancel arrives first and kills the worker, as a cancel always
+        // does.
+        worker
+            .cancel("r1")
+            .expect("an active request is cancellable");
+
+        // Extraction had taken its handle on that same worker before the
+        // cancel landed, so the parse command it is about to write is going to
+        // a process that is already gone.
+        *worker.running.lock().unwrap() = Some(process);
+        *worker.active.lock().unwrap() = None;
+
+        let failure = worker
+            .extract("r1", Path::new("document.pdf"), &mut |_| {})
+            .expect_err("a parse command cannot reach a killed worker");
+        assert_eq!(failure.code, "CANCELED");
+        assert!(failure.canceled);
+        assert!(!failure.retryable);
     }
 
     #[test]
