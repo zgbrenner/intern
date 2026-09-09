@@ -213,11 +213,47 @@ pub struct SetupStateDto {
 
 struct TauriPipelineEvents {
     app: AppHandle,
+    /// The queue this reports on. Weak because the queue owns the sink, and
+    /// filled in afterwards because the sink has to exist before the queue
+    /// that holds it does.
+    pipeline: std::sync::OnceLock<std::sync::Weak<Pipeline>>,
+}
+
+impl TauriPipelineEvents {
+    fn new(app: AppHandle) -> Self {
+        Self {
+            app,
+            pipeline: std::sync::OnceLock::new(),
+        }
+    }
+
+    fn watch(&self, pipeline: &Arc<Pipeline>) {
+        let _ = self.pipeline.set(Arc::downgrade(pipeline));
+    }
+
+    fn paused(&self) -> bool {
+        self.pipeline
+            .get()
+            .and_then(std::sync::Weak::upgrade)
+            .is_some_and(|pipeline| pipeline.is_paused())
+    }
+}
+
+/// What a queue-change event carries.
+///
+/// The queue pauses itself - a hosted model that refuses the key, a shared
+/// lease that cannot be taken - and the window only heard "something
+/// changed", so it went on offering to pause a queue that had already
+/// stopped. Every change now says which it is.
+fn queue_changed_payload(paused: bool) -> serde_json::Value {
+    serde_json::json!({ "paused": paused })
 }
 
 impl PipelineEventSink for TauriPipelineEvents {
     fn queue_changed(&self) {
-        let _ = self.app.emit("queue://changed", serde_json::json!({}));
+        let _ = self
+            .app
+            .emit("queue://changed", queue_changed_payload(self.paused()));
     }
     fn progress(&self, progress: PipelineProgress) {
         let _ = self.app.emit("queue://progress", progress);
@@ -880,6 +916,7 @@ impl AppState {
             Arc::clone(&hosted),
             settings.clone(),
         ));
+        let events = Arc::new(TauriPipelineEvents::new(app.clone()));
         let pipeline = Arc::new(
             Pipeline::with_local_files(
                 data.join("queue.sqlite3"),
@@ -888,7 +925,7 @@ impl AppState {
                     worker_temp_root,
                 )),
                 model,
-                Arc::new(TauriPipelineEvents { app: app.clone() }),
+                events.clone(),
                 settings.clone(),
             )?
             .with_filing_sink(Arc::new(FilingSinks(vec![
@@ -899,6 +936,7 @@ impl AppState {
             .with_duplicate_oracle(filed_index.clone())
             .with_admission_guard(microsoft),
         );
+        events.watch(&pipeline);
         pipeline.recover()?;
         // Opened after the pipeline so the pipeline's own store has already
         // migrated the schema this connection reads.
@@ -2287,6 +2325,23 @@ mod intake_tests {
         ));
         // Clock skew across machines: a future stamp still counts as active.
         assert!(presence_active(now + 60, now));
+    }
+}
+
+#[cfg(test)]
+mod queue_event_tests {
+    use super::queue_changed_payload;
+
+    #[test]
+    fn a_queue_change_says_whether_the_queue_is_paused() {
+        assert_eq!(
+            queue_changed_payload(true),
+            serde_json::json!({ "paused": true })
+        );
+        assert_eq!(
+            queue_changed_payload(false),
+            serde_json::json!({ "paused": false })
+        );
     }
 }
 
