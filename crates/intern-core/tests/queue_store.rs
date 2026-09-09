@@ -1,14 +1,15 @@
 use std::{
-    fs,
+    fs, io,
     path::Path,
     sync::{Arc, Barrier},
     thread,
 };
 
 use intern_core::{
-    ErrorCode, FileApplier, FileSystem, HISTORY_LIMIT, OperationDirection, OperationKind,
-    OperationStage, QueueStatus, QueueStore, StdFileSystem, source_path_key,
+    ErrorCode, FileApplier, FileSystem, HISTORY_LIMIT, LockedFile, OperationDirection,
+    OperationKind, OperationStage, QueueStatus, QueueStore, StdFileSystem, source_path_key,
 };
+
 use tempfile::TempDir;
 
 fn store(temp: &TempDir) -> QueueStore {
@@ -741,6 +742,77 @@ fn find_completed_duplicate_reports_the_filed_name_and_skips_pending_or_undone_i
         db.find_completed_duplicate(&hash, &incoming_key)
             .unwrap()
             .is_none()
+    );
+}
+
+/// An operation whose rename cannot land. The undo it refuses is journalled,
+/// fails, and reconciles as rolled back - which leaves the item's newest
+/// receipt a rolled-back undo sitting on top of the apply that filed it.
+struct RenameRefusedFileSystem;
+
+impl FileSystem for RenameRefusedFileSystem {
+    fn exists(&self, path: &Path) -> bool {
+        StdFileSystem.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        StdFileSystem.hash(path)
+    }
+    fn same_volume(&self, source: &Path, destination: &Path) -> io::Result<bool> {
+        StdFileSystem.same_volume(source, destination)
+    }
+    fn rename_no_replace(&self, _source: &Path, _destination: &Path) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "injected rename refusal",
+        ))
+    }
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
+        StdFileSystem.copy_new_locked(source, destination)
+    }
+    fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
+        StdFileSystem.lock_for_delete(path)
+    }
+}
+
+#[test]
+fn duplicate_report_names_the_applied_file_after_a_rolled_back_undo() {
+    let temp = TempDir::new().unwrap();
+    let db = Arc::new(store(&temp));
+    let original = temp.path().join("original.pdf");
+    fs::write(&original, b"same-content").unwrap();
+    let hash = StdFileSystem.hash(&original).unwrap();
+    let filed = temp.path().join("2024 - Filed Agreement.pdf");
+    let completed_id = complete_via_apply(&db, &original, &filed);
+
+    // An undo that cannot rename is journalled, fails, and reconciles as rolled
+    // back. The content never moved: it is still at the filed name.
+    db.begin_applying(completed_id, QueueStatus::Completed)
+        .unwrap();
+    let applied = db.load_receipt(completed_id).unwrap().unwrap();
+    let refused = FileApplier::new(Arc::new(RenameRefusedFileSystem), Arc::clone(&db));
+    refused.undo(completed_id, &applied).unwrap_err();
+    let restored = refused.reconcile(completed_id).unwrap();
+    assert_eq!(restored.status, QueueStatus::Completed);
+    assert_eq!(
+        db.load_receipt(completed_id).unwrap().unwrap().stage,
+        OperationStage::RolledBack
+    );
+    assert!(filed.exists());
+
+    // The rolled-back undo is the newest receipt but it filed nothing, so the
+    // name a duplicate is reported under is still the one the apply gave it.
+    let found = db
+        .find_completed_duplicate(&hash, &source_path_key(&temp.path().join("incoming.pdf")))
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.queue_item_id, completed_id);
+    assert_eq!(
+        found.filed_as.as_deref(),
+        Some("2024 - Filed Agreement.pdf")
     );
 }
 

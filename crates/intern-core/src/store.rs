@@ -348,28 +348,31 @@ impl QueueStore {
         else {
             return Ok(None);
         };
-        // The newest receipt is where the content actually is now. Anything
-        // other than a completed apply (no receipt at all, or an undo followed
-        // by keep-original) means the file kept its original name.
+        // The newest *finished* receipt is where the content actually is now.
+        // Asking for the newest receipt of any kind and then requiring it to be
+        // a completed apply reported no filed name at all whenever something
+        // later had been journalled and abandoned - an undo that rolled back
+        // sits on top of the apply that filed the document without having moved
+        // anything. An operation that rolled back moved nothing, so it cannot
+        // answer the question, and the completed apply underneath it still can.
+        // A completed undo does answer it: the file is back at its own name.
         let filed_as = connection
             .query_row(
-                "SELECT destination_path FROM operation_receipts
-                 WHERE queue_item_id = ?1
-                   AND id = (
-                     SELECT MAX(latest.id) FROM operation_receipts latest
-                     WHERE latest.queue_item_id = ?1
-                   )
-                   AND direction = 'apply' AND stage = 'complete'",
+                "SELECT direction, destination_path FROM operation_receipts
+                 WHERE queue_item_id = ?1 AND stage = 'complete'
+                 ORDER BY id DESC LIMIT 1",
                 params![queue_item_id],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()
             .map_err(InternError::from)?
-            .and_then(|destination| {
+            .filter(|(direction, _)| direction == OperationDirection::Apply.as_db())
+            .and_then(|(_, destination)| {
                 Path::new(&destination)
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
             });
+
         Ok(Some(DuplicateInfo {
             queue_item_id,
             source_path: PathBuf::from(source_path),
