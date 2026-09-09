@@ -425,6 +425,51 @@ fn wrong_digest_keeps_partial_and_never_publishes() {
     assert!(!directory.path().join("model.gguf").exists());
 }
 
+/// A file that is already installed and fails its digest cannot be repaired by
+/// checking it again, and nothing inside the app could delete it, so setup
+/// reported MODEL_FILE_INVALID on every attempt forever.
+#[test]
+fn an_invalid_installed_file_is_replaced_by_a_fresh_download() {
+    let bytes = b"the real model bytes";
+    let server = FakeServer::sequence(vec![response("200 OK", &[], bytes)]);
+    let directory = tempdir().unwrap();
+    // The right length and the wrong contents: corrupted in place by a bad
+    // disk, a half-finished copy, or an antivirus quarantine.
+    let installed = directory.path().join("model.gguf");
+    fs::write(&installed, b"corrupted in place!!").unwrap();
+
+    let result = downloader(u64::MAX)
+        .download(
+            &file(&server.url, bytes),
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
+        .unwrap();
+
+    assert_eq!(result, installed);
+    assert_eq!(fs::read(&installed).unwrap(), bytes);
+    assert!(!directory.path().join("model.gguf.partial").exists());
+
+    // The same dead end reached the other way: installing a copy a person
+    // already has, over a corrupt one.
+    let install = directory.path().join("install");
+    let selected = directory.path().join("selected.gguf");
+    fs::create_dir_all(&install).unwrap();
+    fs::write(install.join("model.gguf"), b"corrupted in place!!").unwrap();
+    fs::write(&selected, bytes).unwrap();
+    let installed = install_selected_file(
+        &selected,
+        &file("https://example.invalid/model.gguf", bytes),
+        &install,
+        &FixedDisk(u64::MAX),
+        &CancellationToken::new(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(fs::read(installed).unwrap(), bytes);
+}
+
 #[test]
 fn insufficient_disk_is_rejected_before_request() {
     let bytes = b"model";

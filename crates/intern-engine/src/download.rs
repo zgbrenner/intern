@@ -423,22 +423,34 @@ impl<H: HttpTransport, D: DiskSpace> Downloader<H, D> {
             total_bytes: expected.size,
         });
         if final_path.exists() {
-            validate_file_cancelable(&final_path, expected, cancellation, |checked| {
+            match validate_file_cancelable(&final_path, expected, cancellation, |checked| {
                 progress(SetupProgress {
                     stage: SetupStage::Checking,
                     completed_bytes: checked,
                     total_bytes: expected.size,
                 });
-            })?;
-            if cancellation.is_canceled() {
-                return Err(canceled());
+            }) {
+                Ok(()) => {
+                    if cancellation.is_canceled() {
+                        return Err(canceled());
+                    }
+                    progress(SetupProgress {
+                        stage: SetupStage::Complete,
+                        completed_bytes: expected.size,
+                        total_bytes: expected.size,
+                    });
+                    return Ok(final_path);
+                }
+                Err(error) if error.code() == ModelErrorCode::DownloadCanceled => {
+                    return Err(error);
+                }
+                // An installed file that fails its digest cannot be repaired by
+                // checking it again, and nothing in the app could remove it, so
+                // setup reported MODEL_FILE_INVALID forever. Delete it and
+                // download it afresh; keeping 1.19 GiB of bytes known to be
+                // wrong would only take the disk space the replacement needs.
+                Err(_) => fs::remove_file(&final_path).map_err(|_| invalid_file())?,
             }
-            progress(SetupProgress {
-                stage: SetupStage::Complete,
-                completed_bytes: expected.size,
-                total_bytes: expected.size,
-            });
-            return Ok(final_path);
         }
         if cancellation.is_canceled() {
             return Err(canceled());
@@ -667,22 +679,30 @@ where
         return Err(invalid_file());
     }
     if final_path.exists() {
-        validate_file_cancelable(&final_path, expected, cancellation, |checked| {
+        match validate_file_cancelable(&final_path, expected, cancellation, |checked| {
             progress(SetupProgress {
                 stage: SetupStage::Checking,
                 completed_bytes: checked,
                 total_bytes: expected.size,
             });
-        })?;
-        if cancellation.is_canceled() {
-            return Err(canceled());
+        }) {
+            Ok(()) => {
+                if cancellation.is_canceled() {
+                    return Err(canceled());
+                }
+                progress(SetupProgress {
+                    stage: SetupStage::Complete,
+                    completed_bytes: expected.size,
+                    total_bytes: expected.size,
+                });
+                return Ok(final_path);
+            }
+            Err(error) if error.code() == ModelErrorCode::DownloadCanceled => return Err(error),
+            // The same dead end as in `download`: a person who reaches for a
+            // copy they already have is doing it because the installed one is
+            // broken, so the broken one must give way to it.
+            Err(_) => fs::remove_file(&final_path).map_err(|_| invalid_file())?,
         }
-        progress(SetupProgress {
-            stage: SetupStage::Complete,
-            completed_bytes: expected.size,
-            total_bytes: expected.size,
-        });
-        return Ok(final_path);
     }
     require_disk(disk, destination_directory, expected.size)?;
     validate_file_cancelable(selected, expected, cancellation, |checked| {
