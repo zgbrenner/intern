@@ -296,7 +296,7 @@ mod tests {
         let chunks = split_sentences(paragraph, 30);
         assert!(chunks.len() > 1);
         assert_eq!(chunks.concat(), paragraph);
-        assert!(chunks[0].contains("$1,248.00"), "{:?}", chunks);
+        assert!(chunks[0].contains("$1,248.00"), "{chunks:?}");
     }
 
     #[test]
