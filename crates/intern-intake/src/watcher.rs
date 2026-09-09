@@ -255,10 +255,11 @@ fn scan_once(
     // side of a conflict after whichever machine wrote it, which is often us.
     let mut machines: Vec<String> = store
         .list_machines()
-        .into_iter()
-        .map(|presence| presence.machine_name)
+        .iter()
+        .flat_map(|presence| presence.names().map(str::to_owned))
         .collect();
     machines.push(identity.name.clone());
+    machines.push(identity.host_name.clone());
 
     let mut scanner = Scanner {
         config,
@@ -327,10 +328,12 @@ impl Scanner<'_> {
         if self.record_backlog {
             self.backlog.insert(facts.relative_path.clone());
         }
-        if !self
-            .stability
-            .observe(&facts.path, facts.size, facts.modified_secs)
-        {
+        if !self.stability.observe(
+            &facts.path,
+            facts.size,
+            facts.modified_secs,
+            self.clock.now(),
+        ) {
             return;
         }
         let doc = DocumentFacts {
@@ -340,41 +343,24 @@ impl Scanner<'_> {
         };
         let key = doc.key();
         self.visited.insert(key.clone());
-        let admission = self.host.admission(&facts.path);
-        if matches!(admission, IntakeAdmission::Other | IntakeAdmission::Unknown) {
-            if admission == IntakeAdmission::Other {
-                self.status.held_for_others += 1;
-            } else {
-                self.status.uploader_unknown += 1;
-            }
-            if self.owned.remove(&key).is_some()
-                || self.store.read(&key).is_some_and(|claim| {
-                    claim.machine_id == self.identity.id && claim.state == ClaimState::Claimed
-                })
-            {
-                self.host.abandon(&facts.path);
-                let _ = self.store.release(&key);
-            }
-            return;
-        }
 
         if self.owned.contains_key(&key) {
-            if self.store.verify(&key) {
-                self.manage_owned(&key, &facts.path, true);
-            } else {
-                self.owned.remove(&key);
-                self.host.abandon(&facts.path);
-            }
+            self.manage_admitted(&key, facts);
             return;
         }
 
+        // Asking the host about a document only when this machine might act on
+        // it: an uploader check can cost a Microsoft audit search, and only 32
+        // of those can be pending at once. Spending them on documents already
+        // tombstoned here, or claimed by another machine, starves the ones that
+        // actually need a verdict.
         match self.store.read(&key) {
             Some(claim) if claim.machine_id == self.identity.id => match claim.state {
                 ClaimState::Claimed => {
                     // A claim from a previous run of this machine: adopt it and
                     // let the host's item state drive it forward again.
                     self.owned.insert(key.clone(), facts.path.clone());
-                    self.manage_owned(&key, &facts.path, true);
+                    self.manage_admitted(&key, facts);
                 }
                 ClaimState::Done => self.status.processed_here += 1,
             },
@@ -383,10 +369,57 @@ impl Scanner<'_> {
                     self.status.claimed_by_others += 1;
                 }
             }
-            None if admission == IntakeAdmission::Verified => {
-                self.attempt_claim(&doc, &key, &facts.path)
+            None => match self.host.admission(&facts.path) {
+                IntakeAdmission::Verified => self.attempt_claim(&doc, &key, &facts.path),
+                IntakeAdmission::LocalOnly => self.consider_unclaimed(&doc, &key, facts),
+                IntakeAdmission::Other => self.status.held_for_others += 1,
+                IntakeAdmission::Unknown | IntakeAdmission::Revoked => {
+                    self.status.uploader_unknown += 1
+                }
+            },
+        }
+    }
+
+    /// Re-checks the uploader of a document this machine already holds, then
+    /// drives the claim.
+    ///
+    /// Only a verdict ends the work. "We could not check right now" — an
+    /// unreachable Microsoft, a throttled connection, an audit event that has
+    /// not been delivered yet — leaves the claim and the queue item alone: the
+    /// queue authorizes again at every stage of its own, so nothing is
+    /// processed on stale evidence, and cancelling here would throw away work
+    /// that was legitimately admitted a moment ago.
+    fn manage_admitted(&mut self, key: &str, facts: &FileFacts) {
+        let admission = self.host.admission(&facts.path);
+        match admission {
+            IntakeAdmission::Other | IntakeAdmission::Revoked => {
+                if admission == IntakeAdmission::Other {
+                    self.status.held_for_others += 1;
+                } else {
+                    self.status.uploader_unknown += 1;
+                }
+                self.owned.remove(key);
+                self.host.abandon(&facts.path);
+                let _ = self.store.release(key);
+                return;
             }
-            None => self.consider_unclaimed(&doc, &key, facts),
+            IntakeAdmission::Unknown => {
+                self.status.uploader_unknown += 1;
+                if self.store.verify(key) {
+                    let _ = self.store.renew(key);
+                } else {
+                    self.owned.remove(key);
+                    self.host.abandon(&facts.path);
+                }
+                return;
+            }
+            IntakeAdmission::Verified | IntakeAdmission::LocalOnly => {}
+        }
+        if self.store.verify(key) {
+            self.manage_owned(key, &facts.path, true);
+        } else {
+            self.owned.remove(key);
+            self.host.abandon(&facts.path);
         }
     }
 
@@ -422,8 +455,18 @@ impl Scanner<'_> {
     }
 
     fn others_claimable(&self, facts: &FileFacts) -> bool {
-        self.config.process_others_uploads
-            && self.clock.now() - facts.modified_secs >= COURTESY_DELAY_SECONDS
+        if !self.config.process_others_uploads {
+            return false;
+        }
+        // The delay runs from when the file turned up here, not from the
+        // timestamp it carries. A sync client preserves the uploader's
+        // modification time, so a document that has only just landed already
+        // looks hours old and there would be no delay at all.
+        let arrived = self
+            .stability
+            .first_seen_at(&facts.path)
+            .map_or(facts.modified_secs, |seen| seen.max(facts.modified_secs));
+        self.clock.now() - arrived >= COURTESY_DELAY_SECONDS
     }
 
     fn attempt_claim(&mut self, doc: &DocumentFacts, key: &str, path: &Path) {
@@ -493,6 +536,18 @@ impl Scanner<'_> {
     /// forgive a document exactly once per trip through the cloud.
     fn finish_failed(&mut self, key: &str, path: &Path) {
         if self.hydration.is_dehydrated(path) {
+            // Nothing else will ever open a placeholder, and a placeholder is
+            // only recalled when something opens it, so a claim held waiting
+            // for content would wait for ever unless the scan asks for the
+            // bytes itself. Once they arrive the claim is released rather than
+            // retried in place, exactly as it is when they arrive some other
+            // way.
+            if self.hydration.hydrate(path) {
+                let _ = self.store.release(key);
+                self.owned.remove(key);
+                self.awaiting_hydration.remove(key);
+                return;
+            }
             // Counted only once the lease is actually held: a document we just
             // abandoned is not one we are waiting on.
             if self.store.renew(key).is_err() {

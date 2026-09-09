@@ -47,9 +47,16 @@ pub fn real_now() -> i64 {
 }
 
 pub fn identity(id: &str, name: &str) -> MachineIdentity {
+    labelled_identity(id, name, name)
+}
+
+/// A machine the user gave a display label, so the name the sync client puts
+/// into a conflict copy is nothing like the name shown in Settings.
+pub fn labelled_identity(id: &str, name: &str, host_name: &str) -> MachineIdentity {
     MachineIdentity {
         id: id.to_string(),
         name: name.to_string(),
+        host_name: host_name.to_string(),
         user: "tester".to_string(),
     }
 }

@@ -7,16 +7,16 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
 
-use common::{MockClock, facts_for, identity, wait_until};
+use common::{MockClock, facts_for, identity, labelled_identity, wait_until};
 use intern_intake::{
     COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome, Hydration,
     IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState,
-    scan::is_conflict_copy,
+    MachineIdentity, scan::is_conflict_copy,
 };
 use tempfile::TempDir;
 
@@ -31,6 +31,7 @@ struct FakeHost {
     statuses: Mutex<Vec<IntakeStatus>>,
     fail_enqueue: AtomicBool,
     admission: Mutex<Option<IntakeAdmission>>,
+    admission_calls: AtomicUsize,
 }
 
 impl FakeHost {
@@ -40,6 +41,10 @@ impl FakeHost {
 
     fn abandoned(&self) -> Vec<PathBuf> {
         self.abandoned.lock().unwrap().clone()
+    }
+
+    fn admission_calls(&self) -> usize {
+        self.admission_calls.load(Ordering::SeqCst)
     }
 
     fn set_state(&self, path: &Path, state: ItemState) {
@@ -53,6 +58,7 @@ impl FakeHost {
 impl IntakeHost for FakeHost {
     // The existing tests exercise the explicitly local-only protocol.
     fn admission(&self, _path: &Path) -> IntakeAdmission {
+        self.admission_calls.fetch_add(1, Ordering::SeqCst);
         self.admission
             .lock()
             .unwrap()
@@ -104,6 +110,8 @@ struct Rig {
 #[derive(Default)]
 struct FakeHydration {
     dehydrated: Mutex<HashSet<PathBuf>>,
+    /// Whether a request for a placeholder's content would succeed.
+    reachable: AtomicBool,
 }
 
 impl FakeHydration {
@@ -123,10 +131,32 @@ impl Hydration for FakeHydration {
     fn is_dehydrated(&self, path: &Path) -> bool {
         path.exists() && self.dehydrated.lock().unwrap().contains(path)
     }
+
+    /// The sync client fetches the bytes when something opens the file;
+    /// offline, the open fails and the file stays a placeholder.
+    fn hydrate(&self, path: &Path) -> bool {
+        if !self.reachable.load(Ordering::SeqCst) {
+            return false;
+        }
+        self.dehydrated.lock().unwrap().remove(path);
+        true
+    }
 }
 
 impl Rig {
     fn start(process_others_uploads: bool, backlog_files: &[&str]) -> Rig {
+        Self::start_as(
+            identity("here-machine", "here"),
+            process_others_uploads,
+            backlog_files,
+        )
+    }
+
+    fn start_as(
+        identity: MachineIdentity,
+        process_others_uploads: bool,
+        backlog_files: &[&str],
+    ) -> Rig {
         let temp = TempDir::new().unwrap();
         for name in backlog_files {
             fs::write(temp.path().join(name), b"backlog content").unwrap();
@@ -139,7 +169,7 @@ impl Rig {
         let hydration = Arc::new(FakeHydration::default());
         let watcher = IntakeWatcher::start_with_seams(
             config,
-            identity("here-machine", "here"),
+            identity,
             host.clone(),
             clock.clone(),
             hydration.clone(),
@@ -700,7 +730,178 @@ fn other_uploads_are_held_and_a_later_revocation_abandons_owned_work() {
     *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Verified);
     rig.step();
     assert_eq!(rig.host.enqueued().len(), 1);
-    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Unknown);
+    // A revocation is a verdict; an unverifiable moment is not, and is covered
+    // by a_transient_verification_error_does_not_cancel_owned_work.
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Revoked);
     rig.step();
     assert!(rig.host.abandoned().contains(&path));
+}
+
+/// Microsoft being briefly unreachable is not the same as an upload having
+/// been revoked. Cancelling the queue item and dropping the claim on a blip
+/// throws away work that was legitimately admitted, and the next scan has to
+/// start the document over.
+#[test]
+fn a_transient_verification_error_does_not_cancel_owned_work() {
+    let rig = Rig::start(false, &[]);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Verified);
+    let path = rig.write("contract.pdf", b"a document being processed");
+    rig.step();
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Unknown);
+    rig.step();
+    assert!(
+        rig.host.abandoned().is_empty(),
+        "work in flight must survive an unverifiable moment"
+    );
+    assert_eq!(rig.read_claim(&key).state, ClaimState::Claimed);
+    assert_eq!(rig.watcher.status().uploader_unknown, 1);
+
+    // A verdict, rather than a blip, still stops the work.
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Revoked);
+    rig.step();
+    assert_eq!(rig.host.abandoned(), vec![path]);
+    assert!(!rig.claim_file(&key).exists());
+}
+
+/// Verifying an uploader costs a Microsoft audit search, and only 32 can be
+/// pending at once. Spending them on documents this machine has already
+/// finished, or that another machine is processing, starves the documents that
+/// actually need a verdict.
+#[test]
+fn held_and_done_files_are_not_reverified_each_scan() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let mine = rig.write("mine.pdf", b"already filed here");
+    rig.step();
+    rig.step();
+    rig.host.set_state(
+        &mine,
+        ItemState::Done {
+            outcome: DoneOutcome::Renamed,
+            result_filename: Some("2026 Contract.pdf".to_string()),
+        },
+    );
+    rig.step();
+
+    rig.write("theirs.pdf", b"another machine is on it");
+    let facts = facts_for(rig.temp.path(), "theirs.pdf");
+    let other = ClaimStore::new(rig.temp.path(), identity("other-machine", "elsewhere")).unwrap();
+    other.write_origin(&facts).unwrap();
+    assert!(matches!(
+        other.acquire(&facts),
+        intern_intake::AcquireOutcome::Acquired
+    ));
+    rig.step();
+    rig.step();
+
+    let before = rig.host.admission_calls();
+    rig.step();
+    rig.step();
+    assert_eq!(
+        rig.host.admission_calls(),
+        before,
+        "neither a tombstoned document nor one another machine holds is ours to verify"
+    );
+    let status = rig.watcher.status();
+    assert_eq!(status.processed_here, 1);
+    assert_eq!(status.claimed_by_others, 1);
+}
+
+/// OneDrive names the losing side of a conflict after the machine that wrote
+/// it, and that is the hostname — not the friendly label someone typed into
+/// Settings. A labelled machine that only knows its label never recognises its
+/// own conflict copies, and files the losing copy as a second document.
+#[test]
+fn a_labelled_machine_still_recognises_its_own_hostname_conflict_copies() {
+    let rig = Rig::start_as(
+        labelled_identity("here-machine", "Front desk", "DESKTOP-A1B2C3"),
+        false,
+        &[],
+    );
+    rig.step();
+    rig.write(
+        "report-DESKTOP-A1B2C3.pdf",
+        b"the losing side of a conflict",
+    );
+    let genuine = rig.write("Invoice-ACME.pdf", b"an ordinary document");
+    rig.step();
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![genuine]);
+    assert_eq!(rig.watcher.status().sync_conflicts, 1);
+
+    // The same is true of a teammate's labelled machine, whose presence record
+    // is all this machine knows about it.
+    let other = ClaimStore::new(
+        rig.temp.path(),
+        labelled_identity("other-machine", "Reception", "LAPTOP-Z9"),
+    )
+    .unwrap();
+    other.touch_presence().unwrap();
+    rig.write("memo-LAPTOP-Z9.pdf", b"their conflict copy");
+    rig.step();
+    rig.step();
+    assert_eq!(rig.watcher.status().sync_conflicts, 2);
+}
+
+/// Nothing else ever opens a placeholder, so a claim held waiting for content
+/// waits for ever unless the scan asks the sync client for the bytes.
+#[test]
+fn a_held_placeholder_is_hydrated_when_the_host_can_reach_the_cloud() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("contract.pdf", b"an online-only document");
+    rig.step();
+    rig.step();
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+
+    // Offline: the content cannot be fetched, so the claim is held open.
+    rig.hydration.set_dehydrated(&path, true);
+    rig.host.set_state(&path, ItemState::Failed);
+    rig.step();
+    assert_eq!(rig.watcher.status().awaiting_hydration, 1);
+
+    rig.hydration.reachable.store(true, Ordering::SeqCst);
+    rig.step();
+    assert!(
+        !rig.hydration.is_dehydrated(&path),
+        "the scan must ask for the content it is waiting on"
+    );
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+    assert!(
+        !rig.claim_file(&key).exists(),
+        "the released claim lets the next scan give the document a real attempt"
+    );
+}
+
+/// A sync client preserves the uploader's modification time, so a document
+/// that has only just landed here already carries an old timestamp. Measuring
+/// the courtesy delay from that timestamp means there is no delay at all, and
+/// this machine races the uploader's own machine for every file it syncs down.
+#[test]
+fn a_file_that_arrives_with_an_old_timestamp_still_waits_out_the_courtesy_delay() {
+    let rig = Rig::start(true, &[]);
+    rig.clock.advance(10 * COURTESY_DELAY_SECONDS);
+    rig.step();
+    let path = rig.write("their-scan.pdf", b"synced down with its original timestamp");
+    let other = ClaimStore::new(rig.temp.path(), identity("other-machine", "elsewhere")).unwrap();
+    other
+        .write_origin(&facts_for(rig.temp.path(), "their-scan.pdf"))
+        .unwrap();
+
+    rig.step();
+    rig.step();
+    assert!(
+        rig.host.enqueued().is_empty(),
+        "the uploader's own machine still gets first shot"
+    );
+    assert_eq!(rig.watcher.status().held_for_others, 1);
+
+    rig.clock.advance(COURTESY_DELAY_SECONDS);
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![path]);
 }

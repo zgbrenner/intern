@@ -50,12 +50,22 @@ pub enum ItemState {
 /// The boundary to whatever processes documents (the pipeline in the real
 /// app, a fake in tests). The watcher only hands over paths and asks about
 /// their fate; it never reads document content itself.
+///
+/// `Unknown` and `Revoked` are both holds and neither ever admits a document,
+/// but they mean opposite things about work already in flight. `Unknown` is
+/// "we could not check right now" — Microsoft unreachable, throttled, or the
+/// audit event not delivered yet — and must leave a document that is already
+/// claimed and queued exactly where it is, because the queue re-checks at
+/// every stage anyway. `Revoked` is a verdict: the connection was dropped, the
+/// account changed, or this file no longer verifies, and the work in flight
+/// is cancelled.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IntakeAdmission {
     LocalOnly,
     Verified,
     Other,
     Unknown,
+    Revoked,
 }
 
 pub trait IntakeHost: Send + Sync {
@@ -192,7 +202,14 @@ pub(crate) fn walk_intake(root: &Path, extensions: &[String]) -> io::Result<Walk
             if !file_type.is_file() || !supported(&path, extensions) {
                 continue;
             }
-            let Ok(metadata) = entry.metadata() else {
+            // Not `entry.metadata()`: Windows updates a directory entry
+            // lazily, so a listing reports the size a file had at its last
+            // flush and a document the sync client is still writing looks
+            // settled. Opening the file for its attributes costs a handle but
+            // hydrates nothing, and a file held so exclusively that even this
+            // is refused is one that is still being written, so skipping it is
+            // the right answer too.
+            let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
             if metadata.len() == 0 {
@@ -224,7 +241,14 @@ pub(crate) fn walk_intake(root: &Path, extensions: &[String]) -> io::Result<Walk
 /// stability available from stat alone.
 #[derive(Debug, Default)]
 pub struct StabilityTracker {
-    observed: HashMap<PathBuf, (u64, i64)>,
+    observed: HashMap<PathBuf, Observation>,
+}
+
+#[derive(Debug)]
+struct Observation {
+    facts: (u64, i64),
+    /// When this machine first saw the file at all, on its own clock.
+    first_seen_at: i64,
 }
 
 impl StabilityTracker {
@@ -234,15 +258,32 @@ impl StabilityTracker {
 
     /// Records the observation; true when it is unchanged since the previous
     /// scan. A first sighting is always unstable.
-    pub fn observe(&mut self, path: &Path, size: u64, modified_secs: i64) -> bool {
-        match self.observed.get(path) {
-            Some(&previous) if previous == (size, modified_secs) => true,
-            _ => {
-                self.observed
-                    .insert(path.to_path_buf(), (size, modified_secs));
+    pub fn observe(&mut self, path: &Path, size: u64, modified_secs: i64, now: i64) -> bool {
+        match self.observed.get_mut(path) {
+            Some(observation) => {
+                let unchanged = observation.facts == (size, modified_secs);
+                observation.facts = (size, modified_secs);
+                unchanged
+            }
+            None => {
+                self.observed.insert(
+                    path.to_path_buf(),
+                    Observation {
+                        facts: (size, modified_secs),
+                        first_seen_at: now,
+                    },
+                );
                 false
             }
         }
+    }
+
+    /// When this machine first saw the file, which is not the same as the
+    /// timestamp the file carries.
+    pub fn first_seen_at(&self, path: &Path) -> Option<i64> {
+        self.observed
+            .get(path)
+            .map(|observation| observation.first_seen_at)
     }
 
     /// Drops observations for files that vanished so the map cannot grow
@@ -263,6 +304,17 @@ fn supported(path: &Path, extensions: &[String]) -> bool {
 /// A seam, because no test can conjure a real Files On-Demand placeholder.
 pub trait Hydration: Send + Sync {
     fn is_dehydrated(&self, path: &Path) -> bool;
+
+    /// Asks the sync client for a placeholder's content, and reports whether
+    /// the bytes are on this disk afterwards.
+    ///
+    /// A placeholder is only recalled when something opens it, so a claim held
+    /// waiting for content waits for ever unless the scan asks. The default is
+    /// to ask for nothing and simply report what is already there, which is
+    /// the honest answer for anything that is not a sync client.
+    fn hydrate(&self, path: &Path) -> bool {
+        !self.is_dehydrated(path)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -296,6 +348,20 @@ impl Hydration for SystemHydration {
     #[cfg(not(windows))]
     fn is_dehydrated(&self, _path: &Path) -> bool {
         false
+    }
+
+    /// Opening a placeholder is what makes Files On-Demand fetch it; one byte
+    /// is enough to start it and the sync client brings down the whole file.
+    /// That download happens on the scan thread, which is why it is asked for
+    /// only for a document this machine already holds and has already failed
+    /// to read. Offline the open fails quickly and the attributes still say
+    /// the content is in the cloud, which is the answer the caller wants.
+    #[cfg(windows)]
+    fn hydrate(&self, path: &Path) -> bool {
+        use std::io::Read;
+
+        let _ = fs::File::open(path).and_then(|mut file| file.read(&mut [0_u8; 1]));
+        !self.is_dehydrated(path)
     }
 }
 
@@ -390,6 +456,33 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["keep.pdf".to_string()]);
         assert_eq!(walk.unreadable_folders, 0);
+    }
+
+    /// Windows updates a file's directory entry lazily, so the size a listing
+    /// reports for a file that is open for writing is the size it had at the
+    /// last flush. Believing it lets the stability check pass a document the
+    /// sync client is still writing, and the claim key is then computed from a
+    /// torn snapshot that the settled file will never match.
+    #[test]
+    fn a_file_held_open_for_writing_is_not_stable() {
+        use std::{fs::OpenOptions, io::Write};
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("uploading.pdf");
+        fs::write(&path, b"first chunk").unwrap();
+        let settled = walk_intake(temp.path(), &extensions()).unwrap().files[0].size;
+
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(b" and a great deal more, not yet flushed")
+            .unwrap();
+        let growing = walk_intake(temp.path(), &extensions()).unwrap().files[0].size;
+        drop(file);
+
+        assert_ne!(
+            growing, settled,
+            "a file still being written must not look unchanged"
+        );
+        assert_eq!(growing, fs::metadata(&path).unwrap().len());
     }
 
     /// A shared drive grants permissions per folder. One folder this machine

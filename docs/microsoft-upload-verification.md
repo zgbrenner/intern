@@ -95,6 +95,13 @@ protected folder does not become unprotected merely by changing that checkbox.
 Disconnect disables authorization immediately even if credential deletion
 fails. Unknown/missing identity, expired sessions, rejected permissions,
 malformed responses, offline sync, throttling or a changed revision hold files.
+Holding and revoking are not the same thing. A file whose uploader cannot be
+established right now — Microsoft unreachable, throttled, or the audit event
+not delivered yet — is never admitted, but a document already claimed and
+queued keeps its claim and its place in the queue, because every pipeline
+stage authorizes again before it acts. Only a verdict — disconnection, a
+changed account, or an upload that no longer verifies — cancels work in
+flight.
 The existing `.intern` machine claims still coordinate processing but never
 prove a Microsoft uploader. Their sync-based leases are best-effort, not
 an exactly-once guarantee across offline machines.
@@ -115,9 +122,13 @@ event availability of **60 to 90 minutes**, without a guaranteed delivery time.
 Intern leaves a document held until evidence arrives. Searches are bounded to
 32 pending entries, polled no faster than 30 seconds, recreated after ten
 minutes if unresolved, and accepted only with complete pagination (at most
-four pages/1,024 records). Accepted event evidence is cached in memory for
-60 seconds and bound to tenant/item/ETag/path; metadata and local-byte checks
-still run at each authorization boundary. HTTP requests are bounded to ten
+four pages/1,024 records). Accepted event evidence is bound to
+tenant/item/ETag/path and kept in memory for a day, so a document that takes
+longer than a poll interval to extract, analyse and file is not thrown back
+into review by its own later authorization checks; a changed revision has a
+different binding and needs its own evidence, and disconnecting or re-pairing
+discards all of it. Metadata and local-byte checks still run at each
+authorization boundary. HTTP requests are bounded to ten
 seconds and 256 KiB; retries respect throttling. Oversized results remain held.
 The seven-day admission window is this pilot's policy, not a claim about
 Graph audit retention limits.

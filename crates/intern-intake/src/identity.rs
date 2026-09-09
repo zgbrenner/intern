@@ -17,6 +17,11 @@ static ID_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 pub struct MachineIdentity {
     pub id: String,
     pub name: String,
+    /// The machine's actual hostname, which is what a sync client puts into
+    /// the name of a conflict copy. It is kept alongside `name` because `name`
+    /// may be a label a person typed, and a labelled machine that only knew
+    /// its label would never recognise its own conflict copies.
+    pub host_name: String,
     pub user: String,
 }
 
@@ -27,7 +32,8 @@ impl MachineIdentity {
     /// The id must survive renames of the machine or user, so it is random at
     /// birth and durable afterwards; `name` and `user` are cosmetic and
     /// re-resolved on every load. A non-blank `label` overrides the hostname
-    /// as the display name.
+    /// as the display name, but never as `host_name`: the sync client keeps
+    /// naming conflict copies after the host whatever Settings calls it.
     pub fn load_or_create(data_dir: &Path, label: &str) -> io::Result<MachineIdentity> {
         fs::create_dir_all(data_dir)?;
         let path = data_dir.join("machine-id");
@@ -59,6 +65,7 @@ impl MachineIdentity {
         Ok(Self {
             id,
             name: resolve_name(label),
+            host_name: hostname(),
             user: resolve_user(),
         })
     }
