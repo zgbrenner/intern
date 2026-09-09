@@ -810,15 +810,30 @@ impl FileApplier {
                 "destination is occupied",
             ));
         }
+        // The volume check opens the source as well as the destination's
+        // folder, so it meets the same sync-client and indexer holds every
+        // other read of the source does - and it runs before the retried hash,
+        // so a hold landing here used to end the apply on the spot. Waiting one
+        // out costs nothing on the common path, and a hold that outlives the
+        // retries is the source being held: reporting that as an unavailable
+        // destination volume names the wrong file to the person reading it.
         let same_volume = self
-            .filesystem
-            .same_volume(source, destination)
-            .map_err(|_| {
-                InternError::new(
-                    ErrorCode::DestinationUnavailable,
-                    "destination volume is unavailable",
-                )
+            .lock_retry
+            .run(|| self.filesystem.same_volume(source, destination))
+            .map_err(|error| {
+                if is_transient_lock(&error) {
+                    InternError::new(
+                        ErrorCode::SourceLocked,
+                        format!("source is still held by another process ({error})"),
+                    )
+                } else {
+                    InternError::new(
+                        ErrorCode::DestinationUnavailable,
+                        format!("destination volume is unavailable ({error})"),
+                    )
+                }
             })?;
+
         if same_volume {
             let pre_hash = self
                 .lock_retry

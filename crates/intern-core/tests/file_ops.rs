@@ -1220,7 +1220,12 @@ impl FileSystem for SyncLockedFileSystem {
         }
     }
     fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
-        Ok(true)
+        // The volume check opens the source too, so a hold lands on it exactly
+        // as it lands on a hash.
+        match self.take_hold() {
+            Some(error) => Err(error),
+            None => Ok(true),
+        }
     }
     fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
         self.inner.rename_no_replace(source, destination)
@@ -1327,6 +1332,7 @@ fn a_source_the_sync_client_releases_is_applied_rather_than_sent_to_review() {
 
     // Two holds: one spent on the fingerprint, one on the pre-rename hash.
     let filesystem = sync_locked(2);
+
     let (applier, _store, item_id) = applying(&temp, &source, filesystem);
     let applier = applier.with_lock_retry(LockRetry::new(5, Duration::from_millis(1)));
 
@@ -1337,6 +1343,53 @@ fn a_source_the_sync_client_releases_is_applied_rather_than_sent_to_review() {
 
     assert!(destination.exists());
     assert!(!source.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_hold_taken_before_the_volume_check_is_waited_out() {
+    let waited = TempDir::new().unwrap();
+    let source = waited.path().join("statement.pdf");
+    let destination = waited.path().join("2026-04-01 Statement of Work.pdf");
+    write(&source, b"statement bytes");
+
+    // The one hold lands on the volume check: the fingerprint is taken outside
+    // the applier, before anything is holding the file.
+    let fingerprint = StdFileSystem.hash(&source).unwrap();
+    let (applier, _store, item_id) = applying(&waited, &source, sync_locked(1));
+    let applier = applier.with_lock_retry(LockRetry::new(5, Duration::from_millis(1)));
+
+    applier
+        .apply(item_id, &source, &destination, &fingerprint)
+        .unwrap();
+
+    assert!(destination.exists());
+    assert!(!source.exists());
+
+    // A hold that outlives the retries is the source being held, not the
+    // destination's volume being unavailable; the reason a person reads has to
+    // name what actually happened.
+    let held = TempDir::new().unwrap();
+    let held_source = held.path().join("statement.pdf");
+    write(&held_source, b"statement bytes");
+    let held_fingerprint = StdFileSystem.hash(&held_source).unwrap();
+    let (applier, _store, item_id) = applying(&held, &held_source, sync_locked(usize::MAX));
+    let applier = applier.with_lock_retry(LockRetry::immediate());
+
+    let error = applier
+        .apply(
+            item_id,
+            &held_source,
+            &held.path().join("named.pdf"),
+            &held_fingerprint,
+        )
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::SourceLocked);
+    assert!(
+        error.to_string().contains("os error 32"),
+        "expected the OS error to be carried, got: {error}"
+    );
 }
 
 #[cfg(windows)]
