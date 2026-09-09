@@ -434,7 +434,11 @@ otherwise receive in cleartext the key and the document text that plain HTTP
 was allowed for on the grounds that neither leaves the machine. A service on
 the internet is still reached through the proxy. **Test connection** sends the same
 calibration document setup uses to check the local model, so a wrong key,
-model name, or address is found before a real document is sent.
+model name, or address is found before a real document is sent. It sends to
+the address on screen rather than the saved one, so a new address can be
+tried before it is saved — but a key that was already on the machine goes
+only to the address the settings name. Typing the key is what admits a new
+address, and nobody can type a key they do not have.
 
 ### The same document twice
 

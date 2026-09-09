@@ -190,7 +190,7 @@ struct ReconciliationDto {
     error_code: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum SetupStatus {
     Ready,
@@ -213,11 +213,47 @@ pub struct SetupStateDto {
 
 struct TauriPipelineEvents {
     app: AppHandle,
+    /// The queue this reports on. Weak because the queue owns the sink, and
+    /// filled in afterwards because the sink has to exist before the queue
+    /// that holds it does.
+    pipeline: std::sync::OnceLock<std::sync::Weak<Pipeline>>,
+}
+
+impl TauriPipelineEvents {
+    fn new(app: AppHandle) -> Self {
+        Self {
+            app,
+            pipeline: std::sync::OnceLock::new(),
+        }
+    }
+
+    fn watch(&self, pipeline: &Arc<Pipeline>) {
+        let _ = self.pipeline.set(Arc::downgrade(pipeline));
+    }
+
+    fn paused(&self) -> bool {
+        self.pipeline
+            .get()
+            .and_then(std::sync::Weak::upgrade)
+            .is_some_and(|pipeline| pipeline.is_paused())
+    }
+}
+
+/// What a queue-change event carries.
+///
+/// The queue pauses itself - a hosted model that refuses the key, a shared
+/// lease that cannot be taken - and the window only heard "something
+/// changed", so it went on offering to pause a queue that had already
+/// stopped. Every change now says which it is.
+fn queue_changed_payload(paused: bool) -> serde_json::Value {
+    serde_json::json!({ "paused": paused })
 }
 
 impl PipelineEventSink for TauriPipelineEvents {
     fn queue_changed(&self) {
-        let _ = self.app.emit("queue://changed", serde_json::json!({}));
+        let _ = self
+            .app
+            .emit("queue://changed", queue_changed_payload(self.paused()));
     }
     fn progress(&self, progress: PipelineProgress) {
         let _ = self.app.emit("queue://progress", progress);
@@ -510,15 +546,52 @@ impl SetupManager {
         self.start_operation(SetupSource::Existing(selection))
     }
 
+    /// Starts and verifies a model that is already installed, on the setup
+    /// thread.
+    ///
+    /// Verification loads 1.19 GiB into llama-server, waits for it to answer
+    /// its health check, and runs a real inference through it. Launch used to
+    /// do that inline in Tauri's setup hook, which runs before the window
+    /// paints, so Intern opened as an unresponsive white rectangle for as long
+    /// as the machine took - and for the full three minutes the health check
+    /// allows when the server was slow to answer. It runs behind the window
+    /// instead, and reports where it ended on `setup://progress` like any
+    /// other setup operation.
+    fn verify_installed(self: &Arc<Self>) {
+        if let Err(error) = self.start_operation(SetupSource::Installed) {
+            eprintln!(
+                "intern: the installed local model could not be verified: {}",
+                error.code
+            );
+        }
+    }
+
+    /// Holds the queue without changing what the interface shows. The model
+    /// is installed and the window may open on the queue, but no document may
+    /// meet a server that has not finished loading - `RuntimeModel::analyze`
+    /// would fail it outright with MODEL_NOT_READY.
+    fn hold_local_model(&self) {
+        self.local_ready.store(false, Ordering::SeqCst);
+        self.refresh_ready();
+    }
+
     fn start_operation(self: &Arc<Self>, source: SetupSource) -> Result<(), CommandError> {
         let completed = self.get()?.downloaded_bytes;
         let cancellation = self.operation.begin()?;
-        self.set_state(SetupStatus::Downloading, completed, None);
+        match setup_progress_status(&source) {
+            Some(status) => self.set_state(status, completed, None),
+            None => self.hold_local_model(),
+        }
         let manager = Arc::clone(self);
         std::thread::Builder::new()
             .name("intern-model-setup".into())
             .spawn(move || {
                 let result = manager.install_and_start(source, &cancellation);
+                // The outcome is settled the moment the work returns, so a
+                // cancel racing the last few instructions of a successful
+                // setup cannot stop the model that was just started and
+                // verified.
+                manager.operation.settle();
                 let final_state = match result {
                     Ok(total) => (SetupStatus::Ready, total, None),
                     Err(error) if error.code == "MODEL_DOWNLOAD_CANCELED" => {
@@ -572,6 +645,7 @@ impl SetupManager {
         let manifest = ModelManifest::embedded()?;
         let total = manifest.total_bytes();
         match source {
+            SetupSource::Installed => {}
             SetupSource::Download => {
                 let downloader = Downloader::new(ReqwestHttpTransport::new()?, SystemDiskSpace);
                 let mut completed_before = 0;
@@ -637,6 +711,23 @@ fn model_ready(local_ready: bool, hosted_active: bool) -> bool {
 enum SetupSource {
     Download,
     Existing(ExistingModelSelection),
+    /// A model that was already installed when Intern launched, which needs
+    /// only to be started and verified.
+    Installed,
+}
+
+/// The status to show while a setup operation runs, or `None` to leave the
+/// interface saying what it already says.
+///
+/// A download or an install has bytes to move and no model to run, so the
+/// setup screen takes the window. Verifying a model that is already installed
+/// is not a download and must not look like one: the screen would offer to
+/// fetch 1.19 GiB that is already on disk.
+fn setup_progress_status(source: &SetupSource) -> Option<SetupStatus> {
+    match source {
+        SetupSource::Download | SetupSource::Existing(_) => Some(SetupStatus::Downloading),
+        SetupSource::Installed => None,
+    }
 }
 
 fn setup_canceled_error() -> CommandError {
@@ -796,11 +887,8 @@ impl AppState {
             Arc::clone(&runtime),
             &manifest,
         ));
-        if runtime.installed(&manifest)
-            && let Err(error) = runtime.start_verified(&manifest, &CancellationToken::new())
-        {
-            let installed_bytes = manifest.total_bytes();
-            setup.set_state(SetupStatus::Failed, installed_bytes, Some(error.code));
+        if runtime.installed(&manifest) {
+            setup.verify_installed();
         }
         let settings = SettingsStore::new(data.join("settings.json"));
         let worker_temp_root = data.join("worker-temp");
@@ -828,6 +916,7 @@ impl AppState {
             Arc::clone(&hosted),
             settings.clone(),
         ));
+        let events = Arc::new(TauriPipelineEvents::new(app.clone()));
         let pipeline = Arc::new(
             Pipeline::with_local_files(
                 data.join("queue.sqlite3"),
@@ -836,7 +925,7 @@ impl AppState {
                     worker_temp_root,
                 )),
                 model,
-                Arc::new(TauriPipelineEvents { app: app.clone() }),
+                events.clone(),
                 settings.clone(),
             )?
             .with_filing_sink(Arc::new(FilingSinks(vec![
@@ -847,6 +936,7 @@ impl AppState {
             .with_duplicate_oracle(filed_index.clone())
             .with_admission_guard(microsoft),
         );
+        events.watch(&pipeline);
         pipeline.recover()?;
         // Opened after the pipeline so the pipeline's own store has already
         // migrated the schema this connection reads.
@@ -1021,6 +1111,26 @@ impl AppState {
     }
 }
 
+/// What a second launch of Intern does.
+///
+/// Intern is one process per machine: a second one would start a second local
+/// model, a second intake watcher, and a second tray against the same queue
+/// database, and a sign-in autostart launch followed by a click on the
+/// shortcut is an ordinary way to end up with both. The single-instance
+/// plugin ends the second process and hands its command line here instead.
+pub fn second_instance_launched(app: &AppHandle, arguments: Vec<String>, _directory: String) {
+    if second_launch_shows_window(&arguments) {
+        crate::tray::show_main_window(app);
+    }
+}
+
+/// Whether a second launch means "show me the window". Someone who clicked
+/// the icon, the shortcut, or a document wants it; a sign-in autostart launch
+/// asked for the tray and must not take the window from whatever is using it.
+fn second_launch_shows_window(arguments: &[String]) -> bool {
+    !arguments.iter().any(|argument| argument == "--minimized")
+}
+
 /// The explicit quit path, used by the tray's "Quit Intern" item: shut the
 /// pipeline (and with it the local model process) down deliberately, then
 /// leave without starting window teardown - the same shape as the close-time
@@ -1040,6 +1150,21 @@ pub(crate) fn shutdown_runtime(app: &AppHandle) {
     }
 }
 
+/// A background task that panicked, or was dropped before it finished.
+///
+/// Nothing the user asked for was refused here, so this must not borrow
+/// another failure's reason: reporting a panic as an unverified Microsoft
+/// upload sent people to Settings to repair a connection that was working.
+/// The panic message itself goes nowhere in a windowed build, so the task
+/// that died is named on stderr as well as in the error.
+fn background_task_failed(task: &str) -> CommandError {
+    eprintln!("intern: the {task} background task did not finish");
+    CommandError {
+        code: "INTERNAL_ERROR".into(),
+        message: format!("{task} could not finish because of an internal error"),
+    }
+}
+
 fn intake_state_conflict() -> CommandError {
     CommandError {
         code: "STATE_CONFLICT".into(),
@@ -1047,15 +1172,26 @@ fn intake_state_conflict() -> CommandError {
     }
 }
 
+/// The queue as the window shows it.
+///
+/// Blocking: every reviewable item is stat'd for its last-modified date, and
+/// the documents can be on a network share, so the listing runs off the
+/// thread WebView2 delivers invokes on.
 #[tauri::command]
-pub fn queue_list(state: State<'_, AppState>) -> Result<Vec<QueueItemDto>, CommandError> {
-    let items = state.pipeline.list()?;
-    // The window asks for the list on every queue change, which makes this
-    // the one place that always knows the current counts - so the tray's
-    // tooltip is kept here rather than on a second event path.
-    let (needs_review, ready) = attention_counts(&items);
-    crate::tray::update_tooltip(&state.app, needs_review, ready);
-    items.into_iter().map(queue_item_dto).collect()
+pub async fn queue_list(state: State<'_, AppState>) -> Result<Vec<QueueItemDto>, CommandError> {
+    let app = state.app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let items = state.pipeline.list()?;
+        // The window asks for the list on every queue change, which makes this
+        // the one place that always knows the current counts - so the tray's
+        // tooltip is kept here rather than on a second event path.
+        let (needs_review, ready) = attention_counts(&items);
+        crate::tray::update_tooltip(&app, needs_review, ready);
+        items.into_iter().map(queue_item_dto).collect()
+    })
+    .await
+    .map_err(|_| background_task_failed("queue listing"))?
 }
 
 /// How many items wait on a person: those needing review, and those ready
@@ -1087,10 +1223,7 @@ pub async fn queue_add_files(
         Ok(())
     })
     .await
-    .map_err(|_| CommandError {
-        code: "UPLOADER_UNVERIFIED".into(),
-        message: "File intake could not complete verification.".into(),
-    })??;
+    .map_err(|_| background_task_failed("file intake"))??;
     state.schedule()
 }
 
@@ -1107,10 +1240,7 @@ pub async fn queue_add_folder(
         Ok(())
     })
     .await
-    .map_err(|_| CommandError {
-        code: "UPLOADER_UNVERIFIED".into(),
-        message: "Folder intake could not complete verification.".into(),
-    })??;
+    .map_err(|_| background_task_failed("folder intake"))??;
     state.schedule()
 }
 
@@ -1132,9 +1262,18 @@ pub fn queue_resume(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.schedule()
 }
 
+/// Stops the document being analysed.
+///
+/// Blocking: cancelling the local model kills llama-server and starts it
+/// again, which reloads 1.19 GiB and waits for the new process to answer, so
+/// this cannot run on the thread WebView2 delivers invokes on.
 #[tauri::command]
-pub fn queue_cancel(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    state.pipeline.cancel(parse_item_id(&id)?)?;
+pub async fn queue_cancel(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    let pipeline = Arc::clone(&state.pipeline);
+    let id = parse_item_id(&id)?;
+    tauri::async_runtime::spawn_blocking(move || pipeline.cancel(id))
+        .await
+        .map_err(|_| background_task_failed("cancel"))??;
     Ok(())
 }
 
@@ -1161,10 +1300,7 @@ pub async fn proposal_approve(
     let id = parse_item_id(&id)?;
     tauri::async_runtime::spawn_blocking(move || pipeline.approve(id, &filename, &description))
         .await
-        .map_err(|_| CommandError {
-            code: "UPLOADER_UNVERIFIED".into(),
-            message: "Rename authorization could not complete.".into(),
-        })??;
+        .map_err(|_| background_task_failed("rename"))??;
     Ok(())
 }
 
@@ -1226,13 +1362,28 @@ fn display_folder(folder: &str) -> String {
     }
 }
 
+/// Saves the settings.
+///
+/// Blocking: the folders are canonicalized, which reaches whatever they live
+/// on and can be an unreachable network share, and a changed intake folder
+/// restarts the watcher, which joins its scan thread. None of that may happen
+/// on the thread WebView2 delivers invokes on.
 #[tauri::command]
-pub fn settings_save(
-    mut settings: AppSettings,
+pub async fn settings_save(
+    settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
+    let app = state.app.clone();
+    tauri::async_runtime::spawn_blocking(move || save_settings(&app.state::<AppState>(), settings))
+        .await
+        .map_err(|_| background_task_failed("settings save"))?
+}
+
+fn save_settings(state: &AppState, mut settings: AppSettings) -> Result<(), CommandError> {
     let previous = state.settings.load().unwrap_or_default();
-    validate_intake_settings(&mut settings, &|path| canonical_folder(path).ok())?;
+    validate_intake_settings(&mut settings, &previous.intake_folder, &|path| {
+        canonical_folder(path).ok()
+    })?;
     // With intake enabled the destination was already canonicalized (with the
     // intake-specific error code); otherwise keep the original behavior.
     if !settings.intake_enabled && !settings.destination.trim().is_empty() {
@@ -1248,12 +1399,6 @@ pub fn settings_save(
     if settings.model_source == ModelSource::Hosted {
         state.hosted.config(&settings)?;
     }
-    // Applied before anything persists so an operating system that refuses
-    // the login entry leaves the stored settings unchanged - the dialog shows
-    // the error against a state that is still true.
-    if previous.start_at_login != settings.start_at_login {
-        apply_autostart(&state.app, settings.start_at_login)?;
-    }
     state
         .app
         .state::<Arc<crate::microsoft_intake::MicrosoftIntake>>()
@@ -1262,7 +1407,12 @@ pub fn settings_save(
             code: "UPLOADER_UNVERIFIED".into(),
             message,
         })?;
-    state.settings.save(&settings)?;
+    save_settings_and_autostart(
+        &previous,
+        &settings,
+        |settings| state.settings.save(settings).map_err(CommandError::from),
+        |enabled| apply_autostart(&state.app, enabled),
+    )?;
     state.refresh_hosted_active(&settings);
     if previous.model_source != settings.model_source {
         state.schedule()?;
@@ -1286,6 +1436,32 @@ pub fn settings_save(
     {
         state.restart_intake(&settings)?;
         state.emit_intake_changed()?;
+    }
+    Ok(())
+}
+
+/// Stores the settings and brings the operating system's login entry into
+/// line with them.
+///
+/// The order matters in both directions. Toggling the entry first left it
+/// changed when the save that followed failed, so the login entry and the
+/// settings disagreed with nothing on screen to say so. Saving first and
+/// putting the previous settings back when registration is refused keeps the
+/// older promise as well - a refused login entry leaves the stored settings
+/// unchanged - and the refusal is what the dialog reports, because it is the
+/// thing that went wrong.
+fn save_settings_and_autostart(
+    previous: &AppSettings,
+    settings: &AppSettings,
+    save: impl Fn(&AppSettings) -> Result<(), CommandError>,
+    autostart: impl Fn(bool) -> Result<(), CommandError>,
+) -> Result<(), CommandError> {
+    save(settings)?;
+    if previous.start_at_login != settings.start_at_login
+        && let Err(error) = autostart(settings.start_at_login)
+    {
+        let _ = save(previous);
+        return Err(error);
     }
     Ok(())
 }
@@ -1319,9 +1495,11 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), CommandError> {
 /// reappears as new), so intake enabled requires a real destination outside
 /// the intake folder. Canonical forms are written back so later comparisons
 /// and the containment check are component-wise, never string-prefix.
-/// `canonicalize` is `canonical_folder` in production and a seam for tests.
+/// `canonicalize` is `canonical_folder` in production and a seam for tests;
+/// `stored` is the intake folder as it is saved now.
 fn validate_intake_settings(
     settings: &mut AppSettings,
+    stored: &str,
     canonicalize: &dyn Fn(&Path) -> Option<PathBuf>,
 ) -> Result<(), CommandError> {
     if settings.intake_folder.trim().is_empty() {
@@ -1332,13 +1510,22 @@ fn validate_intake_settings(
             });
         }
     } else {
-        settings.intake_folder = canonicalize(Path::new(&settings.intake_folder))
-            .ok_or_else(|| CommandError {
-                code: "INTAKE_FOLDER_MISSING".into(),
-                message: "the intake folder does not exist".into(),
-            })?
-            .to_string_lossy()
-            .into_owned();
+        settings.intake_folder = match canonicalize(Path::new(&settings.intake_folder)) {
+            Some(folder) => folder.to_string_lossy().into_owned(),
+            None if settings.intake_enabled => {
+                return Err(CommandError {
+                    code: "INTAKE_FOLDER_MISSING".into(),
+                    message: "the intake folder does not exist".into(),
+                });
+            }
+            // Intake is off, so nothing is read from this folder: an offline
+            // network share must not refuse a save that has nothing to do
+            // with it. The spelling already stored is kept, so it is still
+            // canonical when intake is turned back on - and when nothing is
+            // stored yet, what the person chose is kept rather than cleared.
+            None if !stored.trim().is_empty() => stored.to_owned(),
+            None => settings.intake_folder.clone(),
+        };
     }
     if !settings.intake_enabled {
         return Ok(());
@@ -1413,11 +1600,15 @@ pub fn hosted_model_clear_key(state: State<'_, AppState>) -> Result<(), CommandE
 /// `settings` - the dialog's draft, so what is tested is what is on screen -
 /// with the stored key.
 #[tauri::command]
-pub fn hosted_model_test(
+pub async fn hosted_model_test(
     settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<HostedModelTestDto, CommandError> {
-    state.hosted.test(&settings)
+    let hosted = Arc::clone(&state.hosted);
+    let saved = state.settings.load().unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || hosted.test(&settings, &saved))
+        .await
+        .map_err(|_| background_task_failed("hosted model test"))?
 }
 
 /// The OneDrive accounts and SharePoint libraries the sync client keeps on
@@ -1588,16 +1779,17 @@ pub fn history_list(state: State<'_, AppState>) -> Result<Vec<HistoryEntryDto>, 
         .collect())
 }
 
-/// Writes the rename history to `path` as RFC 4180 CSV and reports how many
-/// operations were written.
+/// Where the history CSV may be written.
 ///
 /// The path comes from the native save dialog, so it is expected to be
-/// absolute with an existing parent folder; anything else is refused before a
-/// byte is written rather than being resolved against whatever the process's
-/// working directory happens to be.
-#[tauri::command]
-pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize, CommandError> {
-    let destination = Path::new(&path);
+/// absolute, in a folder that exists, and named the way the dialog's own
+/// filter names it. Anything else is refused before a byte is written rather
+/// than being resolved against whatever the process's working directory
+/// happens to be - and the extension matters because the window is what
+/// chooses the path, so this is the only thing standing between a page that
+/// should not be there and a file elsewhere on the machine being overwritten.
+fn history_export_destination(path: &str) -> Result<&Path, CommandError> {
+    let destination = Path::new(path);
     if !destination.is_absolute() {
         return Err(history_export_failed("the export path must be absolute"));
     }
@@ -1608,6 +1800,20 @@ pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize,
     if !parent.is_dir() {
         return Err(history_export_failed("the export folder does not exist"));
     }
+    if destination
+        .extension()
+        .is_none_or(|extension| !extension.eq_ignore_ascii_case("csv"))
+    {
+        return Err(history_export_failed("the export must be a CSV file"));
+    }
+    Ok(destination)
+}
+
+/// Writes the rename history to `path` as RFC 4180 CSV and reports how many
+/// operations were written.
+#[tauri::command]
+pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize, CommandError> {
+    let destination = history_export_destination(&path)?;
     let entries = state
         .history
         .list_operation_history(HISTORY_LIMIT)
@@ -1807,7 +2013,9 @@ mod intake_tests {
     use intern_intake::{CloudProviderKind, DoneOutcome, ItemState, MachineIdentity};
     use intern_queue::AppSettings;
 
-    use super::{validate_description_settings, validate_intake_settings};
+    use super::{
+        save_settings_and_autostart, validate_description_settings, validate_intake_settings,
+    };
     use crate::intake::{CloudProviderDto, item_fate, presence_active, status_dto};
 
     /// A fake folder canonicalizer: pairs of (as-entered, canonical form).
@@ -1840,12 +2048,12 @@ mod intake_tests {
         let fs = canonicalizer(&[("/out", "/out")]);
         let mut blank = settings(true, "  ", "/out");
         assert_eq!(
-            error_code(validate_intake_settings(&mut blank, &fs)),
+            error_code(validate_intake_settings(&mut blank, "", &fs)),
             "INTAKE_FOLDER_MISSING"
         );
         let mut missing = settings(true, "/gone", "/out");
         assert_eq!(
-            error_code(validate_intake_settings(&mut missing, &fs)),
+            error_code(validate_intake_settings(&mut missing, "", &fs)),
             "INTAKE_FOLDER_MISSING"
         );
     }
@@ -1869,12 +2077,12 @@ mod intake_tests {
         let fs = canonicalizer(&[("/in", "/in")]);
         let mut blank = settings(true, "/in", "");
         assert_eq!(
-            error_code(validate_intake_settings(&mut blank, &fs)),
+            error_code(validate_intake_settings(&mut blank, "", &fs)),
             "INTAKE_NEEDS_DESTINATION"
         );
         let mut missing = settings(true, "/in", "/gone");
         assert_eq!(
-            error_code(validate_intake_settings(&mut missing, &fs)),
+            error_code(validate_intake_settings(&mut missing, "", &fs)),
             "INTAKE_NEEDS_DESTINATION"
         );
     }
@@ -1889,19 +2097,19 @@ mod intake_tests {
         ]);
         let mut equal = settings(true, "/a/b", "/a/b");
         assert_eq!(
-            error_code(validate_intake_settings(&mut equal, &fs)),
+            error_code(validate_intake_settings(&mut equal, "", &fs)),
             "DESTINATION_INSIDE_INTAKE"
         );
         let mut inside = settings(true, "/a/b", "/a/b/c");
         assert_eq!(
-            error_code(validate_intake_settings(&mut inside, &fs)),
+            error_code(validate_intake_settings(&mut inside, "", &fs)),
             "DESTINATION_INSIDE_INTAKE"
         );
         // `/a/bc` shares the string prefix `/a/b` but is a sibling, not a child.
         let mut sibling = settings(true, "/a/b", "/a/bc");
-        assert!(validate_intake_settings(&mut sibling, &fs).is_ok());
+        assert!(validate_intake_settings(&mut sibling, "", &fs).is_ok());
         let mut outside = settings(true, "/a/b", "/a/other");
-        assert!(validate_intake_settings(&mut outside, &fs).is_ok());
+        assert!(validate_intake_settings(&mut outside, "", &fs).is_ok());
     }
 
     #[test]
@@ -1911,19 +2119,118 @@ mod intake_tests {
             ("/out-entered", "/out/canonical"),
         ]);
         let mut enabled = settings(true, "/in-entered", "/out-entered");
-        validate_intake_settings(&mut enabled, &fs).expect("valid settings");
+        validate_intake_settings(&mut enabled, "", &fs).expect("valid settings");
         assert_eq!(enabled.intake_folder, "/in/canonical");
         assert_eq!(enabled.destination, "/out/canonical");
-        // A non-blank intake folder is canonicalized even while disabled; a
-        // missing one is an error, matching destination handling.
+        // A non-blank intake folder is canonicalized even while disabled, so
+        // the stored form stays the one every later comparison uses.
         let mut disabled = settings(false, "/in-entered", "");
-        validate_intake_settings(&mut disabled, &fs).expect("valid settings");
+        validate_intake_settings(&mut disabled, "", &fs).expect("valid settings");
         assert_eq!(disabled.intake_folder, "/in/canonical");
-        let mut disabled_missing = settings(false, "/gone", "");
+    }
+
+    #[test]
+    fn an_unreachable_intake_folder_does_not_refuse_a_save_that_leaves_intake_off() {
+        let fs = canonicalizer(&[("/out-entered", "/out/canonical")]);
+        // An offline network share cannot be canonicalized. Nothing is being
+        // read from it while intake is off, so a save that has nothing to do
+        // with intake must go through, and the folder keeps the spelling
+        // already stored - still canonical for when intake is turned back on.
+        let mut disabled = settings(false, "//server/share", "");
+        validate_intake_settings(&mut disabled, "/in/canonical", &fs).expect("valid settings");
+        assert_eq!(disabled.intake_folder, "/in/canonical");
+        // With nothing stored yet, what the person chose is kept rather than
+        // silently cleared.
+        let mut fresh = settings(false, "//server/share", "");
+        validate_intake_settings(&mut fresh, "", &fs).expect("valid settings");
+        assert_eq!(fresh.intake_folder, "//server/share");
+        // Turning intake on is still refused: that folder would be watched.
+        let mut enabled = settings(true, "//server/share", "/out-entered");
         assert_eq!(
-            error_code(validate_intake_settings(&mut disabled_missing, &fs)),
+            error_code(validate_intake_settings(&mut enabled, "/in/canonical", &fs)),
             "INTAKE_FOLDER_MISSING"
         );
+    }
+
+    fn login(previous: bool, next: bool) -> (AppSettings, AppSettings) {
+        (
+            AppSettings {
+                start_at_login: previous,
+                ..AppSettings::default()
+            },
+            AppSettings {
+                start_at_login: next,
+                ..AppSettings::default()
+            },
+        )
+    }
+
+    fn failure(code: &str) -> super::CommandError {
+        super::CommandError {
+            code: code.into(),
+            message: "no".into(),
+        }
+    }
+
+    #[test]
+    fn autostart_is_untouched_when_the_save_fails() {
+        let (previous, next) = login(false, true);
+        let toggles = std::cell::Cell::new(0);
+        let error = save_settings_and_autostart(
+            &previous,
+            &next,
+            |_| Err(failure("SETTINGS_WRITE_FAILED")),
+            |_| {
+                toggles.set(toggles.get() + 1);
+                Ok(())
+            },
+        )
+        .expect_err("a save that fails is an error");
+        assert_eq!(error.code, "SETTINGS_WRITE_FAILED");
+        assert_eq!(
+            toggles.get(),
+            0,
+            "the login entry must not be changed for settings that were never stored"
+        );
+    }
+
+    #[test]
+    fn a_refused_login_entry_leaves_the_stored_settings_unchanged() {
+        let (previous, next) = login(false, true);
+        let stored = std::cell::RefCell::new(Vec::new());
+        let error = save_settings_and_autostart(
+            &previous,
+            &next,
+            |settings: &AppSettings| {
+                stored.borrow_mut().push(settings.start_at_login);
+                Ok(())
+            },
+            |_| Err(failure("AUTOSTART_FAILED")),
+        )
+        .expect_err("a refused login entry is an error");
+        assert_eq!(error.code, "AUTOSTART_FAILED");
+        assert_eq!(
+            *stored.borrow(),
+            vec![true, false],
+            "the saved settings are rolled back to what is actually true"
+        );
+    }
+
+    #[test]
+    fn a_save_that_does_not_change_the_login_entry_never_touches_it() {
+        let (previous, next) = login(true, true);
+        let toggles = std::cell::Cell::new(0);
+        save_settings_and_autostart(
+            &previous,
+            &next,
+            |_| Ok(()),
+            |_| {
+                toggles.set(toggles.get() + 1);
+                Ok(())
+            },
+        )
+        .expect("a save with no login change succeeds");
+        assert_eq!(toggles.get(), 0);
     }
 
     fn receipt(
@@ -2097,6 +2404,119 @@ mod intake_tests {
 }
 
 #[cfg(test)]
+mod second_instance_tests {
+    use super::second_launch_shows_window;
+
+    #[test]
+    fn a_second_launch_opens_the_window_unless_it_asked_for_the_tray() {
+        assert!(second_launch_shows_window(&["intern.exe".to_owned()]));
+        assert!(second_launch_shows_window(&[
+            "intern.exe".to_owned(),
+            "C:/drop/scan.pdf".to_owned()
+        ]));
+        // A sign-in autostart launch asked for the tray, so it must not take
+        // the window from whatever is already using it.
+        assert!(!second_launch_shows_window(&[
+            "intern.exe".to_owned(),
+            "--minimized".to_owned()
+        ]));
+    }
+}
+
+#[cfg(test)]
+mod queue_event_tests {
+    use super::queue_changed_payload;
+
+    #[test]
+    fn a_queue_change_says_whether_the_queue_is_paused() {
+        assert_eq!(
+            queue_changed_payload(true),
+            serde_json::json!({ "paused": true })
+        );
+        assert_eq!(
+            queue_changed_payload(false),
+            serde_json::json!({ "paused": false })
+        );
+    }
+}
+
+#[cfg(test)]
+mod ipc_thread_tests {
+    use super::{hosted_model_test, queue_cancel, queue_list, settings_save};
+
+    /// Accepts a command only if calling it returns a future. WebView2
+    /// delivers every invoke on one thread, so a command whose body blocks
+    /// there freezes the whole window while it runs.
+    fn leaves_the_ipc_thread<A, R: std::future::Future, F: FnOnce(A) -> R>(_: F) {}
+    fn leaves_the_ipc_thread_2<A, B, R: std::future::Future, F: FnOnce(A, B) -> R>(_: F) {}
+
+    #[test]
+    fn commands_that_can_block_for_seconds_do_not_run_on_the_ipc_thread() {
+        // Reloads the 1.2 GiB model and waits for it to answer.
+        leaves_the_ipc_thread_2(queue_cancel);
+        // Sends the calibration document to a hosted service, which can take
+        // three minutes to decide it cannot be reached.
+        leaves_the_ipc_thread_2(hosted_model_test);
+        // Canonicalizes folders, which reaches a network share, and restarts
+        // the intake watcher, which joins its scan thread.
+        leaves_the_ipc_thread_2(settings_save);
+        // One file stat per reviewable item, on whatever the documents live on.
+        leaves_the_ipc_thread(queue_list);
+    }
+}
+
+#[cfg(test)]
+mod setup_source_tests {
+    use std::path::PathBuf;
+
+    use intern_engine::setup::ExistingModelSelection;
+
+    use super::{SetupSource, SetupStatus, setup_progress_status};
+
+    #[test]
+    fn verifying_an_installed_model_does_not_take_over_the_window() {
+        // A download or an install has files to fetch and a model that cannot
+        // answer yet, so the setup screen takes the window.
+        assert_eq!(
+            setup_progress_status(&SetupSource::Download),
+            Some(SetupStatus::Downloading)
+        );
+        assert_eq!(
+            setup_progress_status(&SetupSource::Existing(ExistingModelSelection {
+                model_path: PathBuf::from("C:/models/model.gguf"),
+            })),
+            Some(SetupStatus::Downloading)
+        );
+        // A model that was already installed when Intern launched is only
+        // being verified. The interface goes on saying what is true - it is
+        // installed - and the window opens on the queue instead of on a
+        // download screen for a download that is not happening.
+        assert_eq!(setup_progress_status(&SetupSource::Installed), None);
+    }
+}
+
+#[cfg(test)]
+mod background_task_tests {
+    use super::background_task_failed;
+
+    #[test]
+    fn a_panic_during_intake_is_not_reported_as_an_uploader_failure() {
+        let error = tauri::async_runtime::block_on(async {
+            tauri::async_runtime::spawn_blocking(|| panic!("the background task died"))
+                .await
+                .map_err(|_| background_task_failed("file intake"))
+                .expect_err("a panicking task must not report success")
+        });
+        assert_eq!(error.code, "INTERNAL_ERROR");
+        assert!(
+            error.message.contains("file intake"),
+            "the message must name the task that failed: {}",
+            error.message
+        );
+    }
+}
+
+#[cfg(test)]
 mod scheduler_tests {
     use super::{ExistingModelFilesDto, scheduler_actions};
 
@@ -2155,6 +2575,40 @@ mod history_tests {
             original_path: PathBuf::from(original),
             new_path: PathBuf::from(new),
         }
+    }
+
+    #[test]
+    fn the_history_export_refuses_a_path_the_save_dialog_would_not_produce() {
+        use super::history_export_destination;
+        let message = |path: &std::path::Path| {
+            history_export_destination(&path.to_string_lossy())
+                .expect_err("refused")
+                .message
+        };
+        let folder = std::env::temp_dir();
+        assert!(
+            history_export_destination(&folder.join("intern-history.csv").to_string_lossy())
+                .is_ok()
+        );
+        assert!(
+            history_export_destination(&folder.join("INTERN-HISTORY.CSV").to_string_lossy())
+                .is_ok()
+        );
+        // The dialog offers one extension. Anything else is the window
+        // steering Intern into overwriting something it has no business
+        // writing to.
+        assert!(message(&folder.join("hosts")).contains("CSV"));
+        assert!(message(&folder.join("intern-history.csv.exe")).contains("CSV"));
+        assert!(
+            history_export_destination("intern-history.csv")
+                .expect_err("refused")
+                .message
+                .contains("absolute")
+        );
+        assert!(
+            message(&folder.join("no-such-folder").join("intern-history.csv"))
+                .contains("folder does not exist")
+        );
     }
 
     #[test]

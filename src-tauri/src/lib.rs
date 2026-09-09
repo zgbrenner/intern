@@ -11,6 +11,13 @@ pub mod tray;
 
 pub fn run() {
     tauri::Builder::default()
+        // One Intern per machine, and registered first as the plugin
+        // requires. Autostart at sign-in followed by a click on the shortcut
+        // otherwise runs two local models, two intake watchers, and two trays
+        // against one queue database.
+        .plugin(tauri_plugin_single_instance::init(
+            commands::second_instance_launched,
+        ))
         .plugin(tauri_plugin_dialog::init())
         // Opens the published user guide in the system browser. A webview
         // <a target="_blank"> has nowhere to go inside Tauri, and the scope in
