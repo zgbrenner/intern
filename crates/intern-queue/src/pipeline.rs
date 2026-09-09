@@ -1639,12 +1639,9 @@ impl Pipeline {
             .find(|item| item.id == id)
             .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
         if item.status == QueueStatus::NeedsReview
-            && item.error_code == Some(ErrorCode::SourceDeleteFailed)
+            && let Some(error) = unsettled_files(&item)
         {
-            return Err(PipelineError::new(
-                "RECONCILIATION_REQUIRED",
-                "retry the verified source deletion or resolve the files manually",
-            ));
+            return Err(error);
         }
         match item.status {
             QueueStatus::Queued
@@ -1759,11 +1756,8 @@ impl Pipeline {
             .into_iter()
             .find(|item| item.id == id)
             .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
-        if item.error_code == Some(ErrorCode::SourceDeleteFailed) {
-            return Err(PipelineError::new(
-                "RECONCILIATION_REQUIRED",
-                "retry the verified source deletion or resolve the files manually",
-            ));
+        if let Some(error) = unsettled_files(&item) {
+            return Err(error);
         }
         let source_extension = item
             .source_path
@@ -1828,11 +1822,8 @@ impl Pipeline {
             .into_iter()
             .find(|item| item.id == id)
             .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
-        if item.error_code == Some(ErrorCode::SourceDeleteFailed) {
-            return Err(PipelineError::new(
-                "RECONCILIATION_REQUIRED",
-                "retry the verified source deletion or resolve the files manually",
-            ));
+        if let Some(error) = unsettled_files(&item) {
+            return Err(error);
         }
         self.store.complete_keep_original(id, item.status)?;
         self.events.queue_changed();
@@ -1890,12 +1881,9 @@ impl Pipeline {
             .find(|item| item.id == id)
             .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
         if item.status == QueueStatus::NeedsReview
-            && item.error_code == Some(ErrorCode::SourceDeleteFailed)
+            && let Some(error) = unsettled_files(&item)
         {
-            return Err(PipelineError::new(
-                "RECONCILIATION_REQUIRED",
-                "retry the verified source deletion or resolve the files manually",
-            ));
+            return Err(error);
         }
         Ok(())
     }
@@ -1941,6 +1929,28 @@ impl Pipeline {
         }
         self.events.queue_changed();
         Ok(())
+    }
+}
+
+/// Why an item's files must be settled before anything else moves them, or
+/// `None` when nothing is outstanding.
+///
+/// Both codes mean two files are on disk where one document should be: a
+/// verified copy whose original could not be deleted, and a reconciliation
+/// that could not tell which of the two the document is. Renaming, cancelling
+/// or removing such an item would decide that on the person's behalf, so each
+/// of those refuses and says which question is open.
+fn unsettled_files(item: &QueueItem) -> Option<PipelineError> {
+    match item.error_code {
+        Some(ErrorCode::SourceDeleteFailed) => Some(PipelineError::new(
+            "RECONCILIATION_REQUIRED",
+            "retry the verified source deletion or resolve the files manually",
+        )),
+        Some(ErrorCode::ReconciliationRequired) => Some(PipelineError::new(
+            "RECONCILIATION_REQUIRED",
+            "reconciliation could not tell which file is the document; compare both names",
+        )),
+        _ => None,
     }
 }
 

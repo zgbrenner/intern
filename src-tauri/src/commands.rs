@@ -2358,6 +2358,7 @@ mod intake_tests {
         let identity = MachineIdentity {
             id: "0123456789abcdef0123456789abcdef".into(),
             name: "Front desk".into(),
+            host_name: "DESKTOP-A1B2C3".into(),
             user: "pat".into(),
         };
         let dto = status_dto(false, &identity, "", None, None, 1_755_850_000);

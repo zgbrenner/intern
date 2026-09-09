@@ -24,6 +24,7 @@ const SENTENCES: Record<string, string> = {
   DESTINATION_UNAVAILABLE: 'The destination folder is unavailable, or already has a file with this name.',
   MOVE_VERIFICATION_FAILED: 'The rename could not be verified as intact, so it was not finalized.',
   SOURCE_DELETE_FAILED: 'The renamed copy is safe, but the original file could not be removed.',
+  RECONCILIATION_REQUIRED: 'Recovery could not tell which file is the document, and both are still on disk. Compare the two names before deciding.',
   PROPOSAL_MISSING: 'Analysis finished without a usable proposal.',
   IO_ERROR: 'A file operation failed.',
   DATE_REQUIRED: 'Every rename needs a date. Start the filename with the document\'s date as YYYY-MM-DD.',
@@ -43,6 +44,10 @@ const SENTENCES: Record<string, string> = {
   // already filed - a second scan, a re-export, a copy saved again. The
   // inspector names that filing beside this sentence.
   NEAR_DUPLICATE: 'This looks like a document that was filed already. Approve to file it as well, keep the original, or remove it.',
+  // Set when a person undoes a rename. The file is back under its original
+  // name and the proposal is still here, so the document waits for a decision
+  // rather than being renamed again by the next automatic pass.
+  UNDONE: 'You undid this rename. The document is back under its original name and waits for your decision.',
 };
 
 /**
