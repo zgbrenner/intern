@@ -136,6 +136,10 @@ pub struct MicrosoftClient {
     tokens: Arc<dyn TokenStore>,
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
+    /// Who is signed in, mirrored out of `state`. A verification holds the
+    /// state lock across its HTTP calls, and Settings asking who is connected
+    /// must not be answered "nobody" merely because the connection is busy.
+    connected: Mutex<Option<Account>>,
 }
 impl MicrosoftClient {
     pub fn new(config: AuthConfig, tokens: Arc<dyn TokenStore>) -> Result<Self, String> {
@@ -163,16 +167,29 @@ impl MicrosoftClient {
                 retry_at: 0,
                 allow_refresh: true,
             }),
+            connected: Mutex::new(None),
         }
     }
+    /// The signed-in person, from the mirror rather than the connection state.
+    ///
+    /// An access token that has expired is not a person signing out - the
+    /// stored refresh token brings the next one - so this reports whoever the
+    /// last established session belonged to, and nothing at all once the
+    /// session is deliberately dropped.
     pub fn account(&self) -> Option<Account> {
-        self.state.try_lock().ok().and_then(|state| {
-            state
-                .session
-                .as_ref()
-                .filter(|session| session.expires_at > self.clock.now())
-                .map(|session| session.account.clone())
-        })
+        self.connected
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+    /// Every change of session goes through here so the mirror cannot drift.
+    fn set_session(&self, state: &mut State, session: Option<Session>) {
+        *self
+            .connected
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            session.as_ref().map(|session| session.account.clone());
+        state.session = session;
     }
     pub fn begin(&self, config: AuthConfig) -> Result<DevicePrompt, String> {
         config.validate()?;
@@ -180,7 +197,7 @@ impl MicrosoftClient {
             .state
             .lock()
             .map_err(|_| "Microsoft sign-in state is unavailable.")?;
-        state.session = None;
+        self.set_session(&mut state, None);
         state.pending = None;
         state.config = config.clone();
         state.retry_at = 0;
@@ -276,7 +293,7 @@ impl MicrosoftClient {
         state.pending = None;
         let session = self.establish(&config, &reply.body, None)?;
         let account = session.account.clone();
-        state.session = Some(session);
+        self.set_session(&mut state, Some(session));
         state.allow_refresh = true;
         Ok(SignInProgress::Connected { account })
     }
@@ -286,7 +303,7 @@ impl MicrosoftClient {
             .lock()
             .map_err(|_| "Microsoft sign-in state is unavailable.")?;
         state.pending = None;
-        state.session = None;
+        self.set_session(&mut state, None);
         state.retry_at = 0;
         state.allow_refresh = false;
         if state.config.validate().is_ok() {
@@ -331,7 +348,7 @@ impl MicrosoftClient {
                 .as_ref()
                 .is_none_or(|session| session.expires_at <= self.clock.now() + 30)
             {
-                state.session = None;
+                self.set_session(&mut state, None);
                 state.config.validate()?;
                 let raw = self
                     .tokens
@@ -365,10 +382,10 @@ impl MicrosoftClient {
                 if reply.status != 200 {
                     return Err(Failure::connection("Microsoft sign-in needs attention. Reconnect your account; files remain held.".into()));
                 }
-                state.session = Some(
-                    self.establish(&state.config, &reply.body, Some(&stored))
-                        .map_err(Failure::connection)?,
-                );
+                let session = self
+                    .establish(&state.config, &reply.body, Some(&stored))
+                    .map_err(Failure::connection)?;
+                self.set_session(&mut state, Some(session));
             }
             let session = state
                 .session
@@ -389,7 +406,7 @@ impl MicrosoftClient {
             };
             match reply.status {
                 200 | 201 => Ok((session.account.clone(),reply.body)),
-                401 => { state.session=None; Err("Microsoft sign-in expired. Reconnect; files remain held.".into()) }
+                401 => { self.set_session(&mut state, None); Err("Microsoft sign-in expired. Reconnect; files remain held.".into()) }
                 403 => Err("Microsoft denied access to this folder. Ask your administrator to grant the app read access to the selected intake folder.".into()),
                 404 => Err("This file is not yet available in the paired Microsoft folder.".into()),
                 429 | 503 => { state.retry_at=self.clock.now()+reply.retry_after as i64; Err("Microsoft requested a slower verification rate. Files remain held until retry.".into()) }
@@ -484,7 +501,11 @@ mod tests {
     use serde_json::json;
     use std::{
         collections::{HashMap, VecDeque},
-        sync::atomic::{AtomicI64, Ordering},
+        sync::{
+            atomic::{AtomicI64, Ordering},
+            mpsc,
+        },
+        thread,
     };
     #[derive(Default)]
     struct Memory(Mutex<HashMap<String, String>>);
@@ -711,6 +732,75 @@ mod tests {
             4,
             "the second attempt must not reach the network"
         );
+    }
+
+    /// Blocks on the last scripted reply, so a request can be caught in
+    /// flight.
+    struct Held {
+        replies: Mutex<VecDeque<Reply>>,
+        entered: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+    impl Transport for Held {
+        fn request(
+            &self,
+            _url: Url,
+            _form: Option<&[(&str, &str)]>,
+            _bearer: Option<&str>,
+        ) -> Result<Reply, String> {
+            let reply = self
+                .replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or("Unexpected request")?;
+            if self.replies.lock().unwrap().is_empty() {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            Ok(reply)
+        }
+        fn audit_query(&self, _body: &Value, _bearer: &str) -> Result<Reply, String> {
+            Err("Unexpected audit request".into())
+        }
+    }
+
+    /// A verification holds the connection state across its HTTP calls, and
+    /// the pipeline runs them back to back. Settings asking who is signed in
+    /// must not be told "nobody" for as long as that lasts.
+    #[test]
+    fn the_connected_account_is_visible_while_a_request_is_in_flight() {
+        let (entered, entered_here) = mpsc::channel();
+        let (release, released_there) = mpsc::channel();
+        let transport = Arc::new(Held {
+            replies: Mutex::new(
+                vec![device(), token(), me(), reply(200, json!({"id": "item"}))].into(),
+            ),
+            entered,
+            release: Mutex::new(released_there),
+        });
+        let time = Arc::new(Time(AtomicI64::new(1000)));
+        let client = Arc::new(MicrosoftClient::with_transport(
+            config(),
+            Arc::new(Memory::default()),
+            transport,
+            time.clone(),
+        ));
+        client.begin(config()).unwrap();
+        time.0.store(1005, Ordering::SeqCst);
+        client.poll().unwrap();
+
+        let verifying = {
+            let client = client.clone();
+            thread::spawn(move || client.metadata(item()))
+        };
+        entered_here.recv().unwrap();
+        assert!(
+            client.account().is_some(),
+            "a busy connection is not a disconnected one"
+        );
+        release.send(()).unwrap();
+        verifying.join().unwrap().unwrap();
     }
 
     #[test]
