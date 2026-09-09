@@ -209,6 +209,19 @@ pub fn better_reading(incumbent: OcrResult, challenger: OcrResult) -> OcrResult 
     }
 }
 
+/// Whether reading this page again in another orientation could tell us
+/// anything.
+///
+/// A confident reading is done. So is a reading that found no words at all:
+/// that page is blank, and a blank page is blank in four orientations. It
+/// scores zero confidence, though, which read as "not confident, keep
+/// looking" and bought three more recognition passes and three more
+/// full-page PNG encodes - on the back of every sheet of a three-hundred-page
+/// double-sided scan.
+pub fn orientation_search_is_worthwhile(reading: &OcrResult) -> bool {
+    reading.mean_confidence < CONFIDENT_READING && !reading.text.trim().is_empty()
+}
+
 pub fn apply_detected_rotation(
     image: DynamicImage,
     rotation_degrees: u16,

@@ -12,9 +12,9 @@ use std::time::Duration;
 #[cfg(feature = "native-tesseract")]
 use image::{DynamicImage, ImageFormat};
 
-#[cfg(feature = "native-tesseract")]
-use crate::extract::{CONFIDENT_READING, apply_detected_rotation};
 use crate::extract::{CancellationToken, ExtractionError, OcrBackend, OcrResult, RenderedPage};
+#[cfg(feature = "native-tesseract")]
+use crate::extract::{apply_detected_rotation, better_reading, orientation_search_is_worthwhile};
 #[cfg(feature = "native-tesseract")]
 use crate::limits::ResourceLimits;
 #[cfg(feature = "native-tesseract")]
@@ -305,10 +305,11 @@ impl OcrBackend for TesseractOcr {
         };
 
         let mut best = self.recognize_at(&workspace, page, rotation, "oriented", cancel)?;
-        // A page that reads confidently in the orientation OSD asked for is done:
-        // the overwhelmingly common upright document still costs exactly one pass.
+        // A page that reads confidently in the orientation OSD asked for is done,
+        // and so is one that read as blank: the overwhelmingly common upright
+        // document, and every blank back of a duplex scan, cost exactly one pass.
         for candidate in [270, 90, 180, 0] {
-            if best.mean_confidence >= CONFIDENT_READING {
+            if !orientation_search_is_worthwhile(&best) {
                 break;
             }
             if candidate == rotation {
@@ -321,7 +322,7 @@ impl OcrBackend for TesseractOcr {
                 &format!("try-{candidate}"),
                 cancel,
             )?;
-            best = crate::extract::better_reading(best, attempt);
+            best = better_reading(best, attempt);
         }
         Ok(best)
     }

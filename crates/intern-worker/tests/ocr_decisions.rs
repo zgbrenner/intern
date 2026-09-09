@@ -3,7 +3,9 @@
 //! that has to hold on the platform this ships on, where no Tesseract fixture
 //! runs.
 
-use intern_worker::extract::{OcrResult, better_reading};
+use intern_worker::extract::{
+    CONFIDENT_READING, OcrResult, better_reading, orientation_search_is_worthwhile,
+};
 
 /// Measured on the corpus: a page read in the orientation OSD asked for
 /// scored 44 while the same page read as-is scored 95, with both readings
@@ -69,4 +71,34 @@ fn a_denser_and_more_confident_reading_still_wins() {
 
     assert_eq!(chosen.text, "Remittance advice for invoice 4471");
     assert_eq!(chosen.rotation_degrees, 180);
+}
+
+/// A blank page - the back of every sheet of a duplex scan - reads as no
+/// words at all, which scores zero confidence. Zero is "not confident", so
+/// the orientation search used to buy three more recognition passes and
+/// three more full-page PNG encodes to look at the same blank page from
+/// three more angles.
+#[test]
+fn a_blank_page_costs_one_recognition_pass() {
+    let blank = OcrResult::new("", 0.0);
+
+    assert!(!orientation_search_is_worthwhile(&blank));
+    // What the search used to ask, and why it kept going.
+    assert!(blank.mean_confidence < CONFIDENT_READING);
+}
+
+#[test]
+fn an_unconvincing_reading_is_still_worth_another_orientation() {
+    assert!(orientation_search_is_worthwhile(&OcrResult::new(
+        "O71 TIVL3Y MOGVAW",
+        44.1
+    )));
+}
+
+#[test]
+fn a_confident_reading_is_never_read_again() {
+    assert!(!orientation_search_is_worthwhile(&OcrResult::new(
+        "PACKING SLIP PS-311",
+        95.2
+    )));
 }
