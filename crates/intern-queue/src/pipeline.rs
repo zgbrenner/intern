@@ -1766,7 +1766,9 @@ impl Pipeline {
             .list()?
             .into_iter()
             .find(|candidate| candidate.id == id)
-            .unwrap();
+            .ok_or_else(|| {
+                PipelineError::new("ITEM_NOT_FOUND", "queue item disappeared during approval")
+            })?;
         let settings = match self.settings.load() {
             Ok(settings) => settings,
             Err(error) => {
