@@ -432,9 +432,11 @@ pub fn extract_anydoc(
     cancel.check()?;
     let metadata = std::fs::metadata(path).map_err(ExtractionError::io)?;
     limits.validate_source_size(metadata.len())?;
+    let bytes = std::fs::read(path).map_err(ExtractionError::io)?;
+    let format = expected_anydoc_format(path, &bytes)?;
     enforce_office_decompressed_limit(path, limits, cancel)?;
     cancel.check()?;
-    let markdown = anydoc::to_markdown(path)
+    let markdown = anydoc::to_markdown_bytes(&bytes, format)
         .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
     cancel.check()?;
     Ok(ExtractedDocument {
@@ -449,6 +451,32 @@ pub fn extract_anydoc(
         truncated: false,
         optional_image: None,
     })
+}
+
+/// The parser an extension names, refusing content that disagrees with it.
+///
+/// Left to itself anydoc picks its parser from the file's content and treats
+/// the extension as a fallback, so a workbook renamed `.docx` is rendered by
+/// its Excel path with none of the row and column caps spreadsheets are
+/// routed through here, and a PDF renamed `.pptx` reaches a PDF reader with
+/// no page cap, no OCR, and no page image. Routing in this crate is by
+/// extension, so content that is not what the extension names is a routing
+/// failure that belongs in review, not a document to parse anyway.
+fn expected_anydoc_format(path: &Path, bytes: &[u8]) -> Result<anydoc::Format, ExtractionError> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let named = anydoc::Format::from_extension(&extension).ok_or_else(|| {
+        ExtractionError::unsupported(format!("no Office reader handles a .{extension} file"))
+    })?;
+    if anydoc::Format::from_bytes(bytes) != Some(named) {
+        return Err(ExtractionError::unsupported(format!(
+            "file content is not what its .{extension} extension names"
+        )));
+    }
+    Ok(named)
 }
 
 pub(crate) fn enforce_office_decompressed_limit(
