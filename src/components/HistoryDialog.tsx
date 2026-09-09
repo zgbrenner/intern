@@ -44,6 +44,10 @@ export function HistoryDialog({ bridge, selection, onClose }: Props) {
   const [exportError, setExportError] = useState('');
   const dialog = useRef<HTMLElement>(null);
   const initialFocus = useRef<HTMLButtonElement>(null);
+  // Escape reaches the latest onClose through a ref, so the focus effect below
+  // does not have to depend on its identity.
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
 
   useEffect(() => {
     let active = true;
@@ -53,10 +57,12 @@ export function HistoryDialog({ bridge, selection, onClose }: Props) {
     return () => { active = false; };
   }, [bridge]);
 
+  // Focus Close once, when the dialog opens. Depending on `onClose` here meant
+  // refocusing on every App render, and App rerenders on every queue event.
   useEffect(() => {
     initialFocus.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+      if (event.key === 'Escape') { event.preventDefault(); close.current(); return; }
       if (event.key !== 'Tab') return;
       const focusable = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])') ?? []);
       if (!focusable.length) return;
@@ -67,7 +73,7 @@ export function HistoryDialog({ bridge, selection, onClose }: Props) {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, []);
 
   const runExport = async () => {
     if (exporting) return;
