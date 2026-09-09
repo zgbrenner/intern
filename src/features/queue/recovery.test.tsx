@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
-import type { SelectionBoundary } from '../../lib/bridge';
+import type { SelectionBoundary, SelectionResult } from '../../lib/bridge';
 import { createInMemoryBridge } from '../../lib/inMemoryBridge';
 import type { QueueBridgeEvent } from '../../lib/tauriBridge';
 import type { QueueItem } from '../../types';
@@ -130,6 +130,23 @@ const ready: QueueItem = {
     act(() => listener({ type: 'changed', paused: false }));
 
     await waitFor(() => expect(screen.queryByRole('alert', { name: 'Queue stopped' })).not.toBeInTheDocument());
+  });
+
+  // Tauri's own drag-drop is enabled, so on the desktop a dropped file never
+  // reaches the HTML5 handler the tests above drive: the paths arrive as a
+  // window event. That path called the bridge directly, so a refusal was
+  // swallowed and a drop during another action started a second import.
+  it('reports a desktop drop the backend refuses', async () => {
+    let drop!: (result: SelectionResult) => void;
+    const addFiles = vi.fn(async () => { throw new Error('The shared folder is offline.'); });
+    const dropping = selection({ subscribeDrops: async (listener: typeof drop) => { drop = listener; return () => {}; } } as Partial<SelectionBoundary>);
+    render(<App bridge={{ ...createInMemoryBridge({ items: [ready] }), addFiles }} selection={dropping} />);
+    await screen.findByRole('button', { name: 'Select agreement.pdf' });
+
+    await act(async () => { drop({ files: [{ path: 'C:\Docs\dropped.pdf', displayName: 'dropped.pdf' }] }); });
+
+    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
+    expect(addFiles).toHaveBeenCalledOnce();
   });
 
   it('gates same-tick rename submissions before React has rerendered', async () => {

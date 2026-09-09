@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { App } from './App';
 import { createBrowserSelectionBoundary, createFixtureBatchBridge } from './lib/inMemoryBridge';
 import { TauriBridge, createTauriSelectionBoundary, isTauriRuntime } from './lib/tauriBridge';
@@ -14,19 +14,8 @@ export function BrowserApp() {
 
 function TauriApp() {
   const bridge = useMemo(() => new TauriBridge(), []);
+  // The window's drag-drop events are subscribed to by App, which routes them
+  // through the same import path as the file pickers.
   const selection = useMemo(() => createTauriSelectionBoundary(), []);
-  useEffect(() => {
-    let active = true;
-    let stop: (() => void) | undefined;
-    void selection.subscribeDrops((result) => {
-      if (!active) return;
-      if (result.folder) void bridge.addFolder(result.folder);
-      else if (result.files?.length) void bridge.addFiles(result.files);
-    }).then((unsubscribe) => {
-      if (active) stop = unsubscribe;
-      else unsubscribe();
-    });
-    return () => { active = false; stop?.(); };
-  }, [bridge, selection]);
   return <App bridge={bridge} selection={selection} />;
 }

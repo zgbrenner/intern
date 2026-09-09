@@ -12,7 +12,7 @@ import { GUIDE_URL } from './lib/bridge';
 import { humanizeReason } from './lib/reasons';
 import type { DesktopBridge, SelectionBoundary, SelectionResult } from './lib/bridge';
 import { createInMemoryBridge } from './lib/inMemoryBridge';
-import type { SetupEventSource } from './lib/tauriBridge';
+import type { SetupEventSource, TauriSelectionBoundary } from './lib/tauriBridge';
 import { useMediaQuery } from './lib/useMediaQuery';
 import { useQueue } from './features/queue/useQueue';
 import type { AppSettings, QueueItem, QueueView, SetupState } from './types';
@@ -231,6 +231,24 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     reviewTrigger.current = null;
     setSelectedId(targetId);
   };
+  // Tauri's own drag-drop is on, so on the desktop a dropped file never
+  // reaches the drop zone's HTML5 handler: the paths arrive as a window event
+  // instead. That path used to call the bridge straight from BrowserApp, with
+  // no error to show and no busy guard, so a refused drop simply vanished.
+  // It goes through the same import as the pickers now.
+  const importDrop = useRef(importSelection);
+  useEffect(() => { importDrop.current = importSelection; });
+  useEffect(() => {
+    const source = selection as (SelectionBoundary & Partial<TauriSelectionBoundary>) | undefined;
+    if (!source?.subscribeDrops) return;
+    let active = true;
+    let stop: (() => void) | undefined;
+    void source.subscribeDrops((result) => { if (active) void importDrop.current(async () => result); }).then((unsubscribe) => {
+      if (active) stop = unsubscribe;
+      else unsubscribe();
+    }).catch(() => { /* No drop stream in this runtime; the pickers still work. */ });
+    return () => { active = false; stop?.(); };
+  }, [selection]);
   const runSetupAction = async (action: 'start' | 'cancel' | 'choose', run: () => Promise<boolean | void>) => {
     if (setupAction) return;
     setSetupAction(action);
