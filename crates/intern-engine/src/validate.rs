@@ -227,9 +227,22 @@ fn validate_date(
         .iter()
         .flat_map(|segment| segment.lines())
         .collect();
+    // The taint is judged over wrapped lines, not raw ones. A PDF breaks
+    // "... Northstar Lantern Works LLC dated" from "March 3, 2024" wherever
+    // the margin falls, and read raw the second half looks like a date
+    // nothing introduced - which clears the taint and lets the referenced
+    // agreement's date through. The search for a replacement below stays on
+    // raw lines, because there a line break is a real boundary: "effective
+    // as of April 1, 2026 and continues" / "through March 31, 2027" states
+    // one effective date and one end of term, not two candidates.
+    let wrapped: Vec<String> = digest
+        .segments
+        .iter()
+        .flat_map(|segment| crate::infer::wrapped_lines(segment))
+        .collect();
     let mut stated = false;
     let mut tainted = true;
-    for line in &lines {
+    for line in &wrapped {
         let normalized = normalize(line);
         for position in date_match_positions(date, &normalized) {
             stated = true;
@@ -282,7 +295,10 @@ fn validate_date(
 /// phrase begins with "this", which is how a document dates itself.
 pub(crate) fn reference_introduced(normalized: &str, position: usize) -> bool {
     const NEAR: usize = 12;
-    const WIDE: usize = 48;
+    // Wide enough to reach back over a party's full name - "the Employment
+    // Agreement between you and Northstar Lantern Works LLC dated" is 70
+    // characters - and no wider than the window the date's role is read in.
+    const WIDE: usize = 96;
     fn window(normalized: &str, position: usize, span: usize) -> &str {
         let mut start = position.saturating_sub(span);
         while !normalized.is_char_boundary(start) {
@@ -294,12 +310,24 @@ pub(crate) fn reference_introduced(normalized: &str, position: usize) -> bool {
         // "dated" only references another document when a document noun
         // introduces it - "the Master Services Agreement dated June 2, 2023".
         // A bare "Dated January 8, 2025" on a title block is the document
-        // dating itself, and "This Agreement dated ..." is too.
+        // dating itself, and "This Agreement dated ..." is too. It is the
+        // determiner on the noun nearest the date that decides which of
+        // those it is, not a "this" anywhere in the window: "This First
+        // Amendment to the Consulting Agreement dated September 1, 2020"
+        // states the *consulting agreement's* date, and opens with "This".
+        // Punctuation between the two is typography - a defined term is
+        // introduced as `(this "Amendment")` - so it is stepped over.
         let wide = window(normalized, position, WIDE);
-        let names_a_document = ["agreement", "contract", "order", "amendment", "memorandum"]
+        let noun_ends_at = ["agreement", "contract", "order", "amendment", "memorandum"]
             .iter()
-            .any(|noun| wide.contains(noun));
-        return names_a_document && !wide.contains("this ");
+            .filter_map(|noun| wide.rfind(noun))
+            .max();
+        return match noun_ends_at {
+            Some(at) => !wide[..at]
+                .trim_end_matches(|character: char| !character.is_alphanumeric())
+                .ends_with("this"),
+            None => false,
+        };
     }
     ["issued under", "pursuant to", "as amended", "amending "]
         .iter()
@@ -605,6 +633,38 @@ with services commencing on October 1, 2026",
         let outcome = validate(candidate, &digest_of(&document));
         assert!(outcome.proposal.document_date.is_none());
         assert!(outcome.reasons.contains(&ReviewReason::DateUnsupported));
+    }
+
+    /// A PDF breaks the referencing phrase wherever the margin falls, and
+    /// the corpus's termination notice does exactly that: "... Northstar
+    /// Lantern Works LLC dated" ends one line and "March 3, 2024" opens the
+    /// next. Read as raw lines the second statement looks unintroduced, the
+    /// whole date stops counting as tainted, and the trap date the corpus
+    /// forbids becomes a filename.
+    #[test]
+    fn a_referenced_date_wrapped_onto_the_next_line_is_still_a_reference() {
+        let document = "NOTICE OF TERMINATION
+
+Re: Termination of the Employment Agreement
+
+This letter constitutes formal notice under Section 9.2 of the
+Employment Agreement between you and Northstar Lantern Works LLC dated
+March 3, 2024 (the \"Employment Agreement\") that the Company is
+terminating the Employment Agreement without cause.
+
+Your employment with the Company will end effective January 31, 2027.
+";
+        let mut candidate = proposal();
+        candidate.document_type = Some("Notice of Termination".into());
+        candidate.document_date = Some("2024-03-03".into());
+        candidate.parties = vec!["Northstar Lantern Works LLC".into()];
+        candidate.party_relation = PartyRelation::From;
+        let outcome = validate(candidate, &digest_of(document));
+        assert_ne!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2024-03-03"),
+            "the terminated agreement's date must never date the notice"
+        );
     }
 
     /// One line, two dates, two roles: the referenced contract's and the

@@ -203,7 +203,7 @@ pub fn infer_date_role(
 /// starts in lower case, with a number, or with a month - so a header
 /// block's "To:" and "From:" lines stay apart, and "Date of this Notice:
 /// December 29, 2026" does not lend its cue to the sentence under it.
-fn wrapped_lines(segment: &str) -> Vec<String> {
+pub(crate) fn wrapped_lines(segment: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for line in segment.lines() {
         let line = line.trim();
