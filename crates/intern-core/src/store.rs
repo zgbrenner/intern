@@ -837,6 +837,55 @@ impl QueueStore {
         Ok(item)
     }
 
+    /// Hands an `applying` item that reconciliation could not settle to a
+    /// person.
+    ///
+    /// One `applying` row stops the whole queue: `claim_next` and
+    /// `begin_applying` both refuse while any item is applying. An operation
+    /// whose surviving paths cannot be proven used to stay applying forever, so
+    /// a single half-applied rename froze every other document with no way out
+    /// but editing the database by hand. Review is where a state only a person
+    /// can judge belongs, and the receipt is kept so what is on disk can still
+    /// be explained.
+    ///
+    /// The receipt itself is left in whatever stage it reached. It is not
+    /// finished and pretending otherwise would lose the only record of what
+    /// happened, so a parked item can be kept, removed, or canceled but cannot
+    /// be re-applied until a person resolves the files.
+    pub(crate) fn park_applying_for_review(
+        &self,
+        id: i64,
+        receipt_id: i64,
+        error: ErrorCode,
+    ) -> InternResult<QueueItem> {
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(InternError::from)?;
+        let changed = transaction
+            .execute(
+                "UPDATE queue_items
+             SET status = 'needs_review', reconciliation_receipt_id = ?1,
+                 active_receipt_id = NULL, previous_status = NULL,
+                 owner_session = NULL, lease_expires_at = NULL,
+                 error_code = ?2, updated_at = ?3
+             WHERE id = ?4 AND status = 'applying' AND owner_session = ?5
+               AND active_receipt_id = ?1",
+                params![receipt_id, error.as_str(), now(), id, self.session_id],
+            )
+            .map_err(InternError::from)?;
+        if changed != 1 {
+            transaction.rollback().map_err(InternError::from)?;
+            return Err(InternError::new(
+                ErrorCode::StateConflict,
+                "unsettled operation could not be parked for review",
+            ));
+        }
+        let item = query_one(&transaction, "WHERE id = ?1", params![id])?;
+        transaction.commit().map_err(InternError::from)?;
+        Ok(item)
+    }
+
     pub fn claim_deferred_reconciliation(&self, id: i64) -> InternResult<QueueItem> {
         let mut connection = self.lock()?;
         let transaction = connection

@@ -22,6 +22,9 @@ pub enum ErrorCode {
     /// The model declined to answer about this document.
     ModelDeclined,
     UploaderUnverified,
+    /// Reconciliation could not prove what a half-applied operation left on
+    /// disk, so the item was handed to a person instead of held in `applying`.
+    ReconciliationRequired,
 }
 
 impl ErrorCode {
@@ -41,6 +44,7 @@ impl ErrorCode {
             Self::Duplicate => "DUPLICATE",
             Self::ModelDeclined => "MODEL_DECLINED",
             Self::UploaderUnverified => "UPLOADER_UNVERIFIED",
+            Self::ReconciliationRequired => "RECONCILIATION_REQUIRED",
         }
     }
 
@@ -60,6 +64,8 @@ impl ErrorCode {
             "DUPLICATE" => Self::Duplicate,
             "MODEL_DECLINED" => Self::ModelDeclined,
             "UPLOADER_UNVERIFIED" => Self::UploaderUnverified,
+            "RECONCILIATION_REQUIRED" => Self::ReconciliationRequired,
+
             _ => return None,
         })
     }

@@ -249,6 +249,79 @@ impl FileSystem for CrossPublishFailFileSystem {
     }
 }
 
+/// A cross-volume publish whose temporary-to-destination rename lands and is
+/// then reported as having failed. A crash between that rename and the journal
+/// entry recording it leaves exactly the same thing on disk, and it is the
+/// window the reconciliation has to be able to read.
+struct PublishReportedFailedFileSystem {
+    inner: StdFileSystem,
+}
+
+impl FileSystem for PublishReportedFailedFileSystem {
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
+    fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+        self.inner.rename_no_replace(source, destination)?;
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "injected lost publish confirmation",
+        ))
+    }
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
+        self.inner.copy_new_locked(source, destination)
+    }
+    fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
+        self.inner.lock_for_delete(path)
+    }
+}
+
+/// A copy interrupted partway through: the temporary is left on disk holding
+/// half the source's bytes, which is what a crash mid-copy leaves behind.
+struct TruncatedCopyFileSystem {
+    inner: StdFileSystem,
+}
+
+impl FileSystem for TruncatedCopyFileSystem {
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
+    fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+        self.inner.rename_no_replace(source, destination)
+    }
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
+        let bytes = fs::read(source)?;
+        fs::write(destination, &bytes[..bytes.len() / 2])?;
+        Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "injected interrupted copy",
+        ))
+    }
+    fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
+        self.inner.lock_for_delete(path)
+    }
+}
+
 struct ReconciliationProbeFileSystem {
     inner: StdFileSystem,
     database: PathBuf,
@@ -627,6 +700,125 @@ fn publish_failure_reopen_verifies_and_deletes_temp_before_rollback_resolution()
     assert!(source.exists());
     assert!(!destination.exists());
     assert!(!temporary.exists());
+}
+
+#[test]
+fn cross_volume_publish_that_succeeds_but_reports_failure_completes_on_reconcile() {
+    let temp = TempDir::new().unwrap();
+    let database = temp.path().join("queue.sqlite3");
+    let source = temp.path().join("source.pdf");
+    let destination = temp.path().join("named.pdf");
+    write(&source, b"original");
+    let filesystem = Arc::new(PublishReportedFailedFileSystem {
+        inner: StdFileSystem,
+    });
+    let (applier, store, item_id) = applying(&temp, &source, filesystem);
+    let error = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap_err();
+
+    // The receipt is one write behind what is on disk: still verified, while
+    // the temporary has already become the destination.
+    assert_eq!(error.code(), ErrorCode::DestinationUnavailable);
+    let receipt = store.load_receipt(item_id).unwrap().unwrap();
+    assert_eq!(receipt.stage, OperationStage::Verified);
+    assert!(!receipt.temporary_path.clone().unwrap().exists());
+    assert!(source.exists());
+    assert!(destination.exists());
+    drop(applier);
+    drop(store);
+
+    let reopened = Arc::new(QueueStore::open(database).unwrap());
+    reopened.claim_applying_reconciliation(item_id).unwrap();
+    let resolved = FileApplier::local(reopened).reconcile(item_id).unwrap();
+
+    assert_eq!(resolved.status, QueueStatus::Completed);
+    assert!(!source.exists());
+    assert_eq!(fs::read(&destination).unwrap(), b"original");
+}
+
+#[test]
+fn a_truncated_temporary_left_by_a_crash_is_removed_on_reconcile() {
+    let temp = TempDir::new().unwrap();
+    let database = temp.path().join("queue.sqlite3");
+    let source = temp.path().join("source.pdf");
+    let destination = temp.path().join("named.pdf");
+    write(&source, b"original bytes");
+    let filesystem = Arc::new(TruncatedCopyFileSystem {
+        inner: StdFileSystem,
+    });
+    let (applier, store, item_id) = applying(&temp, &source, filesystem);
+    let error = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::DestinationUnavailable);
+    let receipt = store.load_receipt(item_id).unwrap().unwrap();
+    assert_eq!(receipt.stage, OperationStage::Planned);
+    assert!(receipt.temporary_exists);
+    let temporary = receipt.temporary_path.clone().unwrap();
+    assert!(temporary.exists());
+    drop(applier);
+    drop(store);
+
+    let reopened = Arc::new(QueueStore::open(database).unwrap());
+    reopened.claim_applying_reconciliation(item_id).unwrap();
+    let resolved = FileApplier::local(reopened).reconcile(item_id).unwrap();
+
+    assert_eq!(resolved.status, QueueStatus::Ready);
+    assert_eq!(fs::read(&source).unwrap(), b"original bytes");
+    assert!(!temporary.exists());
+    assert!(!destination.exists());
+}
+
+#[test]
+fn retrying_a_deferred_deletion_while_the_source_is_held_parks_it_again() {
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("source.pdf");
+    let destination = temp.path().join("named.pdf");
+    write(&source, b"original");
+    let (applier, store, item_id) = applying(&temp, &source, copying_filesystem(false, true));
+    let error = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::SourceDeleteFailed);
+    assert_eq!(store.list().unwrap()[0].status, QueueStatus::NeedsReview);
+
+    // The person retries while whatever was holding the source still holds it.
+    store.claim_deferred_reconciliation(item_id).unwrap();
+    let retried = FileApplier::new(copying_filesystem(false, true), store.clone())
+        .reconcile(item_id)
+        .unwrap_err();
+
+    assert_eq!(retried.code(), ErrorCode::SourceDeleteFailed);
+    let parked = store.list().unwrap().remove(0);
+    assert_eq!(parked.status, QueueStatus::NeedsReview);
+    assert_eq!(parked.error_code, Some(ErrorCode::SourceDeleteFailed));
+    assert!(source.exists());
+
+    // ... and the same retry finishes the filing once the hold is gone.
+    store.claim_deferred_reconciliation(item_id).unwrap();
+    let resolved = FileApplier::local(store.clone())
+        .reconcile(item_id)
+        .unwrap();
+    assert_eq!(resolved.status, QueueStatus::Completed);
+    assert!(!source.exists());
+    assert_eq!(fs::read(&destination).unwrap(), b"original");
 }
 
 #[test]
@@ -1050,6 +1242,79 @@ fn sync_locked(holds: usize) -> Arc<SyncLockedFileSystem> {
         inner: StdFileSystem,
         remaining_holds: AtomicUsize::new(holds),
     })
+}
+
+/// A source another process is still holding: every attempt to open it for
+/// deletion fails the way Windows reports ERROR_SHARING_VIOLATION.
+struct HeldSourceFileSystem {
+    inner: StdFileSystem,
+}
+
+impl FileSystem for HeldSourceFileSystem {
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
+    fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+        self.inner.rename_no_replace(source, destination)
+    }
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
+        self.inner.copy_new_locked(source, destination)
+    }
+    fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
+        if path.file_name().and_then(|value| value.to_str()) == Some("source.pdf") {
+            return Err(io::Error::from_raw_os_error(32));
+        }
+        self.inner.lock_for_delete(path)
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_source_still_held_when_a_deferred_deletion_is_retried_stays_deferred() {
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("source.pdf");
+    let destination = temp.path().join("named.pdf");
+    write(&source, b"original");
+    let (applier, store, item_id) = applying(&temp, &source, copying_filesystem(false, true));
+    applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &applier.fingerprint(&source).unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(store.list().unwrap()[0].status, QueueStatus::NeedsReview);
+
+    store.claim_deferred_reconciliation(item_id).unwrap();
+    let held = FileApplier::new(
+        Arc::new(HeldSourceFileSystem {
+            inner: StdFileSystem,
+        }),
+        store.clone(),
+    )
+    .with_lock_retry(LockRetry::immediate())
+    .reconcile(item_id)
+    .unwrap_err();
+
+    // A hold that outlives the retries is a source that could not be deleted,
+    // not a document that changed - and only that reading leaves the deferred
+    // deletion where a person can retry it again.
+    assert_eq!(held.code(), ErrorCode::SourceDeleteFailed);
+    let parked = store.list().unwrap().remove(0);
+    assert_eq!(parked.status, QueueStatus::NeedsReview);
+    assert_eq!(parked.error_code, Some(ErrorCode::SourceDeleteFailed));
+    store.claim_deferred_reconciliation(item_id).unwrap();
 }
 
 #[cfg(windows)]

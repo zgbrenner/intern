@@ -387,7 +387,7 @@ impl FileApplier {
         let Some(receipt) = self.store.load_active_receipt(queue_item_id)? else {
             return self.store.resolve_empty_applying(queue_item_id);
         };
-        match receipt.stage {
+        let settled = match receipt.stage {
             OperationStage::RolledBack => self.reconcile_rolled_back(receipt),
             OperationStage::Published => self.reconcile_published(receipt),
             OperationStage::Complete => self.reconcile_complete(receipt),
@@ -395,7 +395,28 @@ impl FileApplier {
             | OperationStage::Copied
             | OperationStage::Verified
             | OperationStage::RollbackRequired => self.reconcile_incomplete(receipt),
+        };
+        settled.map_err(|error| self.park_unsettled(error))
+    }
+
+    /// Moves an item reconciliation could not settle out of `applying`.
+    ///
+    /// Every failure above carries the receipt it failed on, and one applying
+    /// row stops every other document from being claimed - so leaving it there
+    /// froze the whole queue over one file nobody could look at. The failure
+    /// keeps its own code and message; only the queue row moves, into review,
+    /// where a person can see the reason and decide. An error that has already
+    /// moved the row (a deferred source deletion) or that means this session
+    /// lost ownership fails the compare-and-swap and changes nothing.
+    fn park_unsettled(&self, error: InternError) -> InternError {
+        if let Some(receipt) = error.receipt() {
+            let _ = self.store.park_applying_for_review(
+                receipt.queue_item_id,
+                receipt.id,
+                error.code(),
+            );
         }
+        error
     }
 
     fn reconcile_incomplete(&self, receipt: OperationReceipt) -> InternResult<QueueItem> {
@@ -418,11 +439,51 @@ impl FileApplier {
                 receipt.stage,
             );
         }
-        Err(InternError::new(
-            ErrorCode::StateConflict,
-            "incomplete receipt paths require manual reconciliation",
-        )
-        .with_receipt(receipt))
+        // A cross-volume publish renames the verified temporary into place and
+        // only then records that it did. Crash in that window - or lose the
+        // answer to a rename that actually landed - and this is what survives:
+        // the destination present, the temporary gone, the source still waiting
+        // to be deleted. The operation is published and its journal entry is one
+        // write behind, so catch the journal up and finish the filing.
+        if source_exists
+            && destination_exists
+            && receipt.kind == OperationKind::VerifiedCopy
+            && receipt.stage == OperationStage::Verified
+            && !self.temporary_survives(&receipt)
+        {
+            // Prove the destination is the document before recording that it
+            // was published. The handle has to be released first: the deletion
+            // lock the publication path takes cannot share it.
+            drop(self.verify_reconciled_destination(&receipt)?);
+            let mut publication = receipt.clone();
+            publication.destination_exists = true;
+            publication.temporary_exists = false;
+            publication.stage = OperationStage::Published;
+            let published = self
+                .store
+                .update_receipt(OperationStage::Verified, &publication)
+                .map_err(|_| {
+                    InternError::new(
+                        ErrorCode::StateConflict,
+                        "recovered publication could not be journaled",
+                    )
+                    .with_receipt(receipt)
+                })?;
+            return self.reconcile_published(published);
+        }
+        let message = if source_exists {
+            "an incomplete operation left a file at both of its paths"
+        } else {
+            "an incomplete operation left a file at neither of its paths"
+        };
+        Err(InternError::new(ErrorCode::ReconciliationRequired, message).with_receipt(receipt))
+    }
+
+    fn temporary_survives(&self, receipt: &OperationReceipt) -> bool {
+        receipt
+            .temporary_path
+            .as_deref()
+            .is_some_and(|path| self.filesystem.exists(path))
     }
 
     fn cleanup_reconciled_temporary(&self, receipt: &OperationReceipt) -> InternResult<()> {
@@ -449,34 +510,47 @@ impl FileApplier {
                 )
                 .with_receipt(receipt.clone())
             })?;
-        let identity = temporary.identity().map_err(|_| {
-            InternError::new(
-                ErrorCode::MoveVerificationFailed,
-                "temporary file identity is unavailable",
-            )
-            .with_receipt(receipt.clone())
-        })?;
-        let hash = temporary.hash().map_err(|_| {
-            InternError::new(
-                ErrorCode::MoveVerificationFailed,
-                "temporary file hash is unavailable",
-            )
-            .with_receipt(receipt.clone())
-        })?;
-        let identity_after = temporary.identity().map_err(|_| {
-            InternError::new(
-                ErrorCode::MoveVerificationFailed,
-                "temporary file identity became unavailable",
-            )
-            .with_receipt(receipt.clone())
-        })?;
-        if hash != receipt.pre_operation_hash || identity_after != identity {
-            return Err(InternError::new(
-                ErrorCode::MoveVerificationFailed,
-                "temporary file does not match its receipt",
-            )
-            .with_receipt(receipt.clone()));
+        // Only a receipt that reached `verified` proved the temporary holds the
+        // document. Before that the copy was still in flight, and the copy a
+        // crash interrupts is short - so demanding the source's hash of it
+        // refused to delete a fragment nobody wanted and left the item stuck in
+        // `applying` over it. The temporary is Intern's own file, at a name
+        // nothing else writes, so for an unproven copy its identity is the
+        // whole question, and `delete` checks that against the open handle.
+        if !matches!(
+            receipt.stage,
+            OperationStage::Planned | OperationStage::Copied
+        ) {
+            let identity = temporary.identity().map_err(|_| {
+                InternError::new(
+                    ErrorCode::MoveVerificationFailed,
+                    "temporary file identity is unavailable",
+                )
+                .with_receipt(receipt.clone())
+            })?;
+            let hash = temporary.hash().map_err(|_| {
+                InternError::new(
+                    ErrorCode::MoveVerificationFailed,
+                    "temporary file hash is unavailable",
+                )
+                .with_receipt(receipt.clone())
+            })?;
+            let identity_after = temporary.identity().map_err(|_| {
+                InternError::new(
+                    ErrorCode::MoveVerificationFailed,
+                    "temporary file identity became unavailable",
+                )
+                .with_receipt(receipt.clone())
+            })?;
+            if hash != receipt.pre_operation_hash || identity_after != identity {
+                return Err(InternError::new(
+                    ErrorCode::MoveVerificationFailed,
+                    "temporary file does not match its receipt",
+                )
+                .with_receipt(receipt.clone()));
+            }
         }
+
         self.store
             .renew_operation_lease(receipt.queue_item_id, receipt.id, receipt.stage)
             .map_err(|_| {
@@ -585,13 +659,23 @@ impl FileApplier {
             .with_receipt(receipt.clone())
         })?;
         if self.filesystem.exists(&receipt.source) {
+            // The destination is already verified; all that is left is removing
+            // the original. A sync client or an indexer holding it is a moment,
+            // so wait one out - and a hold that outlives the retries is a source
+            // that could not be deleted, not a document that changed. Only that
+            // reading leaves the operation in the deferred deletion a person can
+            // retry.
             let mut source = self
-                .filesystem
-                .lock_for_delete(&receipt.source)
-                .map_err(|_| {
-                    InternError::new(ErrorCode::FileChanged, "published source cannot be locked")
-                        .with_receipt(receipt.clone())
+                .lock_retry
+                .run(|| self.filesystem.lock_for_delete(&receipt.source))
+                .map_err(|error| {
+                    InternError::new(
+                        ErrorCode::SourceDeleteFailed,
+                        format!("published source cannot be locked for deletion ({error})"),
+                    )
+                    .with_receipt(receipt.clone())
                 })?;
+
             let source_identity = source.identity().map_err(|_| {
                 InternError::new(
                     ErrorCode::FileChanged,
