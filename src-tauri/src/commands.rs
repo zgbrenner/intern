@@ -1353,7 +1353,9 @@ pub async fn settings_save(
 
 fn save_settings(state: &AppState, mut settings: AppSettings) -> Result<(), CommandError> {
     let previous = state.settings.load().unwrap_or_default();
-    validate_intake_settings(&mut settings, &|path| canonical_folder(path).ok())?;
+    validate_intake_settings(&mut settings, &previous.intake_folder, &|path| {
+        canonical_folder(path).ok()
+    })?;
     // With intake enabled the destination was already canonicalized (with the
     // intake-specific error code); otherwise keep the original behavior.
     if !settings.intake_enabled && !settings.destination.trim().is_empty() {
@@ -1465,9 +1467,11 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), CommandError> {
 /// reappears as new), so intake enabled requires a real destination outside
 /// the intake folder. Canonical forms are written back so later comparisons
 /// and the containment check are component-wise, never string-prefix.
-/// `canonicalize` is `canonical_folder` in production and a seam for tests.
+/// `canonicalize` is `canonical_folder` in production and a seam for tests;
+/// `stored` is the intake folder as it is saved now.
 fn validate_intake_settings(
     settings: &mut AppSettings,
+    stored: &str,
     canonicalize: &dyn Fn(&Path) -> Option<PathBuf>,
 ) -> Result<(), CommandError> {
     if settings.intake_folder.trim().is_empty() {
@@ -1478,13 +1482,22 @@ fn validate_intake_settings(
             });
         }
     } else {
-        settings.intake_folder = canonicalize(Path::new(&settings.intake_folder))
-            .ok_or_else(|| CommandError {
-                code: "INTAKE_FOLDER_MISSING".into(),
-                message: "the intake folder does not exist".into(),
-            })?
-            .to_string_lossy()
-            .into_owned();
+        settings.intake_folder = match canonicalize(Path::new(&settings.intake_folder)) {
+            Some(folder) => folder.to_string_lossy().into_owned(),
+            None if settings.intake_enabled => {
+                return Err(CommandError {
+                    code: "INTAKE_FOLDER_MISSING".into(),
+                    message: "the intake folder does not exist".into(),
+                });
+            }
+            // Intake is off, so nothing is read from this folder: an offline
+            // network share must not refuse a save that has nothing to do
+            // with it. The spelling already stored is kept, so it is still
+            // canonical when intake is turned back on - and when nothing is
+            // stored yet, what the person chose is kept rather than cleared.
+            None if !stored.trim().is_empty() => stored.to_owned(),
+            None => settings.intake_folder.clone(),
+        };
     }
     if !settings.intake_enabled {
         return Ok(());
@@ -1991,12 +2004,12 @@ mod intake_tests {
         let fs = canonicalizer(&[("/out", "/out")]);
         let mut blank = settings(true, "  ", "/out");
         assert_eq!(
-            error_code(validate_intake_settings(&mut blank, &fs)),
+            error_code(validate_intake_settings(&mut blank, "", &fs)),
             "INTAKE_FOLDER_MISSING"
         );
         let mut missing = settings(true, "/gone", "/out");
         assert_eq!(
-            error_code(validate_intake_settings(&mut missing, &fs)),
+            error_code(validate_intake_settings(&mut missing, "", &fs)),
             "INTAKE_FOLDER_MISSING"
         );
     }
@@ -2020,12 +2033,12 @@ mod intake_tests {
         let fs = canonicalizer(&[("/in", "/in")]);
         let mut blank = settings(true, "/in", "");
         assert_eq!(
-            error_code(validate_intake_settings(&mut blank, &fs)),
+            error_code(validate_intake_settings(&mut blank, "", &fs)),
             "INTAKE_NEEDS_DESTINATION"
         );
         let mut missing = settings(true, "/in", "/gone");
         assert_eq!(
-            error_code(validate_intake_settings(&mut missing, &fs)),
+            error_code(validate_intake_settings(&mut missing, "", &fs)),
             "INTAKE_NEEDS_DESTINATION"
         );
     }
@@ -2040,19 +2053,19 @@ mod intake_tests {
         ]);
         let mut equal = settings(true, "/a/b", "/a/b");
         assert_eq!(
-            error_code(validate_intake_settings(&mut equal, &fs)),
+            error_code(validate_intake_settings(&mut equal, "", &fs)),
             "DESTINATION_INSIDE_INTAKE"
         );
         let mut inside = settings(true, "/a/b", "/a/b/c");
         assert_eq!(
-            error_code(validate_intake_settings(&mut inside, &fs)),
+            error_code(validate_intake_settings(&mut inside, "", &fs)),
             "DESTINATION_INSIDE_INTAKE"
         );
         // `/a/bc` shares the string prefix `/a/b` but is a sibling, not a child.
         let mut sibling = settings(true, "/a/b", "/a/bc");
-        assert!(validate_intake_settings(&mut sibling, &fs).is_ok());
+        assert!(validate_intake_settings(&mut sibling, "", &fs).is_ok());
         let mut outside = settings(true, "/a/b", "/a/other");
-        assert!(validate_intake_settings(&mut outside, &fs).is_ok());
+        assert!(validate_intake_settings(&mut outside, "", &fs).is_ok());
     }
 
     #[test]
@@ -2062,17 +2075,35 @@ mod intake_tests {
             ("/out-entered", "/out/canonical"),
         ]);
         let mut enabled = settings(true, "/in-entered", "/out-entered");
-        validate_intake_settings(&mut enabled, &fs).expect("valid settings");
+        validate_intake_settings(&mut enabled, "", &fs).expect("valid settings");
         assert_eq!(enabled.intake_folder, "/in/canonical");
         assert_eq!(enabled.destination, "/out/canonical");
-        // A non-blank intake folder is canonicalized even while disabled; a
-        // missing one is an error, matching destination handling.
+        // A non-blank intake folder is canonicalized even while disabled, so
+        // the stored form stays the one every later comparison uses.
         let mut disabled = settings(false, "/in-entered", "");
-        validate_intake_settings(&mut disabled, &fs).expect("valid settings");
+        validate_intake_settings(&mut disabled, "", &fs).expect("valid settings");
         assert_eq!(disabled.intake_folder, "/in/canonical");
-        let mut disabled_missing = settings(false, "/gone", "");
+    }
+
+    #[test]
+    fn an_unreachable_intake_folder_does_not_refuse_a_save_that_leaves_intake_off() {
+        let fs = canonicalizer(&[("/out-entered", "/out/canonical")]);
+        // An offline network share cannot be canonicalized. Nothing is being
+        // read from it while intake is off, so a save that has nothing to do
+        // with intake must go through, and the folder keeps the spelling
+        // already stored - still canonical for when intake is turned back on.
+        let mut disabled = settings(false, "//server/share", "");
+        validate_intake_settings(&mut disabled, "/in/canonical", &fs).expect("valid settings");
+        assert_eq!(disabled.intake_folder, "/in/canonical");
+        // With nothing stored yet, what the person chose is kept rather than
+        // silently cleared.
+        let mut fresh = settings(false, "//server/share", "");
+        validate_intake_settings(&mut fresh, "", &fs).expect("valid settings");
+        assert_eq!(fresh.intake_folder, "//server/share");
+        // Turning intake on is still refused: that folder would be watched.
+        let mut enabled = settings(true, "//server/share", "/out-entered");
         assert_eq!(
-            error_code(validate_intake_settings(&mut disabled_missing, &fs)),
+            error_code(validate_intake_settings(&mut enabled, "/in/canonical", &fs)),
             "INTAKE_FOLDER_MISSING"
         );
     }
