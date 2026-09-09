@@ -369,7 +369,15 @@ fn decode_entities(text: &str) -> String {
     while let Some(ampersand) = rest.find('&') {
         result.push_str(&rest[..ampersand]);
         let after = &rest[ampersand..];
-        let entity_end = after[..after.len().min(12)].find(';');
+        // An entity is short, so the semicolon is looked for a dozen
+        // characters ahead — characters, not bytes: an accented word after an
+        // ampersand would otherwise put the end of the window inside a
+        // character and panic the slice.
+        let entity_end = after
+            .char_indices()
+            .take(12)
+            .find(|(_, character)| *character == ';')
+            .map(|(index, _)| index);
         let Some(end) = entity_end else {
             result.push('&');
             rest = &after[1..];
@@ -434,6 +442,20 @@ mod tests {
         assert_eq!(rfc3339_utc(951_827_696), "2000-02-29T12:34:56Z");
         assert_eq!(rfc3339_utc(1_755_782_100), "2025-08-21T13:15:00Z");
         assert_eq!(rfc3339_utc(-1), "1969-12-31T23:59:59Z");
+    }
+
+    /// The entity scan looks a fixed distance past an ampersand for its
+    /// semicolon. Measuring that distance in bytes cuts a multi-byte
+    /// character in half, and slicing a string there panics — which, in an
+    /// HTML body, is a document an accented word away from killing the
+    /// extraction thread.
+    #[test]
+    fn entity_scan_window_does_not_split_a_multibyte_character() {
+        assert_eq!(html_to_text("<p>Caf&éééééé</p>"), "Caf&éééééé");
+        assert_eq!(
+            html_to_text("<p>5 &lt; 6 ✓ &amp; 7 &gt; 6</p>"),
+            "5 < 6 ✓ & 7 > 6"
+        );
     }
 
     #[test]
