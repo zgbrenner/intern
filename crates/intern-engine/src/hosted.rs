@@ -139,13 +139,7 @@ impl HostedModelConfig {
 pub fn endpoint_for(provider: HostedProvider, base_url: &str) -> EngineResult<Url> {
     let root = Url::parse(base_url.trim().trim_end_matches('/'))
         .map_err(|_| misconfigured("the hosted model's address is not a URL"))?;
-    let local = root.host_str().is_some_and(|host| {
-        host.eq_ignore_ascii_case("localhost")
-            || host
-                .trim_matches(['[', ']'])
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|address| address.is_loopback())
-    });
+    let local = is_this_machine(&root);
     match root.scheme() {
         "https" => {}
         "http" if local => {}
@@ -168,6 +162,29 @@ pub fn endpoint_for(provider: HostedProvider, base_url: &str) -> EngineResult<Ur
     endpoint.set_query(None);
     endpoint.set_fragment(None);
     Ok(endpoint)
+}
+
+/// Whether an address is this machine.
+fn is_this_machine(url: &Url) -> bool {
+    url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    })
+}
+
+/// Whether a request to this endpoint goes through the machine's proxy.
+///
+/// The same judgement that lets plain HTTP through decides this, and it has
+/// to: the loopback exception exists so a server on this machine can be used
+/// without a certificate, not so a proxy configured for the internet can be
+/// handed the API key and the whole distilled text of every document in
+/// plaintext on the way to `localhost`. A hosted service on the internet is
+/// reached through the proxy as before.
+fn uses_system_proxy(endpoint: &Url) -> bool {
+    !is_this_machine(endpoint)
 }
 
 /// The client for one hosted model.
@@ -194,16 +211,22 @@ impl HostedClient {
     pub fn new(config: HostedModelConfig) -> EngineResult<Self> {
         let config = config.resolved()?;
         let endpoint = endpoint_for(config.provider, &config.base_url)?;
-        // The system proxy is honoured here, unlike for the local server: a
-        // machine that reaches the internet through a proxy reaches this
-        // endpoint through it too. Redirects are still refused, so a key is
-        // only ever sent to the address that was configured.
-        let http = Client::builder()
+        // The system proxy is honoured for a service on the internet, unlike
+        // for the local server: a machine that reaches the internet through a
+        // proxy reaches that endpoint through it too. It is bypassed for an
+        // endpoint on this machine, because a proxy would otherwise be handed
+        // the key and the document text that plain HTTP was allowed for
+        // exactly on the grounds that neither leaves the machine. Redirects
+        // are refused either way, so a key is only ever sent to the address
+        // that was configured.
+        let mut builder = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| unreachable_error())?;
+            .redirect(reqwest::redirect::Policy::none());
+        if !uses_system_proxy(&endpoint) {
+            builder = builder.no_proxy();
+        }
+        let http = builder.build().map_err(|_| unreachable_error())?;
         Ok(Self {
             config,
             endpoint,
@@ -488,6 +511,32 @@ mod tests {
                 EngineErrorCode::HostedModelMisconfigured,
                 "{bad:?}"
             );
+        }
+    }
+
+    /// The proxy bypass has to follow the same classification that allowed
+    /// plain HTTP in the first place. A machine with `HTTP_PROXY` set and no
+    /// loopback entry in its `NO_PROXY` list sent the key and the whole
+    /// distilled document to the proxy in cleartext on the way to Ollama.
+    #[test]
+    fn loopback_endpoints_never_use_a_proxy() {
+        for local in [
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:1234/v1",
+            "http://[::1]:1234/v1",
+            "https://localhost:8443/v1",
+        ] {
+            let endpoint = endpoint_for(HostedProvider::OpenAiCompatible, local).unwrap();
+            assert!(!uses_system_proxy(&endpoint), "{local}");
+        }
+        for remote in [
+            "https://api.anthropic.com/v1",
+            "https://api.openai.com/v1",
+            // A name that merely starts with "localhost" is somebody else's.
+            "https://localhost.example.com/v1",
+        ] {
+            let endpoint = endpoint_for(HostedProvider::OpenAiCompatible, remote).unwrap();
+            assert!(uses_system_proxy(&endpoint), "{remote}");
         }
     }
 

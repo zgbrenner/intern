@@ -376,7 +376,11 @@ The key is stored in the operating system's credential store under Intern's
 name, never in the settings file, and never travels anywhere but the address
 that was configured — redirects are refused. Plain HTTP is accepted only to
 this machine, so a local server can be used without a certificate and a
-remote one cannot be used without one. **Test connection** sends the same
+remote one cannot be used without one; the same judgement takes the machine's
+proxy out of the path for an address on this machine, because a proxy would
+otherwise receive in cleartext the key and the document text that plain HTTP
+was allowed for on the grounds that neither leaves the machine. A service on
+the internet is still reached through the proxy. **Test connection** sends the same
 calibration document setup uses to check the local model, so a wrong key,
 model name, or address is found before a real document is sent.
 
