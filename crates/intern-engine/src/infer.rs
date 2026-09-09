@@ -680,14 +680,14 @@ fn title_type(heading: &str) -> Option<String> {
 /// punctuation from a heading.
 fn clean_title(heading: &str) -> String {
     let mut text = heading.trim().trim_start_matches('#').trim().to_owned();
-    let lowered = text.to_lowercase();
     for marker in [" - page ", " – page ", " — page ", " page "] {
-        if let Some(index) = lowered.rfind(marker)
-            && lowered[index + marker.len()..]
+        let found = rfind_ignoring_ascii_case(&text, marker).filter(|index| {
+            text[index + marker.len()..]
                 .trim()
                 .chars()
                 .all(|character| character.is_ascii_digit() || character.is_whitespace())
-        {
+        });
+        if let Some(index) = found {
             text.truncate(index);
         }
     }
@@ -700,6 +700,21 @@ fn clean_title(heading: &str) -> String {
         .trim_end_matches([':', '-', '–', '—', ',', ';', '.'])
         .trim()
         .to_owned()
+}
+
+/// The last occurrence of `marker`, ignoring the case of its ASCII letters,
+/// as a byte offset into `haystack` itself.
+///
+/// Searching a lowercased copy gives an offset into that copy, and case
+/// folding does not preserve byte lengths - "STRAẞE Ü - Page 2" folds one
+/// byte shorter, so the offset lands inside a character and truncating there
+/// panics. A marker begins and ends on a byte matched exactly, so the offset
+/// this returns is always a character boundary.
+fn rfind_ignoring_ascii_case(haystack: &str, marker: &str) -> Option<usize> {
+    haystack
+        .as_bytes()
+        .windows(marker.len())
+        .rposition(|window| window.eq_ignore_ascii_case(marker.as_bytes()))
 }
 
 /// Title case for an all-capitals heading; a mixed-case heading is left as
@@ -999,6 +1014,19 @@ Date: April 1, 2026",
         assert_eq!(
             infer_date_role(&digest, "2026-04-01", Some("Account Statement")),
             Some(DateRole::Issuance)
+        );
+    }
+
+    /// Case folding does not preserve byte lengths - ẞ folds to ß and İ
+    /// folds to two characters - so a page marker found in a lowercased copy
+    /// of the heading is at the wrong offset in the heading itself, and
+    /// truncating there lands inside a character and panics.
+    #[test]
+    fn a_title_with_length_changing_case_folding_does_not_panic() {
+        assert_eq!(clean_title("STRAẞE Ü - Page 2"), "STRAẞE Ü");
+        assert_eq!(
+            clean_title("İSTANBUL WORKS AGREEMENT - Page 2"),
+            "İSTANBUL WORKS AGREEMENT"
         );
     }
 
