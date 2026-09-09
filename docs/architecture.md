@@ -39,17 +39,19 @@ to Markdown, which preserves headings and tables, and only when the container's
 content is what its extension names: routing here is by extension, so a
 workbook renamed `.docx` — which AnyDoc would otherwise render through its
 uncapped Excel path — is a routing failure for review rather than a document.
-Plain text and Markdown are read directly, by byte-order mark: UTF-16 in either order and a marked UTF-8 file all decode, the mark itself never reaches the text, and bytes in some legacy encoding are read lossily with a corruption warning rather than failing the document. Excel workbooks are read
+Plain text and Markdown are read directly, by byte-order mark: UTF-16 in
+either order and a marked UTF-8 file all decode, the mark itself never reaches
+the text, and bytes in some legacy encoding are read lossily with a corruption
+warning rather than failing the document. Excel workbooks are read
 sheet-per-page as Markdown tables, capped at 200 rows by 30 columns per sheet
 with an elision marker so a large workbook cannot flood distillation. A
 standalone image is OCR'd as one page; a TIFF holding a frame per page — a fax,
 a batch scan — yields its first frame and reports the rest as truncated rather
-than dropping them silently. PowerPoint decks go through the same
-Office reader as Word documents, slide by slide in order. `.eml` emails and
-Outlook `.msg` messages emit a fixed-order header
-block — the `Date:` line verbatim, so the sent date is checkable against the
-document like any other fact — followed by the plain-text body and a listing
-(never an extraction) of attachments.
+than dropping them silently. PowerPoint decks go through the same Office reader
+as Word documents, slide by slide in order. `.eml` emails and Outlook `.msg`
+messages emit a fixed-order header block — the `Date:` line verbatim, so the
+sent date is checkable against the document like any other fact — followed by
+the plain-text body and a listing (never an extraction) of attachments.
 
 Two consequences of "OCR only when necessary" are enforced in code rather than
 documented as intent:
