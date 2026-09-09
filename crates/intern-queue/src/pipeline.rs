@@ -1258,7 +1258,7 @@ impl Pipeline {
                 "learned spelling does not exist",
             ));
         }
-        self.restyle_waiting()
+        self.restyle_waiting(None)
     }
 
     /// Apply a learned spelling from now on without waiting for a second
@@ -1270,17 +1270,24 @@ impl Pipeline {
                 "learned spelling does not exist",
             ));
         }
-        self.restyle_waiting()
+        self.restyle_waiting(None)
     }
 
     /// Recomposes the proposed name of every document still waiting under
     /// the spellings now in force, so a rule that just changed shows in the
     /// queue at once rather than only on the next document.
-    fn restyle_waiting(&self) -> PipelineResult<()> {
+    ///
+    /// `approved` names the document whose name a person has just typed, if
+    /// any. That name is theirs and is never recomposed: composing it again
+    /// from the validated facts would throw away everything the facts do not
+    /// carry, the date they typed in most of all.
+    fn restyle_waiting(&self, approved: Option<i64>) -> PipelineResult<()> {
         let style = self.repository.active_style()?;
         let mut changed = false;
         for item in self.store.list()? {
-            if !matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready) {
+            if !matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready)
+                || approved == Some(item.id)
+            {
                 continue;
             }
             let Some(mut record) = self.repository.load_proposal(item.id)? else {
@@ -1319,6 +1326,7 @@ impl Pipeline {
     /// rule.
     fn learn_from_edit(
         &self,
+        id: i64,
         record: &ProposalRecord,
         extension: &str,
         approved: &str,
@@ -1342,7 +1350,7 @@ impl Pipeline {
         } else if lesson.is_meaningful() {
             self.repository.learn(&lesson)?;
         }
-        self.restyle_waiting()
+        self.restyle_waiting(Some(id))
     }
 
     fn analyze_with_deadline(
@@ -1770,7 +1778,7 @@ impl Pipeline {
         // A preference store, not a filing step: a lesson that cannot be
         // written must not stop the rename that was just approved.
         if let Some(record) = proposed.as_ref() {
-            let _ = self.learn_from_edit(record, source_extension, &filename);
+            let _ = self.learn_from_edit(id, record, source_extension, &filename);
         }
         let ready = self
             .store

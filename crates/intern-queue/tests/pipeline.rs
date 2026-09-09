@@ -2281,6 +2281,62 @@ fn a_respelling_made_twice_in_review_becomes_interns_own_spelling() {
     );
 }
 
+/// The reviewer's name is the reviewer's. A second identical respelling makes
+/// the spelling Intern's own and every waiting document is recomposed under
+/// it - but not the one being approved, whose name a person has just typed:
+/// recomposing that one throws away the date they typed with it, and the loss
+/// shows the moment the apply does not go through.
+#[test]
+fn a_second_edit_that_also_typed_a_date_keeps_the_date_when_the_apply_fails() {
+    let temp = tempdir().unwrap();
+    // No date anywhere in the document, so validation withholds the model's
+    // and the reviewer types one in.
+    let undated = "Employment Agreement between John Smith and Acme Corporation         covering duties, salary, and term.";
+    let first = source(temp.path(), "first.pdf");
+    let second = source(temp.path(), "second.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(undated)),
+        Ok(parsed(undated)),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(proposal(0.94, false)),
+    ]));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&first, "first-hash");
+    files.trust(&second, "second-hash");
+    let pipeline = pipeline(
+        temp.path(),
+        worker,
+        model,
+        Arc::clone(&files),
+        AppSettings::default(),
+    );
+    let queued = pipeline.enqueue_files(&[first, second]).unwrap();
+    let first_id = queued[0].id;
+    let second_id = queued[1].id;
+    pipeline.run_until_idle().unwrap();
+    assert_eq!(
+        record_of(&pipeline, second_id).filename,
+        "Employment Agreement between John Smith and Acme Corporation.pdf",
+        "no date the document supports"
+    );
+
+    let approved = "2024-04-12 Employment Agreement between John Smith and Acme.pdf";
+    pipeline
+        .approve(first_id, approved, "A sentence about the agreement.")
+        .unwrap();
+    // The same respelling a second time, and this apply does not go through.
+    files.fail_next_apply();
+    let _ = pipeline.approve(second_id, approved, "A sentence about the agreement.");
+
+    assert_eq!(
+        record_of(&pipeline, second_id).filename,
+        approved,
+        "the name the reviewer typed, date and all"
+    );
+}
+
 #[test]
 fn a_spelling_can_be_used_at_once_and_forgotten_again() {
     let temp = tempdir().unwrap();

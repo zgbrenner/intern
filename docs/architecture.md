@@ -329,7 +329,10 @@ into the connector, and a diff would credit it all to one party.
 
 A rule takes effect on the second identical edit (`EDITS_TO_LEARN`), or at
 once when a person says "Use now" in Settings, and every document still
-waiting is recomposed under it so the queue shows the change immediately.
+waiting is recomposed under it so the queue shows the change immediately -
+every document but the one whose name was just approved, which is the
+reviewer's own text and would lose whatever the validated facts do not
+carry, the date they typed with it most of all.
 Respelling a spelling Intern applied maps back to the document's word - the
 person changed their mind about the word, not about Intern - and restoring
 the document's own spelling retracts the rule. The whole memory is the list
