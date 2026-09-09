@@ -179,3 +179,79 @@ fn a_file_that_is_not_a_compound_file_is_a_parse_failure_not_a_crash() {
         extract_msg(&path, &ResourceLimits::default(), &CancellationToken::new()).unwrap_err();
     assert_eq!(error.code(), "PARSE_FAILED");
 }
+
+/// An `LZFu` compressed-RTF header, its literal-coded payload, and whatever
+/// decompressed size it cares to claim. The MS-OXRTFCP decompressor reserves
+/// that claimed size before it reads a byte of the payload.
+fn compressed_rtf(rtf: &str, declared_raw_size: u32) -> Vec<u8> {
+    let mut payload = Vec::new();
+    for chunk in rtf.as_bytes().chunks(8) {
+        payload.push(0x00);
+        payload.extend_from_slice(chunk);
+    }
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&((payload.len() + 12) as u32).to_le_bytes());
+    bytes.extend_from_slice(&declared_raw_size.to_le_bytes());
+    bytes.extend_from_slice(&0x7546_5A4C_u32.to_le_bytes());
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&payload);
+    bytes
+}
+
+/// A message whose only body is RTF, compressed, declaring `declared_raw_size`
+/// bytes once decompressed.
+fn rtf_only_message(path: &std::path::Path, declared_raw_size: u32) {
+    let handle = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .unwrap();
+    let mut file = cfb::CompoundFile::create_with_version(cfb::Version::V3, handle).unwrap();
+    write_stream(
+        &mut file,
+        "/__substg1.0_0037001F",
+        &utf16("Ledger for March"),
+    );
+    write_stream(
+        &mut file,
+        "/__substg1.0_10090102",
+        &compressed_rtf(
+            r"{\rtf1\fromhtml1 {\*\htmltag <p>The March ledger is attached.</p>}}",
+            declared_raw_size,
+        ),
+    );
+    write_stream(
+        &mut file,
+        "/__properties_version1.0",
+        &properties(true, &[]),
+    );
+    file.flush().unwrap();
+}
+
+#[test]
+fn an_rtf_body_declaring_four_gigabytes_is_ignored() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("rtf-bomb.msg");
+    rtf_only_message(&path, u32::MAX);
+
+    let extracted =
+        extract_msg(&path, &ResourceLimits::default(), &CancellationToken::new()).unwrap();
+    let text = &extracted.pages[0].text;
+
+    assert!(!text.contains("The March ledger is attached."), "{text}");
+    assert!(text.contains("Subject: Ledger for March"), "{text}");
+}
+
+#[test]
+fn an_honestly_sized_rtf_body_is_still_read() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("rtf-body.msg");
+    rtf_only_message(&path, 66);
+
+    let extracted =
+        extract_msg(&path, &ResourceLimits::default(), &CancellationToken::new()).unwrap();
+    let text = &extracted.pages[0].text;
+
+    assert!(text.contains("The March ledger is attached."), "{text}");
+}

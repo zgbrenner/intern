@@ -41,6 +41,19 @@ const EMITTED_HEADERS: [&str; 5] = ["From", "To", "Cc", "Date", "Subject"];
 /// hundred, all of them siblings.
 const MAX_MULTIPART_DECLARATIONS: usize = 256;
 
+/// The largest decompressed RTF body this will ask for, and the largest
+/// expansion it will believe.
+///
+/// Outlook stores an RTF body compressed, and the compressed body states its
+/// own decompressed size in its header; the MS-OXRTFCP decompressor reserves
+/// exactly that many bytes before it reads a byte of payload. A
+/// three-kilobyte message claiming four gigabytes therefore aborts the worker
+/// process on the allocation. A real body is prose, which this LZ77 variant
+/// compresses by well under a factor of ten, and no email body approaches
+/// sixty-four megabytes of text.
+const MAX_RTF_DECOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_RTF_EXPANSION: u64 = 64;
+
 pub fn extract_eml(
     path: &Path,
     limits: &ResourceLimits,
@@ -143,11 +156,13 @@ fn render_outlook(message: &msg_parser::Outlook) -> String {
         message.body.clone()
     } else if !message.html.trim().is_empty() {
         html_to_text(&message.html)
-    } else {
+    } else if rtf_body_is_believable(&message.rtf_compressed) {
         message
             .html_from_rtf()
             .map(|html| html_to_text(&html))
             .unwrap_or_default()
+    } else {
+        String::new()
     };
     let mut text = lines.join("\n");
     text.push_str("\n\n");
@@ -168,6 +183,33 @@ fn render_outlook(message: &msg_parser::Outlook) -> String {
         }
     }
     text
+}
+
+/// Whether a compressed RTF body's own header claims a decompressed size
+/// worth allocating for. A body that says nothing readable about its size is
+/// not read either.
+fn rtf_body_is_believable(compressed_hex: &str) -> bool {
+    let compressed = (compressed_hex.len() / 2) as u64;
+    match declared_rtf_size(compressed_hex) {
+        Some(declared) => {
+            declared <= MAX_RTF_DECOMPRESSED_BYTES
+                && declared <= compressed.saturating_mul(MAX_RTF_EXPANSION)
+        }
+        None => false,
+    }
+}
+
+/// The decompressed size a compressed RTF body declares. The MS-OXRTFCP
+/// header is four little-endian 32-bit words — compressed size, decompressed
+/// size, magic, CRC — and the MAPI property arrives hex-encoded.
+fn declared_rtf_size(compressed_hex: &str) -> Option<u64> {
+    let declared = compressed_hex.get(8..16)?;
+    let mut size = 0_u64;
+    for index in (0..8).step_by(2) {
+        let byte = u8::from_str_radix(declared.get(index..index + 2)?, 16).ok()?;
+        size |= u64::from(byte) << (4 * index);
+    }
+    Some(size)
 }
 
 /// `2026-03-04T15:22:10Z` as `2026-03-04 15:22:10 UTC`: the date then
