@@ -28,6 +28,19 @@ use crate::limits::ResourceLimits;
 /// them when the `Date` header parses.
 const EMITTED_HEADERS: [&str; 5] = ["From", "To", "Cc", "Date", "Subject"];
 
+/// How many `multipart/` content types a message may declare before it is
+/// refused unparsed.
+///
+/// mailparse walks a MIME tree by recursion, so nesting depth is stack depth
+/// on a two-megabyte extraction thread, and a few kilobytes of nested
+/// boundaries overflow it — which aborts the worker process rather than
+/// failing one document. Counting the declarations is a cheap upper bound on
+/// the depth without parsing anything. Measured on this parser a
+/// two-thousand-level message still parses, and nothing real comes near this
+/// bound: a digest carrying a hundred forwarded messages declares about a
+/// hundred, all of them siblings.
+const MAX_MULTIPART_DECLARATIONS: usize = 256;
+
 pub fn extract_eml(
     path: &Path,
     limits: &ResourceLimits,
@@ -35,6 +48,11 @@ pub fn extract_eml(
 ) -> Result<ExtractedDocument, ExtractionError> {
     cancel.check()?;
     let bytes = read_bounded(path, limits, cancel)?;
+    if declares_too_many_multiparts(&bytes) {
+        return Err(ExtractionError::parse_failed(format!(
+            "email declares more than {MAX_MULTIPART_DECLARATIONS} multipart content types"
+        )));
+    }
     let mail = mailparse::parse_mail(&bytes)
         .map_err(|error| ExtractionError::parse_failed(format!("email did not parse: {error}")))?;
     cancel.check()?;
@@ -186,6 +204,18 @@ fn read_bounded(
     Ok(bytes)
 }
 
+/// Counts `multipart/` in the raw message, stopping as soon as the bound is
+/// passed so an oversized message costs no more than a bounded scan.
+fn declares_too_many_multiparts(bytes: &[u8]) -> bool {
+    const NEEDLE: &[u8] = b"multipart/";
+    bytes
+        .windows(NEEDLE.len())
+        .filter(|window| window.eq_ignore_ascii_case(NEEDLE))
+        .take(MAX_MULTIPART_DECLARATIONS + 1)
+        .count()
+        > MAX_MULTIPART_DECLARATIONS
+}
+
 fn render_email(mail: &ParsedMail) -> String {
     let mut lines = Vec::new();
     for name in EMITTED_HEADERS {
@@ -207,7 +237,7 @@ fn render_email(mail: &ParsedMail) -> String {
     }
 
     let mut parts = MessageParts::default();
-    collect_parts(mail, &mut parts);
+    collect_parts(mail, &mut parts, 0);
     let body = match (parts.plain, parts.html) {
         (Some(plain), _) => plain,
         (None, Some(html)) => html_to_text(&html),
@@ -241,7 +271,13 @@ struct MessageParts {
 
 /// Walks the (possibly nested) MIME tree depth-first, keeping the first
 /// text/plain and first text/html bodies and listing every attachment.
-fn collect_parts(part: &ParsedMail, parts: &mut MessageParts) {
+///
+/// This walk recurses too, so it stops at the same depth the message is
+/// allowed to declare rather than trusting the tree it was handed.
+fn collect_parts(part: &ParsedMail, parts: &mut MessageParts, depth: usize) {
+    if depth > MAX_MULTIPART_DECLARATIONS {
+        return;
+    }
     let disposition = part.get_content_disposition();
     if disposition.disposition == DispositionType::Attachment {
         let filename = disposition
@@ -255,7 +291,7 @@ fn collect_parts(part: &ParsedMail, parts: &mut MessageParts) {
     }
     if part.ctype.mimetype.starts_with("multipart/") {
         for subpart in &part.subparts {
-            collect_parts(subpart, parts);
+            collect_parts(subpart, parts, depth + 1);
         }
         return;
     }

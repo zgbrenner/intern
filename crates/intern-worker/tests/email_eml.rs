@@ -158,3 +158,41 @@ fn a_malformed_message_reports_a_parse_error_instead_of_panicking() {
     assert_eq!(error.code(), "PARSE_FAILED");
     assert!(!error.retryable());
 }
+
+/// Each nested `multipart/` level is another frame in mailparse's recursion,
+/// on a two-megabyte extraction thread. A file a few kilobytes long can nest
+/// deeply enough to run that stack out, and a stack overflow takes the whole
+/// worker process down rather than failing one document.
+fn nested_multiparts(depth: usize) -> Vec<u8> {
+    let mut message = String::from(
+        "From: alice@example.com\r\n\
+         Subject: Deeply nested\r\n\
+         MIME-Version: 1.0\r\n",
+    );
+    for level in 0..depth {
+        message.push_str(&format!(
+            "Content-Type: multipart/mixed; boundary=\"b{level}\"\r\n\r\n--b{level}\r\n"
+        ));
+    }
+    message.push_str("Content-Type: text/plain\r\n\r\nthe innermost body\r\n");
+    message.into_bytes()
+}
+
+#[test]
+fn deeply_nested_multiparts_are_a_parse_error_not_a_crash() {
+    let error = extract(&nested_multiparts(5_000)).unwrap_err();
+
+    assert_eq!(error.code(), "PARSE_FAILED");
+    assert!(!error.retryable());
+}
+
+#[test]
+fn ordinary_nesting_depth_still_parses() {
+    let document = extract(&nested_multiparts(8)).unwrap();
+
+    assert!(
+        document.pages[0].text.contains("the innermost body"),
+        "{}",
+        document.pages[0].text
+    );
+}
