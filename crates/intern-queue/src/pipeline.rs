@@ -168,6 +168,10 @@ impl Drop for LeaseKeeper {
 pub const PARSER_TIMEOUT_SECONDS: u64 = 30 * 60;
 pub const MODEL_TIMEOUT_SECONDS: u64 = 15 * 60;
 
+/// How long a request that has already missed its deadline is given to
+/// notice its cancel before the queue stops waiting for it.
+const MODEL_CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The extraction boundary, as the queue sees it.
 pub use intern_engine::DocumentExtractor as WorkerBoundary;
 /// Extraction failures, as the queue sees them.
@@ -284,7 +288,18 @@ impl FileActions for CoreFileActions {
     }
 
     fn apply(&self, item: &QueueItem, destination: &Path) -> PipelineResult<()> {
-        self.store.begin_applying(item.id, QueueStatus::Ready)?;
+        self.store
+            .begin_applying(item.id, QueueStatus::Ready)
+            .map_err(|error| match error.code() {
+                // The queue is working on another document, so the rename is
+                // early rather than wrong. Saying so distinctly is what lets
+                // the caller wait instead of blaming the document.
+                ErrorCode::StateConflict => PipelineError::new(
+                    APPLY_DEFERRED,
+                    "another document is being processed; the rename waits for the queue",
+                ),
+                _ => error.into(),
+            })?;
         let lease = LeaseKeeper::start(Arc::clone(&self.store), item.id, LEASE_RENEWAL_INTERVAL)?;
         let result = self
             .applier
@@ -483,11 +498,20 @@ pub struct ProposalRecord {
     /// Such a document waits for a person rather than being filed twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub near_duplicate_of: Option<String>,
+    /// Whether a person has approved this name. An approval the queue was too
+    /// busy to act on at once waits here, so the scheduler files the document
+    /// when it is free even with automatic renaming switched off.
+    #[serde(default)]
+    pub approved: bool,
 }
 
 /// The review reason for a document whose text is nearly the text of one
 /// already filed. The record's `near_duplicate_of` names that filing.
 pub const NEAR_DUPLICATE: &str = "NEAR_DUPLICATE";
+
+/// The review reason for a rename a person took back. The document is where
+/// it started and waits for a decision; nothing files it again on its own.
+pub const UNDONE: &str = "UNDONE";
 
 impl ProposalRecord {
     /// The validated facts as the name carries them: the document's words,
@@ -560,6 +584,17 @@ pub struct Pipeline {
     model_timeout: std::time::Duration,
     lease_renewal_interval: std::time::Duration,
     run_lock: Mutex<()>,
+}
+
+/// Which waiting renames one scheduler pass applies.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ReadyScope {
+    /// Everything owed: every ready document when automatic renaming is on,
+    /// and every approval still waiting. What opens a drain.
+    Everything,
+    /// Only the approvals the queue was too busy to act on when they were
+    /// made. What runs between documents.
+    ApprovalsOnly,
 }
 
 #[derive(Clone, Copy)]
@@ -828,11 +863,15 @@ impl Pipeline {
             .run_lock
             .lock()
             .map_err(|_| PipelineError::new("STATE_CONFLICT", "pipeline lock is unavailable"))?;
-        self.apply_pending_automatic_ready()?;
+        self.apply_pending_ready(ReadyScope::Everything)?;
         while !self.paused.load(Ordering::SeqCst) {
             if !self.run_next_inner()? {
                 break;
             }
+            // Between documents, not only before the first: an approval made
+            // while the queue was working could not be applied then, and this
+            // is the next moment the store will let it through.
+            self.apply_pending_ready(ReadyScope::ApprovalsOnly)?;
         }
         Ok(())
     }
@@ -843,7 +882,7 @@ impl Pipeline {
             .lock()
             .map_err(|_| PipelineError::new("STATE_CONFLICT", "pipeline lock is unavailable"))?;
         if !self.paused.load(Ordering::SeqCst) {
-            self.apply_pending_automatic_ready()?;
+            self.apply_pending_ready(ReadyScope::Everything)?;
             let _ = self.run_next_inner()?;
         }
         Ok(())
@@ -933,12 +972,15 @@ impl Pipeline {
                         && self.worker.restart().is_err();
                     self.store
                         .record_processing_failure(item.id, ErrorCode::IoError)?;
-                    if restart_failed
-                        && let Some(reclaimed) = self.store.claim_next()?
-                        && reclaimed.id == item.id
-                    {
-                        self.store
-                            .record_processing_failure(item.id, ErrorCode::IoError)?;
+                    // A worker that will not come back cannot read this
+                    // document on a second attempt either, so the failure is
+                    // counted twice and the document fails now rather than
+                    // stalling the queue again. Counted against this item by
+                    // id: reclaiming through the queue would claim whichever
+                    // document is next in line, which is not always this one,
+                    // and leave that one extracting under nobody's lease.
+                    if restart_failed {
+                        self.repository.record_recovered_failure(item.id)?;
                     }
                     self.events.queue_changed();
                     return Ok(true);
@@ -1056,6 +1098,7 @@ impl Pipeline {
             revision: 1,
             house_rules,
             near_duplicate_of,
+            approved: false,
         };
         let next = match record.status {
             ProposalStatus::Ready => QueueStatus::Ready,
@@ -1099,11 +1142,15 @@ impl Pipeline {
         Ok(true)
     }
 
-    fn apply_pending_automatic_ready(&self) -> PipelineResult<()> {
+    /// Applies the renames the scheduler owes: every ready document when
+    /// automatic renaming is on, and every document a person approved while
+    /// the queue was busy elsewhere, whether it is on or not.
+    fn apply_pending_ready(&self, scope: ReadyScope) -> PipelineResult<()> {
         if self.paused.load(Ordering::SeqCst) {
             return Ok(());
         }
         let ready = self
+            .store
             .list()?
             .into_iter()
             .filter(|item| item.status == QueueStatus::Ready)
@@ -1112,25 +1159,22 @@ impl Pipeline {
             return Ok(());
         }
         let settings = self.settings.load()?;
-        if !settings.automatic_rename {
-            return Ok(());
-        }
+        let automatic = settings.automatic_rename && scope == ReadyScope::Everything;
         for item in ready {
             if self.paused.load(Ordering::SeqCst) {
                 break;
             }
-            let Some(proposal) = item.proposal else {
-                self.repository
-                    .mark_needs_review(item.id, "PROPOSAL_MISSING")?;
+            let Some(proposal) = self.repository.load_proposal(item.id)? else {
+                if automatic {
+                    self.repository
+                        .mark_needs_review(item.id, "PROPOSAL_MISSING")?;
+                }
                 continue;
             };
-            let queue_item = self
-                .store
-                .list()?
-                .into_iter()
-                .find(|candidate| candidate.id == item.id)
-                .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
-            let _ = self.apply_if_unchanged(&queue_item, &proposal.filename, &settings);
+            if !automatic && !proposal.approved {
+                continue;
+            }
+            let _ = self.apply_if_unchanged(&item, &proposal.filename, &settings);
         }
         Ok(())
     }
@@ -1159,9 +1203,9 @@ impl Pipeline {
         let local = self
             .repository
             .find_similar(fingerprint, item_id)
-            .ok()
-            .flatten()
-            .filter(|similar| {
+            .unwrap_or_default()
+            .into_iter()
+            .find(|similar| {
                 same_document(similar.distance, &similar.filing.filename, date.as_deref())
             })
             .map(|similar| similar.filing.describe());
@@ -1218,7 +1262,7 @@ impl Pipeline {
                 "learned spelling does not exist",
             ));
         }
-        self.restyle_waiting()
+        self.restyle_waiting(None)
     }
 
     /// Apply a learned spelling from now on without waiting for a second
@@ -1230,17 +1274,24 @@ impl Pipeline {
                 "learned spelling does not exist",
             ));
         }
-        self.restyle_waiting()
+        self.restyle_waiting(None)
     }
 
     /// Recomposes the proposed name of every document still waiting under
     /// the spellings now in force, so a rule that just changed shows in the
     /// queue at once rather than only on the next document.
-    fn restyle_waiting(&self) -> PipelineResult<()> {
+    ///
+    /// `approved` names the document whose name a person has just typed, if
+    /// any. That name is theirs and is never recomposed: composing it again
+    /// from the validated facts would throw away everything the facts do not
+    /// carry, the date they typed in most of all.
+    fn restyle_waiting(&self, approved: Option<i64>) -> PipelineResult<()> {
         let style = self.repository.active_style()?;
         let mut changed = false;
         for item in self.store.list()? {
-            if !matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready) {
+            if !matches!(item.status, QueueStatus::NeedsReview | QueueStatus::Ready)
+                || approved == Some(item.id)
+            {
                 continue;
             }
             let Some(mut record) = self.repository.load_proposal(item.id)? else {
@@ -1279,6 +1330,7 @@ impl Pipeline {
     /// rule.
     fn learn_from_edit(
         &self,
+        id: i64,
         record: &ProposalRecord,
         extension: &str,
         approved: &str,
@@ -1302,7 +1354,7 @@ impl Pipeline {
         } else if lesson.is_meaningful() {
             self.repository.learn(&lesson)?;
         }
-        self.restyle_waiting()
+        self.restyle_waiting(Some(id))
     }
 
     fn analyze_with_deadline(
@@ -1340,8 +1392,17 @@ impl Pipeline {
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let canceled = model.cancel();
-                let _ = receiver.recv();
-                let _ = join.join();
+                // A request that has already missed its deadline is given a
+                // little longer to notice the cancel, and then left to finish
+                // on its own. Waiting on it without a deadline meant one model
+                // that honoured neither its deadline nor its cancel stopped
+                // the queue for as long as the process lived.
+                if receiver
+                    .recv_timeout(self.model_timeout.min(MODEL_CANCEL_GRACE))
+                    .is_ok()
+                {
+                    let _ = join.join();
+                }
                 match canceled {
                     Ok(()) => Err(ModelFailure::fatal("MODEL_TIMEOUT")),
                     Err(_) => Err(ModelFailure::fatal("MODEL_CANCEL_FAILED")),
@@ -1394,12 +1455,20 @@ impl Pipeline {
             self.events.queue_changed();
             return Ok(());
         }
+        let proposal = self.repository.load_proposal(item.id)?;
+        // The name to apply is the one the record holds now, not the one the
+        // caller read a moment ago. Nothing holds the queue still between a
+        // scheduler pass deciding what to file and the file operation itself,
+        // and an edit approved in that moment is the name the person expects
+        // to see on the document.
+        let filename = proposal
+            .as_ref()
+            .map_or(filename, |record| record.filename.as_str());
         if leading_date(filename).is_none() {
             self.repository.mark_needs_review(item.id, DATE_REQUIRED)?;
             self.events.queue_changed();
             return Ok(());
         }
-        let proposal = self.repository.load_proposal(item.id)?;
         let target = match proposal.as_ref() {
             Some(record) => target_folder(
                 settings,
@@ -1421,6 +1490,14 @@ impl Pipeline {
             return Err(failure);
         }
         if let Err(error) = self.files.apply(item, &target.join(filename)) {
+            if error.code == APPLY_DEFERRED {
+                // Nothing is wrong with this document: the queue was busy with
+                // another one. The name a person approved is durable in the
+                // proposal, so the item stays ready and the scheduler applies
+                // it between documents rather than sending it to review.
+                self.events.queue_changed();
+                return Ok(());
+            }
             // Core file operations journal ambiguous failures in Applying. Try to settle
             // them now; the scheduler also retries reconciliation periodically.
             let _ = self.files.reconcile(item);
@@ -1431,6 +1508,8 @@ impl Pipeline {
                 .any(|current| current.id == item.id && current.status == QueueStatus::Ready)
             {
                 self.repository.mark_needs_review(item.id, &error.code)?;
+            } else {
+                self.report_settled(item.id);
             }
             self.events.queue_changed();
             return Err(error);
@@ -1469,6 +1548,63 @@ impl Pipeline {
                     .remember_fingerprint(item.id, fingerprint, &filed_name);
             }
             self.filing.filed(&document);
+        }
+    }
+
+    /// Reports an operation a reconciliation finished rather than the call
+    /// that started it.
+    ///
+    /// The applier journals an ambiguous apply or undo and settles it
+    /// afterwards - on the next retry, on the next recovery pass, or right
+    /// here - and nobody used to be told: a document filed that way was never
+    /// described and never remembered as a filing, so a second scan of it was
+    /// filed all over again, and a document put back that way was still
+    /// remembered as filed. What is reported is read from the store, so it is
+    /// the same work whichever call finished the operation.
+    fn report_settled(&self, item_id: i64) {
+        let Ok(items) = self.store.list() else {
+            return;
+        };
+        let Some(item) = items.into_iter().find(|candidate| candidate.id == item_id) else {
+            return;
+        };
+        let Ok(Some(receipt)) = self.store.load_receipt(item_id) else {
+            return;
+        };
+        if receipt.stage != OperationStage::Complete {
+            return;
+        }
+        match receipt.direction {
+            OperationDirection::Apply if item.status == QueueStatus::Completed => {
+                self.report_filed(&item);
+            }
+            OperationDirection::Undo if item.status != QueueStatus::Completed => {
+                // An undo returns the item to ready, which is the state the
+                // scheduler files from: with automatic renaming on it would
+                // apply the same name again within the minute and undo the
+                // person's undo. Taking a decision back is a decision, so the
+                // document waits for the next one.
+                let _ = self.repository.mark_needs_review(item_id, UNDONE);
+                let _ = self.repository.forget_fingerprint(item_id);
+                // An undo receipt reads the other way round: it moved the
+                // document from the name it was filed under back to where it
+                // started, and the vacated name is what a records keeper knows
+                // it by.
+                self.filing.unfiled(&UnfiledDocument {
+                    item_id,
+                    source_path: item.source_path.clone(),
+                    source_hash: item.source_hash.clone(),
+                    destination: receipt.source.clone(),
+                });
+                if let Ok(settings) = self.settings.load() {
+                    prune_empty_layout_folders(
+                        &destination_root(&settings, &item.source_path),
+                        &receipt.source,
+                        settings.destination_layout,
+                    );
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1561,8 +1697,20 @@ impl Pipeline {
         {
             let claimed = self.store.claim_deferred_reconciliation(id)?;
             let result = self.files.reconcile(&claimed);
+            self.report_settled(id);
             self.events.queue_changed();
             return result;
+        }
+        if item.status == QueueStatus::NeedsReview
+            && item.error_code == Some(ErrorCode::UploaderUnverified)
+        {
+            // The denial happened before any analysis, so there is no
+            // proposal to review and nothing for a person to approve: the
+            // only useful thing Retry can mean is "the file is verified now,
+            // read it". Same compare-and-swap as the duplicate shortcut.
+            self.repository.retry_unverified(id)?;
+            self.events.queue_changed();
+            return Ok(());
         }
         if item.status == QueueStatus::NeedsReview && item.error_code == Some(ErrorCode::Duplicate)
         {
@@ -1652,14 +1800,16 @@ impl Pipeline {
         // A preference store, not a filing step: a lesson that cannot be
         // written must not stop the rename that was just approved.
         if let Some(record) = proposed.as_ref() {
-            let _ = self.learn_from_edit(record, source_extension, &filename);
+            let _ = self.learn_from_edit(id, record, source_extension, &filename);
         }
         let ready = self
             .store
             .list()?
             .into_iter()
             .find(|candidate| candidate.id == id)
-            .unwrap();
+            .ok_or_else(|| {
+                PipelineError::new("ITEM_NOT_FOUND", "queue item disappeared during approval")
+            })?;
         let settings = match self.settings.load() {
             Ok(settings) => settings,
             Err(error) => {
@@ -1708,22 +1858,13 @@ impl Pipeline {
                 "completed item has no durable operation receipt",
             )
         })?;
-        self.files.undo(&item, &receipt)?;
-        let _ = self.repository.forget_fingerprint(id);
-        self.filing.unfiled(&UnfiledDocument {
-            item_id: item.id,
-            source_path: item.source_path.clone(),
-            source_hash: item.source_hash.clone(),
-            destination: receipt.destination.clone(),
-        });
-        if let Ok(settings) = self.settings.load() {
-            prune_empty_layout_folders(
-                &destination_root(&settings, &item.source_path),
-                &receipt.destination,
-            );
-        }
+        // An undo the applier journalled can be finished by a reconciliation
+        // even when the call itself reports a failure, so what settles this is
+        // the store rather than the return value.
+        let outcome = self.files.undo(&item, &receipt);
+        self.report_settled(id);
         self.events.queue_changed();
-        Ok(())
+        outcome
     }
 
     pub fn clear_history(&self) -> PipelineResult<usize> {
@@ -1796,6 +1937,7 @@ impl Pipeline {
             {
                 let _ = self.files.reconcile(&claimed);
             }
+            self.report_settled(item.id);
         }
         self.events.queue_changed();
         Ok(())
@@ -2043,13 +2185,18 @@ impl PipelineRepository {
         Ok(())
     }
 
-    /// The closest filing to `fingerprint` within the near-duplicate
-    /// distance, other than `except_item`'s own.
+    /// The filings within the near-duplicate distance of `fingerprint`,
+    /// closest first, other than `except_item`'s own.
+    ///
+    /// All of them, not only the closest. Last year's renewal of an agreement
+    /// can be nearer in text than this year's second scan of it is, and
+    /// answering with that one alone hid the filing the document really
+    /// repeats behind a date that says "another document".
     fn find_similar(
         &self,
         fingerprint: u64,
         except_item: i64,
-    ) -> PipelineResult<Option<SimilarFiling>> {
+    ) -> PipelineResult<Vec<SimilarFiling>> {
         let connection = self.lock()?;
         let mut statement = connection
             .prepare("SELECT fingerprint, filed_name FROM fingerprints WHERE queue_item_id <> ?1")
@@ -2059,14 +2206,12 @@ impl PipelineRepository {
                 Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?))
             })
             .map_err(database_error)?;
-        let mut closest: Option<SimilarFiling> = None;
+        let mut similar = Vec::new();
         for row in rows {
             let (stored, filed_name) = row.map_err(database_error)?;
             let distance = fingerprint::hamming(fingerprint, stored);
-            if distance <= NEAR_DUPLICATE_DISTANCE
-                && closest.as_ref().is_none_or(|best| distance < best.distance)
-            {
-                closest = Some(SimilarFiling {
+            if distance <= NEAR_DUPLICATE_DISTANCE {
+                similar.push(SimilarFiling {
                     filing: KnownFiling {
                         filename: filed_name,
                         filed_by: None,
@@ -2075,7 +2220,8 @@ impl PipelineRepository {
                 });
             }
         }
-        Ok(closest)
+        similar.sort_by_key(|candidate| candidate.distance);
+        Ok(similar)
     }
 
     fn forget_rule_for(&self, kind: RuleKind, from: &str) -> PipelineResult<()> {
@@ -2125,6 +2271,9 @@ impl PipelineRepository {
         if !record.reasons.iter().any(|entry| entry == reason) {
             record.reasons.push(reason.to_owned());
         }
+        // A document waiting for a person is no longer a document waiting to
+        // be filed, whatever was approved before.
+        record.approved = false;
         record.revision += 1;
         let mut connection = self.lock()?;
         let transaction = connection.transaction().map_err(database_error)?;
@@ -2144,6 +2293,27 @@ impl PipelineRepository {
         transaction.commit().map_err(database_error)
     }
 
+    /// Returns a document denied at admission to the queue, for the person
+    /// who has since had its uploader verified. The compare-and-swap covers
+    /// the error code as well as the status, so only that denial takes the
+    /// shortcut and a concurrent decision on the item makes it fail closed.
+    fn retry_unverified(&self, id: i64) -> PipelineResult<()> {
+        let changed = self.lock()?.execute(
+            "UPDATE queue_items SET status = 'queued', processing_failures = 0, error_code = NULL,
+             owner_session = NULL, lease_expires_at = NULL, updated_at = unixepoch()
+             WHERE id = ?1 AND status = 'needs_review' AND error_code = 'UPLOADER_UNVERIFIED'",
+            params![id],
+        ).map_err(database_error)?;
+        if changed == 1 {
+            Ok(())
+        } else {
+            Err(PipelineError::new(
+                "STATE_CONFLICT",
+                "unverified retry compare-and-swap failed",
+            ))
+        }
+    }
+
     fn retry_canceled(&self, id: i64) -> PipelineResult<()> {
         let changed = self.lock()?.execute(
             "UPDATE queue_items SET status = 'queued', processing_failures = 0, error_code = NULL,
@@ -2161,6 +2331,10 @@ impl PipelineRepository {
         }
     }
 
+    /// Counts one processing failure against an item that is back in the
+    /// queue and owned by nobody - interrupted by a crash, or given up on
+    /// because the worker that was reading it cannot be restarted - and
+    /// fails it once it has failed twice.
     fn record_recovered_failure(&self, id: i64) -> PipelineResult<()> {
         let changed = self
             .lock()?
@@ -2212,6 +2386,7 @@ impl PipelineRepository {
         record.description = description.trim().to_owned();
         record.status = ProposalStatus::Ready;
         record.reasons.clear();
+        record.approved = true;
         record.revision += 1;
         let json = serde_json::to_string(&record)
             .map_err(|_| PipelineError::new("INVALID_DATA", "proposal could not be stored"))?;
@@ -2317,12 +2492,23 @@ pub fn layout_subfolder(
 /// in, walking up from its folder to (but never including) the destination
 /// root. A folder holding anything else is left where it is; so is a folder
 /// outside the root.
-fn prune_empty_layout_folders(root: &Path, vacated: &Path) {
+///
+/// Never more folders than `layout` itself creates, either. A destination
+/// changed to a folder that contains the old one puts everything ever filed
+/// "inside the root", and walking up until the root then emptied out the
+/// previous destination - somebody's filing, not Intern's scaffolding.
+fn prune_empty_layout_folders(root: &Path, vacated: &Path, layout: DestinationLayout) {
+    let mut remaining = match layout {
+        DestinationLayout::Flat => 0,
+        DestinationLayout::Year | DestinationLayout::Type | DestinationLayout::Party => 1,
+        DestinationLayout::YearType => 2,
+    };
     let mut folder = vacated.parent();
     while let Some(current) = folder {
-        if current == root || !current.starts_with(root) {
+        if remaining == 0 || current == root || !current.starts_with(root) {
             break;
         }
+        remaining -= 1;
         let empty = fs::read_dir(current).is_ok_and(|mut entries| entries.next().is_none());
         if !empty || fs::remove_dir(current).is_err() {
             break;
@@ -2414,6 +2600,11 @@ fn model_error_code(error: &ModelFailure) -> ErrorCode {
 
 /// The review reason and error code for a rename that carries no date.
 pub const DATE_REQUIRED: &str = "DATE_REQUIRED";
+
+/// What an apply reports when the queue is busy with another document. Not a
+/// failure of the rename: the item stays ready and the scheduler applies it
+/// as soon as it is free.
+const APPLY_DEFERRED: &str = "APPLY_DEFERRED";
 
 /// The date a filename begins with - `YYYY-MM-DD`, a real calendar date,
 /// standing on its own before whatever follows - or `None`.
@@ -2714,13 +2905,36 @@ mod layout_tests {
         );
     }
 
+    /// The destination can be changed to a folder that contains the old one.
+    /// Everything under the old destination is then "inside the root", and
+    /// walking up until the root emptied out the previous destination itself,
+    /// which is somebody's filing rather than Intern's scaffolding. Only as
+    /// many folders as the layout in force could have made are ever removed.
+    #[test]
+    fn pruning_never_reaches_above_the_folders_the_layout_makes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let previous_destination = root.join("filed");
+        let vacated = previous_destination
+            .join("2026")
+            .join("Invoice")
+            .join("a.pdf");
+        std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
+        prune_empty_layout_folders(&root, &vacated, DestinationLayout::YearType);
+        assert!(!previous_destination.join("2026").exists());
+        assert!(
+            previous_destination.exists(),
+            "the folder that used to be the destination is not Intern's to remove"
+        );
+    }
+
     #[test]
     fn pruning_stops_at_the_root_and_at_the_first_folder_with_contents() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("filed");
         let vacated = root.join("2026").join("Invoice").join("a.pdf");
         std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
-        prune_empty_layout_folders(&root, &vacated);
+        prune_empty_layout_folders(&root, &vacated, DestinationLayout::YearType);
         assert!(!root.join("2026").exists());
         assert!(root.exists());
 
@@ -2729,7 +2943,7 @@ mod layout_tests {
         std::fs::write(&sibling, b"x").unwrap();
         let vacated = root.join("2025").join("Notice").join("c.pdf");
         std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
-        prune_empty_layout_folders(&root, &vacated);
+        prune_empty_layout_folders(&root, &vacated, DestinationLayout::YearType);
         assert!(!root.join("2025").join("Notice").exists());
         assert!(
             root.join("2025").join("Invoice").exists(),
@@ -2739,7 +2953,7 @@ mod layout_tests {
         // A path outside the root is never touched.
         let elsewhere = temp.path().join("elsewhere").join("d.pdf");
         std::fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
-        prune_empty_layout_folders(&root, &elsewhere);
+        prune_empty_layout_folders(&root, &elsewhere, DestinationLayout::YearType);
         assert!(elsewhere.parent().unwrap().exists());
     }
 }

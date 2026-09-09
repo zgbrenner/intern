@@ -308,7 +308,20 @@ subfolder the queue derives from the validated facts: the year, the year and
 type, the type, or the first party (`2026/Statement of Work/`). A fact the
 layout needs but the document lacks sends it to `Undated` or `Unsorted`, never
 the root. Folders are created on first use and removed by the undo that
-empties them; the destination itself is never removed.
+empties them; the destination itself is never removed, and neither is
+anything above the folders the layout in force could have made - a
+destination changed to a folder that contains the old one leaves everything
+already filed inside the new root, and those folders are somebody's filing
+rather than Intern's scaffolding. An undo puts the
+document back and leaves it waiting for a person, not ready to file: ready is
+the state the scheduler files from, and with automatic renaming on the same
+name would be applied again within the minute, undoing the undo.
+
+Only one document is worked on at a time, so an approval made while the queue
+is busy cannot be applied on the spot. It is remembered on the proposal and
+applied by the scheduler between documents, under the name the reviewer typed
+- a busy queue is not something wrong with the document, and never sends it to
+review.
 
 ### House style
 
@@ -341,7 +354,10 @@ into the connector, and a diff would credit it all to one party.
 
 A rule takes effect on the second identical edit (`EDITS_TO_LEARN`), or at
 once when a person says "Use now" in Settings, and every document still
-waiting is recomposed under it so the queue shows the change immediately.
+waiting is recomposed under it so the queue shows the change immediately -
+every document but the one whose name was just approved, which is the
+reviewer's own text and would lose whatever the validated facts do not
+carry, the date they typed with it most of all.
 Respelling a spelling Intern applied maps back to the document's word - the
 person changed their mind about the word, not about Intern - and restoring
 the document's own spelling retracts the rule. The whole memory is the list
@@ -425,7 +441,11 @@ decide: this month's statement and last month's share almost every word, and
 a fingerprint barely sees the date and the figures that differ. So the dates
 have to agree - the filed name's leading date against the date the analysis
 found or the model read - and without a date on one side only a
-near-identical text counts. A match sends the document to review with
+near-identical text counts. Every filing within the
+distance is considered, not only the nearest one: last year's renewal of an
+agreement can be nearer in text than this year's second scan of it is, and
+looking only at the nearest hid the filing the document really repeats behind
+a date that said "another document". A match sends the document to review with
 `NEAR_DUPLICATE`, named after the filing it repeats and the machine that made
 it; it is never filed on its own, and an undo forgets the fingerprint.
 
@@ -505,7 +525,11 @@ app's sinks write the description records that let a SharePoint column carry
 the sentence — see [`sharepoint-descriptions.md`](sharepoint-descriptions.md)
 — and the filed markers of the shared intake folder. A sink hears about a
 rename only after it has succeeded and cannot undo it; a record that fails to
-write is reported in Settings, and the rename stands.
+write is reported in Settings, and the rename stands. A rename the applier
+had to settle afterwards - an ambiguous failure finished by a reconciliation,
+here, on the next retry, or on the next recovery pass - is reported the same
+way, because what is reported is read from the queue's own record of the
+operation rather than from whichever call happened to finish it.
 
 The mirror image is the *duplicate oracle*: before analysing a document the
 queue checks its own history for the same content, then asks the oracle,

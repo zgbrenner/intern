@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use intern_core::{ErrorCode, OperationReceipt, QueueItem, QueueStatus};
+use intern_core::{ErrorCode, OperationReceipt, QueueItem, QueueStatus, QueueStore};
 use intern_engine::{
     AnalysisTelemetry, DateRole, DigestBudget, DocumentAnalysis, DocumentSource, Evidence,
     ExtractProgress, ModelProposal, PageOrigin, ParserWarning, PartyRelation, ProposalStatus,
@@ -17,9 +17,9 @@ use intern_engine::{
 };
 use intern_queue::{
     pipeline::{
-        AnalyzerBoundary, DuplicateOracle, FileActions, FiledDocument, FilingSink, KnownFiling,
-        ModelFailure, NEAR_DUPLICATE, Pipeline, PipelineError, PipelineEventSink, PipelineProgress,
-        SimilarFiling, UnfiledDocument, WorkerBoundary, WorkerFailure,
+        AnalyzerBoundary, CoreFileActions, DuplicateOracle, FileActions, FiledDocument, FilingSink,
+        KnownFiling, ModelFailure, NEAR_DUPLICATE, Pipeline, PipelineError, PipelineEventSink,
+        PipelineProgress, SimilarFiling, UNDONE, UnfiledDocument, WorkerBoundary, WorkerFailure,
     },
     settings::{AppSettings, DestinationLayout, SettingsStore},
 };
@@ -171,6 +171,50 @@ impl WorkerBoundary for FakeWorker {
     fn shutdown(&self) -> Result<(), WorkerFailure> {
         self.cancellations.fetch_add(1, Ordering::SeqCst);
         self.gate.1.notify_all();
+        Ok(())
+    }
+}
+
+/// A worker that holds its first request open until a test releases it, and
+/// then reports a crash it cannot be restarted from - every time.
+#[derive(Default)]
+struct CrashingWorker {
+    started: AtomicBool,
+    gate: (Mutex<bool>, Condvar),
+}
+
+impl CrashingWorker {
+    fn release(&self) {
+        *self.gate.0.lock().unwrap() = true;
+        self.gate.1.notify_all();
+    }
+}
+
+impl WorkerBoundary for CrashingWorker {
+    fn extract(
+        &self,
+        _request_id: &str,
+        _path: &Path,
+        _progress: &mut dyn FnMut(ExtractProgress),
+    ) -> Result<DocumentSource, WorkerFailure> {
+        self.started.store(true, Ordering::SeqCst);
+        let (lock, wake) = &self.gate;
+        let mut released = lock.lock().unwrap();
+        while !*released {
+            released = wake.wait(released).unwrap();
+        }
+        Err(WorkerFailure::crashed())
+    }
+
+    fn cancel(&self, _request_id: &str) -> Result<(), WorkerFailure> {
+        Ok(())
+    }
+
+    fn restart(&self) -> Result<(), WorkerFailure> {
+        Err(WorkerFailure::new("WORKER_RESTART_FAILED", false, false))
+    }
+
+    fn shutdown(&self) -> Result<(), WorkerFailure> {
         Ok(())
     }
 }
@@ -657,6 +701,73 @@ fn failed_item_does_not_block_the_next_and_worker_restarts_only_once() {
     assert_eq!(items[0].status, QueueStatus::Failed);
     assert_eq!(items[0].error_code, Some(ErrorCode::IoError));
     assert_eq!(items[1].status, QueueStatus::Ready);
+}
+
+/// A crash the worker cannot be restarted from used to reclaim whatever the
+/// queue offered next, which is not always the document that crashed. Another
+/// waiting document was claimed instead and left extracting, under a lease
+/// nothing would renew and recovery would not take back while the app kept
+/// running: the document was simply gone.
+#[test]
+fn worker_crash_with_failed_restart_does_not_strand_another_queued_item() {
+    let temp = tempdir().unwrap();
+    let waiting = source(temp.path(), "waiting.pdf");
+    let crashing = source(temp.path(), "crashing.pdf");
+    let worker = Arc::new(CrashingWorker::default());
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&waiting, "waiting-hash");
+    files.trust(&crashing, "crashing-hash");
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings.save(&AppSettings::default()).unwrap();
+    let pipeline = Arc::new(
+        Pipeline::open(
+            temp.path().join("queue.sqlite3"),
+            Arc::clone(&worker) as Arc<dyn WorkerBoundary>,
+            Arc::new(FakeModel::new(vec![])),
+            files,
+            Arc::new(RecordingEvents::default()),
+            settings,
+        )
+        .unwrap(),
+    );
+    let enqueued = pipeline
+        .enqueue_files(&[waiting.clone(), crashing.clone()])
+        .unwrap();
+    let waiting_id = enqueued[0].id;
+    let crashing_id = enqueued[1].id;
+    // The first document is out of the queue while the second one runs, and a
+    // person puts it back - Retry - while that one is crashing.
+    pipeline.cancel(waiting_id).unwrap();
+
+    let running = Arc::clone(&pipeline);
+    let join = thread::spawn(move || running.run_until_idle());
+    while !worker.started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    pipeline.retry(waiting_id).unwrap();
+    worker.release();
+    join.join().unwrap().unwrap();
+
+    let items = pipeline.list().unwrap();
+    assert!(
+        items
+            .iter()
+            .all(|item| !matches!(item.status, QueueStatus::Extracting)),
+        "no document is left claimed by a worker that is gone: {items:?}"
+    );
+    let status = |id: i64| {
+        items
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.status)
+            .unwrap()
+    };
+    assert_eq!(
+        status(crashing_id),
+        QueueStatus::Failed,
+        "the document that crashed the worker is the one that fails"
+    );
+    assert_eq!(status(waiting_id), QueueStatus::Failed);
 }
 
 #[test]
@@ -1161,7 +1272,7 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
 
     pipeline.undo(completed.id).unwrap();
 
-    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::NeedsReview);
     assert!(path.exists());
     assert!(!receipt.destination.exists());
     assert_eq!(
@@ -1180,8 +1291,155 @@ fn real_sqlite_and_core_file_actions_apply_then_undo_the_operation_receipt() {
     );
     assert_eq!(
         pipeline.find_by_source_path(&path).unwrap().unwrap().status,
-        QueueStatus::Ready
+        QueueStatus::NeedsReview
     );
+}
+
+/// An undo is a decision, and the scheduler's next pass must respect it: with
+/// automatic renaming on, the queue used to file the document again within
+/// the minute, which undoes the person's undo.
+#[test]
+fn an_undone_rename_is_not_reapplied_automatically() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "undone.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("undone-queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+
+    pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+    pipeline.run_until_idle().unwrap();
+    let completed = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(completed.status, QueueStatus::Completed);
+    let destination = completed.receipt.clone().unwrap().destination;
+
+    pipeline.undo(completed.id).unwrap();
+    assert!(path.exists());
+
+    // The scheduler's next pass - the one that comes round every sixty-five
+    // seconds whether or not anything else happened.
+    pipeline.run_until_idle().unwrap();
+
+    let after = pipeline.list().unwrap().pop().unwrap();
+    let record = after.proposal.as_ref().unwrap();
+    assert_eq!(
+        after.status,
+        QueueStatus::NeedsReview,
+        "an undone rename waits for a person"
+    );
+    assert!(
+        record.reasons.iter().any(|reason| reason == UNDONE),
+        "{:?}",
+        record.reasons
+    );
+    assert!(path.exists(), "the document stays where the undo put it");
+    assert!(!destination.exists());
+}
+
+/// A person who clicks Approve while the queue is working on another document
+/// must end up with the document filed under the name they typed, not with an
+/// error they never asked about and a document pushed into review.
+#[test]
+fn approving_while_another_document_is_analyzing_files_it_when_the_queue_is_free() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let reviewed = source(&inbox, "reviewed.pdf");
+    let other = source(&inbox, "other.pdf");
+    let database = temp.path().join("busy-queue.sqlite3");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings.save(&AppSettings::default()).unwrap();
+    let pipeline = Pipeline::with_local_files(
+        database.clone(),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+
+    pipeline
+        .enqueue_files(std::slice::from_ref(&reviewed))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let waiting = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(waiting.status, QueueStatus::Ready);
+
+    // A second document, claimed the way a running queue claims one: the
+    // store refuses any apply while it is being processed.
+    pipeline
+        .enqueue_files(std::slice::from_ref(&other))
+        .unwrap();
+    let busy = QueueStore::open(&database).unwrap();
+    let claimed = busy.claim_next().unwrap().unwrap();
+    assert_eq!(claimed.status, QueueStatus::Extracting);
+
+    let approved = "2024-04-12 Employment Agreement between John Smith and Acme Corp.pdf";
+    pipeline
+        .approve(waiting.id, approved, "A sentence about the agreement.")
+        .unwrap();
+    let deferred = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == waiting.id)
+        .unwrap();
+    assert_eq!(
+        deferred.status,
+        QueueStatus::Ready,
+        "a busy queue is not a reason to review the document again"
+    );
+    assert_eq!(deferred.proposal.as_ref().unwrap().filename, approved);
+
+    // The other document leaves the queue, and the approval that was waiting
+    // is applied under the name the reviewer typed.
+    busy.transition(
+        claimed.id,
+        QueueStatus::Extracting,
+        QueueStatus::Canceled,
+        None,
+    )
+    .unwrap();
+    drop(busy);
+    pipeline.run_until_idle().unwrap();
+
+    let filed = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == waiting.id)
+        .unwrap();
+    assert_eq!(filed.status, QueueStatus::Completed);
+    assert_eq!(
+        filed
+            .receipt
+            .unwrap()
+            .destination
+            .file_name()
+            .unwrap()
+            .to_string_lossy(),
+        approved
+    );
+    assert!(inbox.join(approved).exists());
 }
 
 /// A year of contracts should not become one folder of a thousand files. The
@@ -1476,6 +1734,52 @@ fn failed_model_timeout_cancel_pauses_drain_until_request_is_terminal() {
     assert_eq!(model.calls.load(Ordering::SeqCst), 1);
 }
 
+/// A cancel the model refuses is still an answer; the request itself may
+/// never come back. The queue then waited on that request with no deadline
+/// at all, so one model that ignored both its deadline and its cancel stopped
+/// the queue for good.
+#[test]
+fn a_cancel_the_model_refuses_does_not_hold_the_queue_forever() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "ignores-cancel.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(BlockingModel::new(false));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "ignores-hash");
+    let pipeline = Arc::new(
+        Pipeline::open(
+            temp.path().join("queue.sqlite3"),
+            worker,
+            model.clone(),
+            files,
+            Arc::new(RecordingEvents::default()),
+            SettingsStore::new(temp.path().join("settings.json")),
+        )
+        .unwrap()
+        .with_model_timeout(Duration::from_millis(20)),
+    );
+    pipeline.enqueue_files(&[path]).unwrap();
+    let running = Arc::clone(&pipeline);
+    let (done, finished) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let _ = done.send(running.run_until_idle());
+    });
+
+    model.wait_for_cancel();
+    // The cancel comes back refused, and the request behind it never returns.
+    model.release_cancel();
+
+    finished
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the queue gave up on a request that would not come back")
+        .unwrap();
+    assert!(pipeline.is_paused());
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Queued);
+}
+
 #[test]
 fn shutdown_cancels_blocking_worker_before_waiting_for_pipeline_exit() {
     let temp = tempdir().unwrap();
@@ -1753,7 +2057,7 @@ fn undone_completion_is_not_flagged_as_a_duplicate_on_re_add() {
     assert_eq!(completed.status, QueueStatus::Completed);
 
     pipeline.undo(completed.id).unwrap();
-    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::NeedsReview);
 
     // The apply was undone, so the content is not filed anywhere: a new copy
     // must analyze normally instead of being flagged.
@@ -2023,6 +2327,62 @@ fn a_respelling_made_twice_in_review_becomes_interns_own_spelling() {
     );
 }
 
+/// The reviewer's name is the reviewer's. A second identical respelling makes
+/// the spelling Intern's own and every waiting document is recomposed under
+/// it - but not the one being approved, whose name a person has just typed:
+/// recomposing that one throws away the date they typed with it, and the loss
+/// shows the moment the apply does not go through.
+#[test]
+fn a_second_edit_that_also_typed_a_date_keeps_the_date_when_the_apply_fails() {
+    let temp = tempdir().unwrap();
+    // No date anywhere in the document, so validation withholds the model's
+    // and the reviewer types one in.
+    let undated = "Employment Agreement between John Smith and Acme Corporation         covering duties, salary, and term.";
+    let first = source(temp.path(), "first.pdf");
+    let second = source(temp.path(), "second.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(undated)),
+        Ok(parsed(undated)),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(proposal(0.94, false)),
+    ]));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&first, "first-hash");
+    files.trust(&second, "second-hash");
+    let pipeline = pipeline(
+        temp.path(),
+        worker,
+        model,
+        Arc::clone(&files),
+        AppSettings::default(),
+    );
+    let queued = pipeline.enqueue_files(&[first, second]).unwrap();
+    let first_id = queued[0].id;
+    let second_id = queued[1].id;
+    pipeline.run_until_idle().unwrap();
+    assert_eq!(
+        record_of(&pipeline, second_id).filename,
+        "Employment Agreement between John Smith and Acme Corporation.pdf",
+        "no date the document supports"
+    );
+
+    let approved = "2024-04-12 Employment Agreement between John Smith and Acme.pdf";
+    pipeline
+        .approve(first_id, approved, "A sentence about the agreement.")
+        .unwrap();
+    // The same respelling a second time, and this apply does not go through.
+    files.fail_next_apply();
+    let _ = pipeline.approve(second_id, approved, "A sentence about the agreement.");
+
+    assert_eq!(
+        record_of(&pipeline, second_id).filename,
+        approved,
+        "the name the reviewer typed, date and all"
+    );
+}
+
 #[test]
 fn a_spelling_can_be_used_at_once_and_forgotten_again() {
     let temp = tempdir().unwrap();
@@ -2164,6 +2524,118 @@ const AGREEMENT: &str = "EMPLOYMENT AGREEMENT\n\nThis Employment Agreement is si
     benefits, and duties are described in the attached schedule, which forms part of this \
     agreement.";
 
+/// A rename that really happens but is reported to the queue as a failure:
+/// what the caller sees when the applier journalled an ambiguous operation
+/// and a reconciliation finished it afterwards.
+struct ReconciledApply {
+    inner: CoreFileActions,
+}
+
+impl FileActions for ReconciledApply {
+    fn fingerprint(&self, path: &Path) -> Result<String, PipelineError> {
+        self.inner.fingerprint(path)
+    }
+
+    fn apply(&self, item: &QueueItem, destination: &Path) -> Result<(), PipelineError> {
+        self.inner.apply(item, destination)?;
+        Err(PipelineError::new(
+            "MOVE_VERIFICATION_FAILED",
+            "the rename could not be confirmed by the caller",
+        ))
+    }
+
+    fn undo(&self, item: &QueueItem, receipt: &OperationReceipt) -> Result<(), PipelineError> {
+        self.inner.undo(item, receipt)
+    }
+
+    fn reconcile(&self, item: &QueueItem) -> Result<(), PipelineError> {
+        self.inner.reconcile(item)
+    }
+}
+
+/// A rename finished by a reconciliation is still a rename: the records
+/// keepers must hear about it, and it must be remembered as a filing, or the
+/// description is never written and a second scan of the same document is
+/// filed a second time.
+#[test]
+fn a_rename_finished_by_reconciliation_is_reported_and_fingerprinted() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let database = temp.path().join("queue.sqlite3");
+    let rescan_text = AGREEMENT
+        .replace("employs John", "emplcys John")
+        .replace("cartographer", "cartograpner")
+        .replace("thirty", "thirly");
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(AGREEMENT)),
+        Ok(parsed(&rescan_text)),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(proposal(0.94, false)),
+    ]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let store = Arc::new(QueueStore::open(&database).unwrap());
+    let filing = Arc::new(RecordingFiling::default());
+    let pipeline = Pipeline::open(
+        &database,
+        worker,
+        model,
+        Arc::new(ReconciledApply {
+            inner: CoreFileActions::local(store),
+        }),
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap()
+    .with_filing_sink(filing.clone());
+
+    let original = source(&inbox, "agreement-scan-1.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&original))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+
+    let completed = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(completed.status, QueueStatus::Completed);
+    let destination = completed.receipt.clone().unwrap().destination;
+    let filed = filing.filed.lock().unwrap().clone();
+    assert_eq!(filed.len(), 1, "the filing sink is told once: {filed:?}");
+    assert_eq!(filed[0].destination, destination);
+
+    // And the filing is remembered, so a second scan of the same agreement is
+    // recognised instead of being filed all over again.
+    let rescan = source(&inbox, "agreement-scan-2.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&rescan))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let second = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.source_path == rescan)
+        .unwrap();
+    assert_eq!(second.status, QueueStatus::NeedsReview);
+    let record = second.proposal.as_ref().unwrap();
+    assert!(
+        record.reasons.iter().any(|reason| reason == NEAR_DUPLICATE),
+        "{:?}",
+        record.reasons
+    );
+    assert_eq!(
+        record.near_duplicate_of.as_deref(),
+        destination.file_name().and_then(|name| name.to_str())
+    );
+}
+
 /// Two documents that say the same thing are one document filed twice. A
 /// second scan of a filed agreement - different bytes, three misread words -
 /// waits for a person and names the filing it repeats; the same template
@@ -2303,6 +2775,105 @@ fn a_second_scan_of_a_filed_document_waits_and_names_the_filing_it_repeats() {
         "an undone filing is forgotten"
     );
     assert_eq!(fourth.proposal.as_ref().unwrap().near_duplicate_of, None);
+}
+
+/// Closeness alone does not decide, and neither does the closest row. A
+/// renewal of the same agreement is nearer in text than a scan of the
+/// original is, and used to be the only filing the duplicate check looked at:
+/// its date said "another document", and the filing this scan really repeats
+/// was never mentioned.
+#[test]
+fn the_closest_fingerprint_with_the_wrong_date_does_not_hide_the_true_duplicate() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    let filed = temp.path().join("filed");
+    std::fs::create_dir_all(&inbox).unwrap();
+    std::fs::create_dir_all(&filed).unwrap();
+    let rescan_text = AGREEMENT
+        .replace("employs John", "emplcys John")
+        .replace("cartographer", "cartograpner")
+        .replace("thirly", "thirty");
+    let renewal_text = AGREEMENT.replace("April 12, 2024", "April 12, 2025");
+    let original = fingerprint::source_fingerprint(&parsed(AGREEMENT)).unwrap();
+    let to_rescan = fingerprint::hamming(
+        original,
+        fingerprint::source_fingerprint(&parsed(&rescan_text)).unwrap(),
+    );
+    let to_renewal = fingerprint::hamming(
+        original,
+        fingerprint::source_fingerprint(&parsed(&renewal_text)).unwrap(),
+    );
+    assert!(
+        to_renewal < to_rescan && to_rescan <= fingerprint::NEAR_DUPLICATE_DISTANCE,
+        "the renewal must be the nearer filing and the rescan a near duplicate          ({to_renewal} then {to_rescan})"
+    );
+    let renewal = ModelProposal {
+        document_date: Some("2025-04-12".into()),
+        evidence: Evidence {
+            date: Some("signed April 12, 2025".into()),
+            ..proposal(0.94, false).evidence
+        },
+        ..proposal(0.94, false)
+    };
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(&rescan_text)),
+        Ok(parsed(&renewal_text)),
+        Ok(parsed(AGREEMENT)),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(renewal),
+        Ok(proposal(0.94, false)),
+    ]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            destination: filed.to_string_lossy().into_owned(),
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+
+    for name in ["scan-1.pdf", "renewal.pdf"] {
+        let path = source(&inbox, name);
+        pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+        pipeline.run_until_idle().unwrap();
+    }
+    let filings = pipeline.filed_documents().unwrap();
+    assert_eq!(filings.len(), 2, "{filings:?}");
+
+    let again = source(&inbox, "scan-2.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&again))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+
+    let third = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.source_path == again)
+        .unwrap();
+    assert_eq!(third.status, QueueStatus::NeedsReview);
+    let record = third.proposal.as_ref().unwrap();
+    assert!(
+        record.reasons.iter().any(|reason| reason == NEAR_DUPLICATE),
+        "{:?}",
+        record.reasons
+    );
+    assert_eq!(
+        record.near_duplicate_of.as_deref(),
+        Some("2024-04-12 Employment Agreement between John Smith and Acme Corporation.pdf"),
+        "the filing that shares this document's date, not the nearer one"
+    );
 }
 
 /// The shared index answers for teammates' machines. Its answer is held to
@@ -2446,6 +3017,42 @@ fn uploader_guard_rechecks_a_previously_queued_document_before_extraction() {
         Some(ErrorCode::UploaderUnverified)
     );
 }
+
+/// A denial at admission happens before any analysis, so there is nothing to
+/// review and nothing to approve: the only useful thing a person can do is
+/// verify the file and ask for it again. Retry used to refuse.
+#[test]
+fn an_item_denied_at_extraction_can_be_retried_after_verification() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "denied.pdf");
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "denied-hash");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let guard = Arc::new(UploaderGuard {
+        allowed: AtomicBool::new(true),
+        hash: None,
+    });
+    let pipeline = pipeline(temp.path(), worker, model, files, AppSettings::default())
+        .with_admission_guard(guard.clone());
+    pipeline.enqueue_files(&[path]).unwrap();
+    guard.allowed.store(false, Ordering::SeqCst);
+    pipeline.run_until_idle().unwrap();
+    let denied = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(denied.status, QueueStatus::NeedsReview);
+    assert_eq!(denied.error_code, Some(ErrorCode::UploaderUnverified));
+    assert!(denied.proposal.is_none(), "nothing was analyzed");
+
+    guard.allowed.store(true, Ordering::SeqCst);
+    pipeline.retry(denied.id).unwrap();
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Queued);
+
+    pipeline.run_until_idle().unwrap();
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+}
+
 #[test]
 fn uploader_guard_binds_provider_verified_bytes_to_the_queue_fingerprint() {
     let temp = tempdir().unwrap();
