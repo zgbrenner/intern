@@ -174,6 +174,54 @@ impl Drop for StallingServer {
     }
 }
 
+/// A server that sends the whole correct body, slowly, in pieces - the shape
+/// of a 1.19 GiB download on a domestic connection.
+struct DribblingServer {
+    url: String,
+    join: Option<thread::JoinHandle<()>>,
+}
+
+impl DribblingServer {
+    fn new(body: &'static [u8], pieces: usize, gap: Duration) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let join = thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let _ = read_request(&mut stream);
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.flush();
+            // A client that gave up mid-body is the scenario one half of this
+            // test is asserting, so a broken pipe here must not panic; see the
+            // note in StallingServer for why a panic here aborts the binary.
+            for piece in body.chunks(body.len().div_ceil(pieces)) {
+                thread::sleep(gap);
+                if stream.write_all(piece).is_err() {
+                    return;
+                }
+                let _ = stream.flush();
+            }
+        });
+        Self {
+            url: format!("http://{address}/model.gguf"),
+            join: Some(join),
+        }
+    }
+}
+
+impl Drop for DribblingServer {
+    fn drop(&mut self) {
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
 impl FakeServer {
     fn sequence(responses: Vec<Vec<u8>>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -289,7 +337,7 @@ fn patient_downloader(disk: u64) -> Downloader<ReqwestHttpTransport, FixedDisk> 
         ReqwestHttpTransport::with_timeouts(
             Duration::from_secs(5),
             Duration::from_secs(20),
-            Duration::from_secs(60),
+            Some(Duration::from_secs(60)),
         )
         .unwrap(),
         FixedDisk(disk),
@@ -301,7 +349,7 @@ fn short_timeout_downloader(disk: u64) -> Downloader<ReqwestHttpTransport, Fixed
         ReqwestHttpTransport::with_timeouts(
             Duration::from_millis(80),
             Duration::from_millis(80),
-            Duration::from_millis(180),
+            Some(Duration::from_millis(180)),
         )
         .unwrap(),
         FixedDisk(disk),
@@ -425,6 +473,51 @@ fn wrong_digest_keeps_partial_and_never_publishes() {
     assert!(!directory.path().join("model.gguf").exists());
 }
 
+/// A file that is already installed and fails its digest cannot be repaired by
+/// checking it again, and nothing inside the app could delete it, so setup
+/// reported MODEL_FILE_INVALID on every attempt forever.
+#[test]
+fn an_invalid_installed_file_is_replaced_by_a_fresh_download() {
+    let bytes = b"the real model bytes";
+    let server = FakeServer::sequence(vec![response("200 OK", &[], bytes)]);
+    let directory = tempdir().unwrap();
+    // The right length and the wrong contents: corrupted in place by a bad
+    // disk, a half-finished copy, or an antivirus quarantine.
+    let installed = directory.path().join("model.gguf");
+    fs::write(&installed, b"corrupted in place!!").unwrap();
+
+    let result = downloader(u64::MAX)
+        .download(
+            &file(&server.url, bytes),
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
+        .unwrap();
+
+    assert_eq!(result, installed);
+    assert_eq!(fs::read(&installed).unwrap(), bytes);
+    assert!(!directory.path().join("model.gguf.partial").exists());
+
+    // The same dead end reached the other way: installing a copy a person
+    // already has, over a corrupt one.
+    let install = directory.path().join("install");
+    let selected = directory.path().join("selected.gguf");
+    fs::create_dir_all(&install).unwrap();
+    fs::write(install.join("model.gguf"), b"corrupted in place!!").unwrap();
+    fs::write(&selected, bytes).unwrap();
+    let installed = install_selected_file(
+        &selected,
+        &file("https://example.invalid/model.gguf", bytes),
+        &install,
+        &FixedDisk(u64::MAX),
+        &CancellationToken::new(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(fs::read(installed).unwrap(), bytes);
+}
+
 #[test]
 fn insufficient_disk_is_rejected_before_request() {
     let bytes = b"model";
@@ -480,6 +573,50 @@ fn stalled_response_headers_time_out_without_hanging() {
 
     assert_eq!(error.code(), ModelErrorCode::DownloadInterrupted);
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+/// A ceiling on the whole transfer is a connection speed below which a 1.19
+/// GiB download can never succeed, however many times it is retried. Only a
+/// transfer that stops moving may end one.
+#[test]
+fn a_slow_body_that_keeps_moving_is_not_cut_off() {
+    const BODY: &[u8] = b"a body that arrives in pieces over a slow link";
+    let gap = Duration::from_millis(120);
+
+    // The control: with a whole-transfer ceiling, a transfer that never
+    // stalled is cut off anyway.
+    let capped = DribblingServer::new(BODY, 6, gap);
+    let directory = tempdir().unwrap();
+    let error = Downloader::new(
+        ReqwestHttpTransport::with_timeouts(
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+            Some(Duration::from_millis(200)),
+        )
+        .unwrap(),
+        FixedDisk(u64::MAX),
+    )
+    .download(
+        &file(&capped.url, BODY),
+        directory.path(),
+        &CancellationToken::new(),
+        |_| {},
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), ModelErrorCode::DownloadInterrupted);
+
+    // The shipped policy has no such ceiling.
+    let server = DribblingServer::new(BODY, 6, gap);
+    let directory = tempdir().unwrap();
+    let published = downloader(u64::MAX)
+        .download(
+            &file(&server.url, BODY),
+            directory.path(),
+            &CancellationToken::new(),
+            |_| {},
+        )
+        .unwrap();
+    assert_eq!(fs::read(published).unwrap(), BODY);
 }
 
 #[test]

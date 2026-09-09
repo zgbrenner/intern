@@ -21,6 +21,12 @@ use crate::prompt::{RESPONSE_GRAMMAR, SYSTEM_INSTRUCTION, build_prompt};
 /// writing prose, so this stays small and generation stays fast.
 const MAX_REPLY_TOKENS: u32 = 420;
 
+/// How much of a reply body is worth reading. A reply is a short JSON object;
+/// even a thinking model's whole visible answer is a few tens of kilobytes.
+/// Two megabytes is far above anything real and far below anything that would
+/// hurt a laptop already running the model.
+const MAX_REPLY_BYTES: u64 = 2 * 1024 * 1024;
+
 /// What actually gets sent to the model for one document.
 ///
 /// Text only, by construction. Intern reads documents as text and the local
@@ -97,11 +103,17 @@ impl ModelClient {
         })
     }
 
-    /// One attempt, then one retry on a malformed reply.
+    /// One attempt, then one retry when the reply was malformed. A request
+    /// that failed outright is not retried: the second attempt fails the same
+    /// way, and against a server that has died or hung it turns one document
+    /// into two full request timeouts before anyone is told.
     pub fn propose(&self, request: &ModelRequest) -> EngineResult<ModelProposal> {
         match self.propose_once(request) {
             Ok(proposal) => Ok(proposal),
-            Err(_) => self.propose_once(request).map_err(AttemptError::into_error),
+            Err(AttemptError(EngineErrorCode::ModelResponseInvalid)) => {
+                self.propose_once(request).map_err(AttemptError::into_error)
+            }
+            Err(error) => Err(error.into_error()),
         }
     }
 
@@ -119,8 +131,8 @@ impl ModelClient {
         if !response.status().is_success() {
             return Err(AttemptError(EngineErrorCode::ModelRequestFailed));
         }
-        let completion: ChatCompletion = response
-            .json()
+        let bytes = read_capped(response, EngineErrorCode::ModelResponseInvalid)?;
+        let completion: ChatCompletion = serde_json::from_slice(&bytes)
             .map_err(|_| AttemptError(EngineErrorCode::ModelResponseInvalid))?;
         decode(completion)
     }
@@ -144,6 +156,29 @@ impl ModelClient {
             "chat_template_kwargs": {"enable_thinking": false}
         })
     }
+}
+
+/// Reads a reply body, refusing one that could not be a reply.
+///
+/// Whatever is at the other end of the socket decides how many bytes arrive,
+/// and a proxy's error page or a stream nobody asked for should not be read
+/// into memory without a limit. A body over the cap is a malformed reply;
+/// `on_io_failure` is what a body that simply stopped arriving means to the
+/// caller, which differs between the local server and a hosted service.
+pub(crate) fn read_capped(
+    body: impl std::io::Read,
+    on_io_failure: EngineErrorCode,
+) -> Result<Vec<u8>, AttemptError> {
+    use std::io::Read as _;
+
+    let mut bytes = Vec::new();
+    body.take(MAX_REPLY_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| AttemptError(on_io_failure))?;
+    if bytes.len() as u64 > MAX_REPLY_BYTES {
+        return Err(AttemptError(EngineErrorCode::ModelResponseInvalid));
+    }
+    Ok(bytes)
 }
 
 /// Reads a proposal out of a chat-completion reply: the local server's, or
@@ -179,16 +214,25 @@ pub(crate) fn proposal_from_text(content: &str) -> Result<ModelProposal, Attempt
 /// Recovers the JSON object from a reply that may be fenced or prefixed.
 pub fn extract_json_object(content: &str) -> Option<&str> {
     let trimmed = content.trim();
-    if let Some(fenced) = trimmed
+    // A fence is bounded by its own closing marker, not by the end of the
+    // reply: a hosted model that fences the object and then adds a sentence
+    // has still answered, and requiring the fence to be the last thing in the
+    // reply threw that answer away twice and paused the queue. Everything
+    // outside the fence is chatter, so its braces never enter the scan.
+    let body = match trimmed
         .strip_prefix("```json")
         .or_else(|| trimmed.strip_prefix("```JSON"))
         .or_else(|| trimmed.strip_prefix("```"))
     {
-        return fenced.strip_suffix("```").map(str::trim);
-    }
-    let start = trimmed.find('{')?;
-    let end = trimmed.rfind('}')?;
-    (end > start).then(|| trimmed[start..=end].trim())
+        Some(fenced) => match fenced.find("```") {
+            Some(close) => &fenced[..close],
+            None => fenced,
+        },
+        None => trimmed,
+    };
+    let start = body.find('{')?;
+    let end = body.rfind('}')?;
+    (end > start).then(|| body[start..=end].trim())
 }
 
 #[derive(Deserialize)]
@@ -347,6 +391,28 @@ mod tests {
         assert_eq!(extract_json_object("no object here"), None);
     }
 
+    /// Hosted models fence the object and then add a closing sentence. That
+    /// reply was read as malformed, retried, read as malformed again, and the
+    /// queue paused - over a reply that contained exactly what was asked for.
+    #[test]
+    fn json_is_recovered_from_a_fence_followed_by_chatter() {
+        assert_eq!(
+            extract_json_object("```json\n{\"a\":1}\n```\nLet me know if you need anything else."),
+            Some("{\"a\":1}")
+        );
+        assert_eq!(
+            extract_json_object("Here you go:\n```\n{\"a\":1}\n```\nHope that helps!"),
+            Some("{\"a\":1}")
+        );
+        // A fence the model never closed still carries the object.
+        assert_eq!(extract_json_object("```json\n{\"a\":1}"), Some("{\"a\":1}"));
+        // Prose after the fence must not be scanned for braces of its own.
+        assert_eq!(
+            extract_json_object("```json\n{\"a\":1}\n```\nNote the {braces} above."),
+            Some("{\"a\":1}")
+        );
+    }
+
     #[test]
     fn a_reply_missing_optional_fields_still_decodes() {
         let wire: WireProposal =
@@ -388,6 +454,82 @@ mod tests {
         let body = client.completion_request(&ModelRequest { prompt: "p".into() });
         assert!(body["messages"][1]["content"].is_string());
         assert!(!body.to_string().contains("image_url"));
+    }
+
+    /// A retry is for a reply that came back malformed. A request that failed
+    /// outright fails the same way twice, and against a dead or hung server
+    /// the second attempt only doubles a ten-minute wait for one document.
+    #[test]
+    fn a_failed_request_is_not_retried() {
+        use std::{
+            io::{BufRead, BufReader, Write},
+            net::TcpListener,
+            sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            },
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&attempts);
+        // Never joined: after the fix there is no second connection to accept,
+        // and the harness ends the process when the last test finishes.
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                counted.fetch_add(1, Ordering::SeqCst);
+                // Drain the request so closing the socket cannot reset it
+                // before the status line arrives.
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0_usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).is_err() || line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+                let _ = std::io::Read::read_exact(&mut reader, &mut vec![0_u8; length]);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+                let _ = stream.flush();
+            }
+        });
+
+        let client =
+            ModelClient::new(&format!("http://{address}/v1/chat/completions"), "k", "m").unwrap();
+        let error = client
+            .propose(&ModelRequest { prompt: "p".into() })
+            .unwrap_err();
+
+        assert_eq!(error.code(), EngineErrorCode::ModelRequestFailed);
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    /// Whatever answers the socket decides how many bytes arrive, and the
+    /// machine on the other end of a hosted endpoint is not Intern's.
+    #[test]
+    fn a_reply_body_is_read_only_up_to_a_cap() {
+        assert_eq!(
+            read_capped(
+                &b"{\"choices\":[]}"[..],
+                EngineErrorCode::ModelRequestFailed
+            )
+            .unwrap(),
+            b"{\"choices\":[]}"
+        );
+        let flood = std::io::Read::take(std::io::repeat(b'{'), 8 * 1024 * 1024);
+        assert_eq!(
+            read_capped(flood, EngineErrorCode::ModelRequestFailed)
+                .unwrap_err()
+                .0,
+            EngineErrorCode::ModelResponseInvalid
+        );
     }
 
     #[test]

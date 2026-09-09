@@ -71,6 +71,7 @@ impl ModelManifest {
         for file in &self.files {
             if !is_safe_filename(&file.name)
                 || !file.url.starts_with("https://")
+                || !pins_an_immutable_revision(&file.url)
                 || file.size == 0
                 || !names.insert(file.name.as_str())
                 || file.sha256.len() != 64
@@ -102,6 +103,23 @@ impl ModelManifest {
     pub fn total_bytes(&self) -> u64 {
         self.files.iter().map(|file| file.size).sum()
     }
+}
+
+/// Whether a download URL names a revision that cannot move.
+///
+/// Hugging Face serves `/resolve/<ref>/<path>`, and a branch name is a ref
+/// that moves: an upstream re-upload changes the bytes under a digest the
+/// manifest has already promised, and the download then costs a full 1.19 GiB
+/// on every retry and fails the same check every time with nothing to say why.
+/// A 40-character commit id cannot move, so the digest either matches on the
+/// first attempt or the pin itself is wrong.
+fn pins_an_immutable_revision(url: &str) -> bool {
+    url.split('/').any(|segment| {
+        segment.len() == 40
+            && segment
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    })
 }
 
 fn is_safe_filename(name: &str) -> bool {
@@ -162,6 +180,24 @@ mod tests {
         second.name = "mmproj.gguf".into();
         extra.files.push(second);
         assert!(extra.validate().is_err());
+    }
+
+    /// A moving upstream ref makes the pinned digest a promise the manifest
+    /// cannot keep: an upstream re-upload changes the bytes under it, and the
+    /// download then costs a full 1.19 GiB on every retry and fails the same
+    /// check each time with nothing to say why.
+    #[test]
+    fn manifest_urls_pin_an_immutable_revision() {
+        let base = ModelManifest::embedded().unwrap();
+        for file in &base.files {
+            assert!(!file.url.contains("/resolve/main/"), "{}", file.url);
+        }
+
+        let mut moving = base;
+        moving.files[0].url =
+            "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf"
+                .into();
+        assert!(moving.validate().is_err());
     }
 
     #[test]

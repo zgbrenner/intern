@@ -390,14 +390,19 @@ that never gets filed. What goes out is the distilled digest of the document,
 condensed but verbatim; what comes back is read through the same JSON
 recovery and the same evidence checks as a local reply. A refusal from the
 model is reported as one and sends the document to review, never re-routed
-elsewhere; a rejected key or an unreachable service pauses the queue rather
-than failing the backlog one item at a time; a busy service earns one retry.
+elsewhere; a rejected key, an unreachable service, a model name the service
+does not know, and an address that has moved all pause the queue rather than
+failing the backlog one item at a time; a busy service earns one retry.
 
 The key is stored in the operating system's credential store under Intern's
 name, never in the settings file, and never travels anywhere but the address
 that was configured — redirects are refused. Plain HTTP is accepted only to
 this machine, so a local server can be used without a certificate and a
-remote one cannot be used without one. **Test connection** sends the same
+remote one cannot be used without one; the same judgement takes the machine's
+proxy out of the path for an address on this machine, because a proxy would
+otherwise receive in cleartext the key and the document text that plain HTTP
+was allowed for on the grounds that neither leaves the machine. A service on
+the internet is still reached through the proxy. **Test connection** sends the same
 calibration document setup uses to check the local model, so a wrong key,
 model name, or address is found before a real document is sent.
 

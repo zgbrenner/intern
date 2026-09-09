@@ -24,7 +24,6 @@ pub const DISK_RESERVE_BYTES: u64 = 512 * 1024 * 1024;
 const BUFFER_BYTES: usize = 1024 * 1024;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(30);
-const DEFAULT_OVERALL_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 const CANCELLATION_POLL: Duration = Duration::from_millis(10);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -99,36 +98,43 @@ pub struct ReqwestHttpTransport {
 }
 
 impl ReqwestHttpTransport {
+    /// No ceiling on the whole transfer. The download is 1.19 GiB, so any
+    /// fixed deadline is a connection speed below which the download can
+    /// never succeed however many times it is retried: the two hours this
+    /// used to allow meant every link under about 178 KB/s failed, every
+    /// time, with nothing to show for the hours it spent. What "stalled"
+    /// actually means is that bytes stopped arriving, and the read timeout
+    /// says that; cancellation covers the person who changes their mind.
     pub fn new() -> ModelResult<Self> {
-        Self::with_timeouts(
-            DEFAULT_CONNECT_TIMEOUT,
-            DEFAULT_READ_TIMEOUT,
-            DEFAULT_OVERALL_TIMEOUT,
-        )
+        Self::with_timeouts(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT, None)
     }
 
     pub fn with_timeouts(
         connect_timeout: Duration,
         read_timeout: Duration,
-        overall_timeout: Duration,
+        overall_timeout: Option<Duration>,
     ) -> ModelResult<Self> {
-        if connect_timeout.is_zero() || read_timeout.is_zero() || overall_timeout.is_zero() {
+        if connect_timeout.is_zero()
+            || read_timeout.is_zero()
+            || overall_timeout.is_some_and(|timeout| timeout.is_zero())
+        {
             return Err(ModelError::new(
                 ModelErrorCode::DownloadFailed,
                 "download timeouts must be bounded and nonzero",
             ));
         }
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
-            .read_timeout(read_timeout)
-            .timeout(overall_timeout)
-            .build()
-            .map_err(|_| {
-                ModelError::new(
-                    ModelErrorCode::DownloadFailed,
-                    "download client could not be created",
-                )
-            })?;
+            .read_timeout(read_timeout);
+        if let Some(overall_timeout) = overall_timeout {
+            builder = builder.timeout(overall_timeout);
+        }
+        let client = builder.build().map_err(|_| {
+            ModelError::new(
+                ModelErrorCode::DownloadFailed,
+                "download client could not be created",
+            )
+        })?;
         Ok(Self { client })
     }
 }
@@ -423,22 +429,34 @@ impl<H: HttpTransport, D: DiskSpace> Downloader<H, D> {
             total_bytes: expected.size,
         });
         if final_path.exists() {
-            validate_file_cancelable(&final_path, expected, cancellation, |checked| {
+            match validate_file_cancelable(&final_path, expected, cancellation, |checked| {
                 progress(SetupProgress {
                     stage: SetupStage::Checking,
                     completed_bytes: checked,
                     total_bytes: expected.size,
                 });
-            })?;
-            if cancellation.is_canceled() {
-                return Err(canceled());
+            }) {
+                Ok(()) => {
+                    if cancellation.is_canceled() {
+                        return Err(canceled());
+                    }
+                    progress(SetupProgress {
+                        stage: SetupStage::Complete,
+                        completed_bytes: expected.size,
+                        total_bytes: expected.size,
+                    });
+                    return Ok(final_path);
+                }
+                Err(error) if error.code() == ModelErrorCode::DownloadCanceled => {
+                    return Err(error);
+                }
+                // An installed file that fails its digest cannot be repaired by
+                // checking it again, and nothing in the app could remove it, so
+                // setup reported MODEL_FILE_INVALID forever. Delete it and
+                // download it afresh; keeping 1.19 GiB of bytes known to be
+                // wrong would only take the disk space the replacement needs.
+                Err(_) => fs::remove_file(&final_path).map_err(|_| invalid_file())?,
             }
-            progress(SetupProgress {
-                stage: SetupStage::Complete,
-                completed_bytes: expected.size,
-                total_bytes: expected.size,
-            });
-            return Ok(final_path);
         }
         if cancellation.is_canceled() {
             return Err(canceled());
@@ -667,22 +685,30 @@ where
         return Err(invalid_file());
     }
     if final_path.exists() {
-        validate_file_cancelable(&final_path, expected, cancellation, |checked| {
+        match validate_file_cancelable(&final_path, expected, cancellation, |checked| {
             progress(SetupProgress {
                 stage: SetupStage::Checking,
                 completed_bytes: checked,
                 total_bytes: expected.size,
             });
-        })?;
-        if cancellation.is_canceled() {
-            return Err(canceled());
+        }) {
+            Ok(()) => {
+                if cancellation.is_canceled() {
+                    return Err(canceled());
+                }
+                progress(SetupProgress {
+                    stage: SetupStage::Complete,
+                    completed_bytes: expected.size,
+                    total_bytes: expected.size,
+                });
+                return Ok(final_path);
+            }
+            Err(error) if error.code() == ModelErrorCode::DownloadCanceled => return Err(error),
+            // The same dead end as in `download`: a person who reaches for a
+            // copy they already have is doing it because the installed one is
+            // broken, so the broken one must give way to it.
+            Err(_) => fs::remove_file(&final_path).map_err(|_| invalid_file())?,
         }
-        progress(SetupProgress {
-            stage: SetupStage::Complete,
-            completed_bytes: expected.size,
-            total_bytes: expected.size,
-        });
-        return Ok(final_path);
     }
     require_disk(disk, destination_directory, expected.size)?;
     validate_file_cancelable(selected, expected, cancellation, |checked| {
