@@ -1032,6 +1032,21 @@ pub(crate) fn shutdown_and_exit(app: &AppHandle) -> ! {
     std::process::exit(0);
 }
 
+/// A background task that panicked, or was dropped before it finished.
+///
+/// Nothing the user asked for was refused here, so this must not borrow
+/// another failure's reason: reporting a panic as an unverified Microsoft
+/// upload sent people to Settings to repair a connection that was working.
+/// The panic message itself goes nowhere in a windowed build, so the task
+/// that died is named on stderr as well as in the error.
+fn background_task_failed(task: &str) -> CommandError {
+    eprintln!("intern: the {task} background task did not finish");
+    CommandError {
+        code: "INTERNAL_ERROR".into(),
+        message: format!("{task} could not finish because of an internal error"),
+    }
+}
+
 fn intake_state_conflict() -> CommandError {
     CommandError {
         code: "STATE_CONFLICT".into(),
@@ -1079,10 +1094,7 @@ pub async fn queue_add_files(
         Ok(())
     })
     .await
-    .map_err(|_| CommandError {
-        code: "UPLOADER_UNVERIFIED".into(),
-        message: "File intake could not complete verification.".into(),
-    })??;
+    .map_err(|_| background_task_failed("file intake"))??;
     state.schedule()
 }
 
@@ -1099,10 +1111,7 @@ pub async fn queue_add_folder(
         Ok(())
     })
     .await
-    .map_err(|_| CommandError {
-        code: "UPLOADER_UNVERIFIED".into(),
-        message: "Folder intake could not complete verification.".into(),
-    })??;
+    .map_err(|_| background_task_failed("folder intake"))??;
     state.schedule()
 }
 
@@ -1153,10 +1162,7 @@ pub async fn proposal_approve(
     let id = parse_item_id(&id)?;
     tauri::async_runtime::spawn_blocking(move || pipeline.approve(id, &filename, &description))
         .await
-        .map_err(|_| CommandError {
-            code: "UPLOADER_UNVERIFIED".into(),
-            message: "Rename authorization could not complete.".into(),
-        })??;
+        .map_err(|_| background_task_failed("rename"))??;
     Ok(())
 }
 
@@ -2085,6 +2091,27 @@ mod intake_tests {
         ));
         // Clock skew across machines: a future stamp still counts as active.
         assert!(presence_active(now + 60, now));
+    }
+}
+
+#[cfg(test)]
+mod background_task_tests {
+    use super::background_task_failed;
+
+    #[test]
+    fn a_panic_during_intake_is_not_reported_as_an_uploader_failure() {
+        let error = tauri::async_runtime::block_on(async {
+            tauri::async_runtime::spawn_blocking(|| panic!("the background task died"))
+                .await
+                .map_err(|_| background_task_failed("file intake"))
+                .expect_err("a panicking task must not report success")
+        });
+        assert_eq!(error.code, "INTERNAL_ERROR");
+        assert!(
+            error.message.contains("file intake"),
+            "the message must name the task that failed: {}",
+            error.message
+        );
     }
 }
 
