@@ -10,7 +10,7 @@
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     time::Duration,
 };
@@ -70,6 +70,9 @@ pub struct HostedModelTestDto {
 pub struct HostedModel {
     secrets: Arc<dyn SecretStore>,
     engine: Mutex<Option<(HostedModelConfig, Arc<Engine>)>>,
+    /// Whether someone has typed an API key into this window since Intern
+    /// started. Entering a key is a person saying where it may go.
+    key_entered: AtomicBool,
 }
 
 impl HostedModel {
@@ -77,6 +80,7 @@ impl HostedModel {
         Self {
             secrets,
             engine: Mutex::new(None),
+            key_entered: AtomicBool::new(false),
         }
     }
 
@@ -135,6 +139,7 @@ impl HostedModel {
         self.secrets
             .set(HOSTED_MODEL_API_KEY, trimmed)
             .map_err(store_error)?;
+        self.key_entered.store(true, Ordering::SeqCst);
         self.forget_engine();
         Ok(())
     }
@@ -147,11 +152,47 @@ impl HostedModel {
         Ok(())
     }
 
+    /// Whether the stored key may be sent to the address these settings name.
+    ///
+    /// The address comes from the dialog rather than the settings file, so a
+    /// new one can be tested before it is saved - which means the window
+    /// chooses where the key goes. A page that should not be in the window
+    /// could choose too, so a key that was already on this machine when
+    /// Intern started only ever goes to the address the settings file names.
+    /// Typing a key admits the address it was typed for, which is the flow a
+    /// person actually uses; nobody can type a key they do not have.
+    fn may_send_to(&self, settings: &AppSettings, saved: &AppSettings) -> bool {
+        if self.key_entered.load(Ordering::SeqCst) {
+            return true;
+        }
+        let address = |settings: &AppSettings| {
+            let base_url = match settings.hosted_base_url.trim() {
+                "" => settings.hosted_provider.default_base_url(),
+                given => given,
+            };
+            endpoint_for(settings.hosted_provider, base_url)
+                .ok()
+                .map(|endpoint| endpoint.to_string())
+        };
+        address(settings).is_some_and(|wanted| address(saved) == Some(wanted))
+    }
+
     /// Sends the calibration document, the way the local model is checked
     /// at setup, so a wrong key, model, or address is found here rather than
-    /// on someone's first real document.
-    pub fn test(&self, settings: &AppSettings) -> Result<HostedModelTestDto, CommandError> {
-        let client = HostedClient::new(self.config(settings)?)?;
+    /// on someone's first real document. `saved` is the settings as stored.
+    pub fn test(
+        &self,
+        settings: &AppSettings,
+        saved: &AppSettings,
+    ) -> Result<HostedModelTestDto, CommandError> {
+        let config = self.config(settings)?;
+        if !self.may_send_to(settings, saved) {
+            return Err(CommandError {
+                code: "HOSTED_MODEL_ADDRESS_UNCONFIRMED".into(),
+                message: "enter the API key for this address before testing it".into(),
+            });
+        }
+        let client = HostedClient::new(config)?;
         let analysis = client.probe()?;
         Ok(HostedModelTestDto {
             model: client.model().to_owned(),
@@ -418,6 +459,39 @@ mod tests {
             assert!(!failure.retryable, "{code:?}");
             assert_eq!(failure.code, code.as_str());
         }
+    }
+
+    #[test]
+    fn a_key_from_an_earlier_session_only_goes_to_the_saved_address() {
+        let secrets: Arc<dyn SecretStore> = Arc::new(MemoryStore::default());
+        let hosted = HostedModel::new(Arc::clone(&secrets));
+        // A key that was already on this machine when Intern started.
+        secrets
+            .set(HOSTED_MODEL_API_KEY, "sk-ant-api03-example-key-0042")
+            .unwrap();
+        let saved = AppSettings {
+            model_source: ModelSource::Hosted,
+            ..AppSettings::default()
+        };
+        assert!(hosted.may_send_to(&saved, &saved), "the saved address");
+
+        let elsewhere = AppSettings {
+            hosted_base_url: "https://collector.example.com/v1".into(),
+            ..saved.clone()
+        };
+        assert!(!hosted.may_send_to(&elsewhere, &saved));
+        assert_eq!(
+            hosted
+                .test(&elsewhere, &saved)
+                .expect_err("an address nobody named is refused")
+                .code,
+            "HOSTED_MODEL_ADDRESS_UNCONFIRMED"
+        );
+
+        // Typing the key is the person saying where it may go, which is how a
+        // new address is tested before it is saved.
+        hosted.set_key("sk-ant-api03-example-key-0042").unwrap();
+        assert!(hosted.may_send_to(&elsewhere, &saved));
     }
 
     #[test]

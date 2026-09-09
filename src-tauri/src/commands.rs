@@ -1577,7 +1577,8 @@ pub async fn hosted_model_test(
     state: State<'_, AppState>,
 ) -> Result<HostedModelTestDto, CommandError> {
     let hosted = Arc::clone(&state.hosted);
-    tauri::async_runtime::spawn_blocking(move || hosted.test(&settings))
+    let saved = state.settings.load().unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || hosted.test(&settings, &saved))
         .await
         .map_err(|_| background_task_failed("hosted model test"))?
 }
