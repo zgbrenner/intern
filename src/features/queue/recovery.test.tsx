@@ -172,6 +172,24 @@ const ready: QueueItem = {
     await waitFor(() => expect(inputs).toHaveLength(2));
   });
 
+  // The rename has already happened by the time the queue is reread. Telling
+  // the person it failed sends them to look for a file that is no longer under
+  // its old name; the reread failing is what the queue connection banner is
+  // for, and it says so itself.
+  it('does not blame the command when only the reread afterwards fails', async () => {
+    const base = createInMemoryBridge({ items: [ready] });
+    const listItems = vi.fn(base.listItems);
+    render(<App bridge={{ ...base, listItems }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select agreement.pdf' }));
+    listItems.mockRejectedValueOnce(new Error('Queue database is busy.'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply rename' }));
+
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Action status' })).toHaveTextContent('Rename applied.'));
+    expect(screen.queryByRole('status', { name: 'Action error' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert', { name: 'Queue connection error' })).toHaveTextContent('Queue database is busy.');
+  });
+
   it('gates same-tick rename submissions before React has rerendered', async () => {
     const pending = deferred<void>();
     const approve = vi.fn(() => pending.promise);

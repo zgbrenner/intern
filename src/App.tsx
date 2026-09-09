@@ -137,14 +137,18 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     setActionError('');
     setActionMessage('');
     try {
-      await run();
-      await refresh();
+      try { await run(); }
+      catch (error) {
+        try { await refresh(); } catch { /* Preserve the original command error. */ }
+        setActionError(describeActionError(error));
+        return false;
+      }
+      // The command has already happened. A reread that fails afterwards is
+      // reported by the queue's own connection banner, and calling the command
+      // failed would send someone looking for a file under its old name.
+      try { await refresh(); } catch { /* Reported as a queue connection error. */ }
       setActionMessage(success);
       return true;
-    } catch (error) {
-      try { await refresh(); } catch { /* Preserve the original command error. */ }
-      setActionError(describeActionError(error));
-      return false;
     } finally {
       actionInFlight.current = false;
       setActionPending(false);
