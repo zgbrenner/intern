@@ -50,7 +50,11 @@ clients replay changes in ways that make event streams lie, and a periodic
 scan is invisible next to a model that takes seconds per document. A
 file is picked up once its size and modification time have held still for a
 full scan interval, so a document still being copied or synced in is never
-read half-written.
+read half-written. In the mode that processes everyone's uploads, a document
+also waits out a short courtesy delay counted from when it arrived on this
+machine — not from the timestamp it carries, which a sync client preserves
+from wherever it was written — so the machine that uploaded it gets first
+refusal on its own work.
 
 Conflict copies are left alone. When two machines edit the same document
 before sync catches up, the sync client keeps both and renames the losing side

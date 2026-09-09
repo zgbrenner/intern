@@ -328,10 +328,12 @@ impl Scanner<'_> {
         if self.record_backlog {
             self.backlog.insert(facts.relative_path.clone());
         }
-        if !self
-            .stability
-            .observe(&facts.path, facts.size, facts.modified_secs)
-        {
+        if !self.stability.observe(
+            &facts.path,
+            facts.size,
+            facts.modified_secs,
+            self.clock.now(),
+        ) {
             return;
         }
         let doc = DocumentFacts {
@@ -453,8 +455,18 @@ impl Scanner<'_> {
     }
 
     fn others_claimable(&self, facts: &FileFacts) -> bool {
-        self.config.process_others_uploads
-            && self.clock.now() - facts.modified_secs >= COURTESY_DELAY_SECONDS
+        if !self.config.process_others_uploads {
+            return false;
+        }
+        // The delay runs from when the file turned up here, not from the
+        // timestamp it carries. A sync client preserves the uploader's
+        // modification time, so a document that has only just landed already
+        // looks hours old and there would be no delay at all.
+        let arrived = self
+            .stability
+            .first_seen_at(&facts.path)
+            .map_or(facts.modified_secs, |seen| seen.max(facts.modified_secs));
+        self.clock.now() - arrived >= COURTESY_DELAY_SECONDS
     }
 
     fn attempt_claim(&mut self, doc: &DocumentFacts, key: &str, path: &Path) {

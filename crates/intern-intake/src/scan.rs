@@ -241,7 +241,14 @@ pub(crate) fn walk_intake(root: &Path, extensions: &[String]) -> io::Result<Walk
 /// stability available from stat alone.
 #[derive(Debug, Default)]
 pub struct StabilityTracker {
-    observed: HashMap<PathBuf, (u64, i64)>,
+    observed: HashMap<PathBuf, Observation>,
+}
+
+#[derive(Debug)]
+struct Observation {
+    facts: (u64, i64),
+    /// When this machine first saw the file at all, on its own clock.
+    first_seen_at: i64,
 }
 
 impl StabilityTracker {
@@ -251,15 +258,32 @@ impl StabilityTracker {
 
     /// Records the observation; true when it is unchanged since the previous
     /// scan. A first sighting is always unstable.
-    pub fn observe(&mut self, path: &Path, size: u64, modified_secs: i64) -> bool {
-        match self.observed.get(path) {
-            Some(&previous) if previous == (size, modified_secs) => true,
-            _ => {
-                self.observed
-                    .insert(path.to_path_buf(), (size, modified_secs));
+    pub fn observe(&mut self, path: &Path, size: u64, modified_secs: i64, now: i64) -> bool {
+        match self.observed.get_mut(path) {
+            Some(observation) => {
+                let unchanged = observation.facts == (size, modified_secs);
+                observation.facts = (size, modified_secs);
+                unchanged
+            }
+            None => {
+                self.observed.insert(
+                    path.to_path_buf(),
+                    Observation {
+                        facts: (size, modified_secs),
+                        first_seen_at: now,
+                    },
+                );
                 false
             }
         }
+    }
+
+    /// When this machine first saw the file, which is not the same as the
+    /// timestamp the file carries.
+    pub fn first_seen_at(&self, path: &Path) -> Option<i64> {
+        self.observed
+            .get(path)
+            .map(|observation| observation.first_seen_at)
     }
 
     /// Drops observations for files that vanished so the map cannot grow

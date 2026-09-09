@@ -877,3 +877,31 @@ fn a_held_placeholder_is_hydrated_when_the_host_can_reach_the_cloud() {
         "the released claim lets the next scan give the document a real attempt"
     );
 }
+
+/// A sync client preserves the uploader's modification time, so a document
+/// that has only just landed here already carries an old timestamp. Measuring
+/// the courtesy delay from that timestamp means there is no delay at all, and
+/// this machine races the uploader's own machine for every file it syncs down.
+#[test]
+fn a_file_that_arrives_with_an_old_timestamp_still_waits_out_the_courtesy_delay() {
+    let rig = Rig::start(true, &[]);
+    rig.clock.advance(10 * COURTESY_DELAY_SECONDS);
+    rig.step();
+    let path = rig.write("their-scan.pdf", b"synced down with its original timestamp");
+    let other = ClaimStore::new(rig.temp.path(), identity("other-machine", "elsewhere")).unwrap();
+    other
+        .write_origin(&facts_for(rig.temp.path(), "their-scan.pdf"))
+        .unwrap();
+
+    rig.step();
+    rig.step();
+    assert!(
+        rig.host.enqueued().is_empty(),
+        "the uploader's own machine still gets first shot"
+    );
+    assert_eq!(rig.watcher.status().held_for_others, 1);
+
+    rig.clock.advance(COURTESY_DELAY_SECONDS);
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![path]);
+}
