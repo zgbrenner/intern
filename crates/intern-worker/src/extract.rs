@@ -569,8 +569,7 @@ pub fn extract_text(
         bytes.extend_from_slice(&buffer[..read]);
     }
     limits.validate_source_size(bytes.len() as u64)?;
-    let text = String::from_utf8(bytes)
-        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    let (text, lossy) = decode_text(&bytes);
     cancel.check()?;
     Ok(ExtractedDocument {
         pages: vec![ExtractedPage {
@@ -580,10 +579,51 @@ pub fn extract_text(
             ocr_confidence: None,
             vision_escalated: false,
         }],
-        warnings: vec![],
+        warnings: if lossy {
+            vec![ExtractionWarning::NativeTextCorrupt]
+        } else {
+            vec![]
+        },
         truncated: false,
         optional_image: None,
     })
+}
+
+/// Decodes a text file by its byte-order mark, and says whether anything was
+/// replaced on the way.
+///
+/// Notepad and PowerShell's redirection still write UTF-16, and a mark on a
+/// UTF-8 file is ordinary; neither is a document to refuse, and the mark
+/// itself is not a character of the document. Bytes that decode as nothing
+/// known are read lossily rather than lost: half a document with a warning
+/// beats a file the queue cannot open at all.
+fn decode_text(bytes: &[u8]) -> (String, bool) {
+    fn from_utf16(units: impl Iterator<Item = u16>) -> (String, bool) {
+        let units = units.collect::<Vec<_>>();
+        match String::from_utf16(&units) {
+            Ok(text) => (text, false),
+            Err(_) => (String::from_utf16_lossy(&units), true),
+        }
+    }
+    match bytes {
+        [0xFF, 0xFE, rest @ ..] => from_utf16(
+            rest.chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]])),
+        ),
+        [0xFE, 0xFF, rest @ ..] => from_utf16(
+            rest.chunks_exact(2)
+                .map(|pair| u16::from_be_bytes([pair[0], pair[1]])),
+        ),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => from_utf8(rest),
+        _ => from_utf8(bytes),
+    }
+}
+
+fn from_utf8(bytes: &[u8]) -> (String, bool) {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => (text.to_owned(), false),
+        Err(_) => (String::from_utf8_lossy(bytes).into_owned(), true),
+    }
 }
 
 /// Reads a standalone image file as a one-page document. There is no text
