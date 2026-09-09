@@ -17,9 +17,9 @@ use intern_engine::{
 };
 use intern_queue::{
     pipeline::{
-        AnalyzerBoundary, DuplicateOracle, FileActions, FiledDocument, FilingSink, KnownFiling,
-        ModelFailure, NEAR_DUPLICATE, Pipeline, PipelineError, PipelineEventSink, PipelineProgress,
-        SimilarFiling, UNDONE, UnfiledDocument, WorkerBoundary, WorkerFailure,
+        AnalyzerBoundary, CoreFileActions, DuplicateOracle, FileActions, FiledDocument, FilingSink,
+        KnownFiling, ModelFailure, NEAR_DUPLICATE, Pipeline, PipelineError, PipelineEventSink,
+        PipelineProgress, SimilarFiling, UNDONE, UnfiledDocument, WorkerBoundary, WorkerFailure,
     },
     settings::{AppSettings, DestinationLayout, SettingsStore},
 };
@@ -2421,6 +2421,118 @@ const AGREEMENT: &str = "EMPLOYMENT AGREEMENT\n\nThis Employment Agreement is si
     above and continues until terminated by either party on thirty days written notice. Salary, \
     benefits, and duties are described in the attached schedule, which forms part of this \
     agreement.";
+
+/// A rename that really happens but is reported to the queue as a failure:
+/// what the caller sees when the applier journalled an ambiguous operation
+/// and a reconciliation finished it afterwards.
+struct ReconciledApply {
+    inner: CoreFileActions,
+}
+
+impl FileActions for ReconciledApply {
+    fn fingerprint(&self, path: &Path) -> Result<String, PipelineError> {
+        self.inner.fingerprint(path)
+    }
+
+    fn apply(&self, item: &QueueItem, destination: &Path) -> Result<(), PipelineError> {
+        self.inner.apply(item, destination)?;
+        Err(PipelineError::new(
+            "MOVE_VERIFICATION_FAILED",
+            "the rename could not be confirmed by the caller",
+        ))
+    }
+
+    fn undo(&self, item: &QueueItem, receipt: &OperationReceipt) -> Result<(), PipelineError> {
+        self.inner.undo(item, receipt)
+    }
+
+    fn reconcile(&self, item: &QueueItem) -> Result<(), PipelineError> {
+        self.inner.reconcile(item)
+    }
+}
+
+/// A rename finished by a reconciliation is still a rename: the records
+/// keepers must hear about it, and it must be remembered as a filing, or the
+/// description is never written and a second scan of the same document is
+/// filed a second time.
+#[test]
+fn a_rename_finished_by_reconciliation_is_reported_and_fingerprinted() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let database = temp.path().join("queue.sqlite3");
+    let rescan_text = AGREEMENT
+        .replace("employs John", "emplcys John")
+        .replace("cartographer", "cartograpner")
+        .replace("thirty", "thirly");
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(AGREEMENT)),
+        Ok(parsed(&rescan_text)),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(proposal(0.94, false)),
+    ]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let store = Arc::new(QueueStore::open(&database).unwrap());
+    let filing = Arc::new(RecordingFiling::default());
+    let pipeline = Pipeline::open(
+        &database,
+        worker,
+        model,
+        Arc::new(ReconciledApply {
+            inner: CoreFileActions::local(store),
+        }),
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap()
+    .with_filing_sink(filing.clone());
+
+    let original = source(&inbox, "agreement-scan-1.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&original))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+
+    let completed = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(completed.status, QueueStatus::Completed);
+    let destination = completed.receipt.clone().unwrap().destination;
+    let filed = filing.filed.lock().unwrap().clone();
+    assert_eq!(filed.len(), 1, "the filing sink is told once: {filed:?}");
+    assert_eq!(filed[0].destination, destination);
+
+    // And the filing is remembered, so a second scan of the same agreement is
+    // recognised instead of being filed all over again.
+    let rescan = source(&inbox, "agreement-scan-2.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&rescan))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let second = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.source_path == rescan)
+        .unwrap();
+    assert_eq!(second.status, QueueStatus::NeedsReview);
+    let record = second.proposal.as_ref().unwrap();
+    assert!(
+        record.reasons.iter().any(|reason| reason == NEAR_DUPLICATE),
+        "{:?}",
+        record.reasons
+    );
+    assert_eq!(
+        record.near_duplicate_of.as_deref(),
+        destination.file_name().and_then(|name| name.to_str())
+    );
+}
 
 /// Two documents that say the same thing are one document filed twice. A
 /// second scan of a filed agreement - different bytes, three misread words -

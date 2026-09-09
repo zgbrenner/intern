@@ -1479,6 +1479,8 @@ impl Pipeline {
                 .any(|current| current.id == item.id && current.status == QueueStatus::Ready)
             {
                 self.repository.mark_needs_review(item.id, &error.code)?;
+            } else {
+                self.report_settled(item.id);
             }
             self.events.queue_changed();
             return Err(error);
@@ -1517,6 +1519,62 @@ impl Pipeline {
                     .remember_fingerprint(item.id, fingerprint, &filed_name);
             }
             self.filing.filed(&document);
+        }
+    }
+
+    /// Reports an operation a reconciliation finished rather than the call
+    /// that started it.
+    ///
+    /// The applier journals an ambiguous apply or undo and settles it
+    /// afterwards - on the next retry, on the next recovery pass, or right
+    /// here - and nobody used to be told: a document filed that way was never
+    /// described and never remembered as a filing, so a second scan of it was
+    /// filed all over again, and a document put back that way was still
+    /// remembered as filed. What is reported is read from the store, so it is
+    /// the same work whichever call finished the operation.
+    fn report_settled(&self, item_id: i64) {
+        let Ok(items) = self.store.list() else {
+            return;
+        };
+        let Some(item) = items.into_iter().find(|candidate| candidate.id == item_id) else {
+            return;
+        };
+        let Ok(Some(receipt)) = self.store.load_receipt(item_id) else {
+            return;
+        };
+        if receipt.stage != OperationStage::Complete {
+            return;
+        }
+        match receipt.direction {
+            OperationDirection::Apply if item.status == QueueStatus::Completed => {
+                self.report_filed(&item);
+            }
+            OperationDirection::Undo if item.status != QueueStatus::Completed => {
+                // An undo returns the item to ready, which is the state the
+                // scheduler files from: with automatic renaming on it would
+                // apply the same name again within the minute and undo the
+                // person's undo. Taking a decision back is a decision, so the
+                // document waits for the next one.
+                let _ = self.repository.mark_needs_review(item_id, UNDONE);
+                let _ = self.repository.forget_fingerprint(item_id);
+                // An undo receipt reads the other way round: it moved the
+                // document from the name it was filed under back to where it
+                // started, and the vacated name is what a records keeper knows
+                // it by.
+                self.filing.unfiled(&UnfiledDocument {
+                    item_id,
+                    source_path: item.source_path.clone(),
+                    source_hash: item.source_hash.clone(),
+                    destination: receipt.source.clone(),
+                });
+                if let Ok(settings) = self.settings.load() {
+                    prune_empty_layout_folders(
+                        &destination_root(&settings, &item.source_path),
+                        &receipt.source,
+                    );
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1609,6 +1667,7 @@ impl Pipeline {
         {
             let claimed = self.store.claim_deferred_reconciliation(id)?;
             let result = self.files.reconcile(&claimed);
+            self.report_settled(id);
             self.events.queue_changed();
             return result;
         }
@@ -1756,28 +1815,13 @@ impl Pipeline {
                 "completed item has no durable operation receipt",
             )
         })?;
-        self.files.undo(&item, &receipt)?;
-        // An undo returns the item to ready, which is the state the scheduler
-        // files from: with automatic renaming on it would apply the same name
-        // again within the minute and undo the person's undo. Taking the
-        // decision back is a decision, so the document waits for the next one.
-        // The undo itself has already succeeded and stands either way.
-        let _ = self.repository.mark_needs_review(id, UNDONE);
-        let _ = self.repository.forget_fingerprint(id);
-        self.filing.unfiled(&UnfiledDocument {
-            item_id: item.id,
-            source_path: item.source_path.clone(),
-            source_hash: item.source_hash.clone(),
-            destination: receipt.destination.clone(),
-        });
-        if let Ok(settings) = self.settings.load() {
-            prune_empty_layout_folders(
-                &destination_root(&settings, &item.source_path),
-                &receipt.destination,
-            );
-        }
+        // An undo the applier journalled can be finished by a reconciliation
+        // even when the call itself reports a failure, so what settles this is
+        // the store rather than the return value.
+        let outcome = self.files.undo(&item, &receipt);
+        self.report_settled(id);
         self.events.queue_changed();
-        Ok(())
+        outcome
     }
 
     pub fn clear_history(&self) -> PipelineResult<usize> {
@@ -1850,6 +1894,7 @@ impl Pipeline {
             {
                 let _ = self.files.reconcile(&claimed);
             }
+            self.report_settled(item.id);
         }
         self.events.queue_changed();
         Ok(())

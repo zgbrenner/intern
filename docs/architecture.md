@@ -488,7 +488,11 @@ app's sinks write the description records that let a SharePoint column carry
 the sentence — see [`sharepoint-descriptions.md`](sharepoint-descriptions.md)
 — and the filed markers of the shared intake folder. A sink hears about a
 rename only after it has succeeded and cannot undo it; a record that fails to
-write is reported in Settings, and the rename stands.
+write is reported in Settings, and the rename stands. A rename the applier
+had to settle afterwards - an ambiguous failure finished by a reconciliation,
+here, on the next retry, or on the next recovery pass - is reported the same
+way, because what is reported is read from the queue's own record of the
+operation rather than from whichever call happened to finish it.
 
 The mirror image is the *duplicate oracle*: before analysing a document the
 queue checks its own history for the same content, then asks the oracle,
