@@ -12,11 +12,11 @@ use std::{
     time::Duration,
 };
 
-use common::{MockClock, facts_for, identity, wait_until};
+use common::{MockClock, facts_for, identity, labelled_identity, wait_until};
 use intern_intake::{
     COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome, Hydration,
     IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState,
-    scan::is_conflict_copy,
+    MachineIdentity, scan::is_conflict_copy,
 };
 use tempfile::TempDir;
 
@@ -133,6 +133,18 @@ impl Hydration for FakeHydration {
 
 impl Rig {
     fn start(process_others_uploads: bool, backlog_files: &[&str]) -> Rig {
+        Self::start_as(
+            identity("here-machine", "here"),
+            process_others_uploads,
+            backlog_files,
+        )
+    }
+
+    fn start_as(
+        identity: MachineIdentity,
+        process_others_uploads: bool,
+        backlog_files: &[&str],
+    ) -> Rig {
         let temp = TempDir::new().unwrap();
         for name in backlog_files {
             fs::write(temp.path().join(name), b"backlog content").unwrap();
@@ -145,7 +157,7 @@ impl Rig {
         let hydration = Arc::new(FakeHydration::default());
         let watcher = IntakeWatcher::start_with_seams(
             config,
-            identity("here-machine", "here"),
+            identity,
             host.clone(),
             clock.clone(),
             hydration.clone(),
@@ -785,4 +797,40 @@ fn held_and_done_files_are_not_reverified_each_scan() {
     let status = rig.watcher.status();
     assert_eq!(status.processed_here, 1);
     assert_eq!(status.claimed_by_others, 1);
+}
+
+/// OneDrive names the losing side of a conflict after the machine that wrote
+/// it, and that is the hostname — not the friendly label someone typed into
+/// Settings. A labelled machine that only knows its label never recognises its
+/// own conflict copies, and files the losing copy as a second document.
+#[test]
+fn a_labelled_machine_still_recognises_its_own_hostname_conflict_copies() {
+    let rig = Rig::start_as(
+        labelled_identity("here-machine", "Front desk", "DESKTOP-A1B2C3"),
+        false,
+        &[],
+    );
+    rig.step();
+    rig.write(
+        "report-DESKTOP-A1B2C3.pdf",
+        b"the losing side of a conflict",
+    );
+    let genuine = rig.write("Invoice-ACME.pdf", b"an ordinary document");
+    rig.step();
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![genuine]);
+    assert_eq!(rig.watcher.status().sync_conflicts, 1);
+
+    // The same is true of a teammate's labelled machine, whose presence record
+    // is all this machine knows about it.
+    let other = ClaimStore::new(
+        rig.temp.path(),
+        labelled_identity("other-machine", "Reception", "LAPTOP-Z9"),
+    )
+    .unwrap();
+    other.touch_presence().unwrap();
+    rig.write("memo-LAPTOP-Z9.pdf", b"their conflict copy");
+    rig.step();
+    rig.step();
+    assert_eq!(rig.watcher.status().sync_conflicts, 2);
 }

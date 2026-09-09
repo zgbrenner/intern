@@ -58,7 +58,10 @@ document, and filing one would put a second copy of something already filed
 into the destination. The spelled-out form is unambiguous; the machine-suffix
 form is not, because `Invoice-ACME.pdf` is an ordinary filename, so that
 suffix is believed only when it names a machine this folder has actually seen
-in its presence records. Skipping a document someone meant to file is the
+in its presence records. Both names a machine goes by count: the sync client
+uses the hostname, not the label someone may have typed into Settings, so
+presence records carry both and either one marks a conflict copy. Skipping a
+document someone meant to file is the
 worse of the two mistakes, so the guess is never made on shape alone. Settings
 counts what was skipped; resolve the conflict in the folder and the survivor
 is picked up on the next scan.

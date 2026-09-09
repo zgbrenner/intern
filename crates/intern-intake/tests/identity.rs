@@ -48,6 +48,11 @@ fn the_label_overrides_the_hostname_and_a_blank_label_falls_back() {
     let temp = TempDir::new().unwrap();
     let labeled = MachineIdentity::load_or_create(temp.path(), "  Front Desk  ").unwrap();
     assert_eq!(labeled.name, "Front Desk");
+    assert_ne!(
+        labeled.host_name, "Front Desk",
+        "the label is a display name; the sync client still names conflict copies after the host"
+    );
+    assert!(!labeled.host_name.trim().is_empty());
 
     let unlabeled = MachineIdentity::load_or_create(temp.path(), "").unwrap();
     assert!(
@@ -58,6 +63,8 @@ fn the_label_overrides_the_hostname_and_a_blank_label_falls_back() {
         !unlabeled.user.trim().is_empty(),
         "user fallback must produce a name"
     );
+    assert_eq!(unlabeled.name, unlabeled.host_name);
+    assert_eq!(unlabeled.host_name, labeled.host_name);
     assert_eq!(
         unlabeled.id, labeled.id,
         "the label never changes the durable id"

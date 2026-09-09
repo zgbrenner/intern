@@ -152,8 +152,21 @@ pub struct MachinePresence {
     pub version: u32,
     pub machine_id: String,
     pub machine_name: String,
+    /// The machine's hostname, which is the name a sync client puts into a
+    /// conflict copy. Absent from records written before this field existed,
+    /// and an empty name never matches anything.
+    #[serde(default)]
+    pub host_name: String,
     pub user_name: String,
     pub last_seen_at: i64,
+}
+
+impl MachinePresence {
+    /// Every name this machine might be called in a sync client's conflict
+    /// copy: the display name, which may be a label, and the hostname.
+    pub fn names(&self) -> [&str; 2] {
+        [&self.machine_name, &self.host_name]
+    }
 }
 
 /// `ClaimInfo` dominates the size, but boxing it would push the cost onto
@@ -491,6 +504,7 @@ impl ClaimStore {
             version: FORMAT_VERSION,
             machine_id: self.identity.id.clone(),
             machine_name: self.identity.name.clone(),
+            host_name: self.identity.host_name.clone(),
             user_name: self.identity.user.clone(),
             last_seen_at: now,
         };

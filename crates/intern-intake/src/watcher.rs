@@ -255,10 +255,11 @@ fn scan_once(
     // side of a conflict after whichever machine wrote it, which is often us.
     let mut machines: Vec<String> = store
         .list_machines()
-        .into_iter()
-        .map(|presence| presence.machine_name)
+        .iter()
+        .flat_map(|presence| presence.names().map(str::to_owned))
         .collect();
     machines.push(identity.name.clone());
+    machines.push(identity.host_name.clone());
 
     let mut scanner = Scanner {
         config,
