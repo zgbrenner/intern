@@ -2816,6 +2816,42 @@ fn uploader_guard_rechecks_a_previously_queued_document_before_extraction() {
         Some(ErrorCode::UploaderUnverified)
     );
 }
+
+/// A denial at admission happens before any analysis, so there is nothing to
+/// review and nothing to approve: the only useful thing a person can do is
+/// verify the file and ask for it again. Retry used to refuse.
+#[test]
+fn an_item_denied_at_extraction_can_be_retried_after_verification() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "denied.pdf");
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "denied-hash");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let guard = Arc::new(UploaderGuard {
+        allowed: AtomicBool::new(true),
+        hash: None,
+    });
+    let pipeline = pipeline(temp.path(), worker, model, files, AppSettings::default())
+        .with_admission_guard(guard.clone());
+    pipeline.enqueue_files(&[path]).unwrap();
+    guard.allowed.store(false, Ordering::SeqCst);
+    pipeline.run_until_idle().unwrap();
+    let denied = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(denied.status, QueueStatus::NeedsReview);
+    assert_eq!(denied.error_code, Some(ErrorCode::UploaderUnverified));
+    assert!(denied.proposal.is_none(), "nothing was analyzed");
+
+    guard.allowed.store(true, Ordering::SeqCst);
+    pipeline.retry(denied.id).unwrap();
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Queued);
+
+    pipeline.run_until_idle().unwrap();
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Ready);
+}
+
 #[test]
 fn uploader_guard_binds_provider_verified_bytes_to_the_queue_fingerprint() {
     let temp = tempdir().unwrap();

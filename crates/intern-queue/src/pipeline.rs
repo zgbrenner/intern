@@ -1671,6 +1671,17 @@ impl Pipeline {
             self.events.queue_changed();
             return result;
         }
+        if item.status == QueueStatus::NeedsReview
+            && item.error_code == Some(ErrorCode::UploaderUnverified)
+        {
+            // The denial happened before any analysis, so there is no
+            // proposal to review and nothing for a person to approve: the
+            // only useful thing Retry can mean is "the file is verified now,
+            // read it". Same compare-and-swap as the duplicate shortcut.
+            self.repository.retry_unverified(id)?;
+            self.events.queue_changed();
+            return Ok(());
+        }
         if item.status == QueueStatus::NeedsReview && item.error_code == Some(ErrorCode::Duplicate)
         {
             // "Process anyway": the duplicate flag was set before any
@@ -2246,6 +2257,27 @@ impl PipelineRepository {
             .map_err(|_| PipelineError::new("INVALID_DATA", "proposal could not be stored"))?;
         transaction.execute("UPDATE proposals SET proposal_json = ?1, created_at = unixepoch() WHERE queue_item_id = ?2", params![json, id]).map_err(database_error)?;
         transaction.commit().map_err(database_error)
+    }
+
+    /// Returns a document denied at admission to the queue, for the person
+    /// who has since had its uploader verified. The compare-and-swap covers
+    /// the error code as well as the status, so only that denial takes the
+    /// shortcut and a concurrent decision on the item makes it fail closed.
+    fn retry_unverified(&self, id: i64) -> PipelineResult<()> {
+        let changed = self.lock()?.execute(
+            "UPDATE queue_items SET status = 'queued', processing_failures = 0, error_code = NULL,
+             owner_session = NULL, lease_expires_at = NULL, updated_at = unixepoch()
+             WHERE id = ?1 AND status = 'needs_review' AND error_code = 'UPLOADER_UNVERIFIED'",
+            params![id],
+        ).map_err(database_error)?;
+        if changed == 1 {
+            Ok(())
+        } else {
+            Err(PipelineError::new(
+                "STATE_CONFLICT",
+                "unverified retry compare-and-swap failed",
+            ))
+        }
     }
 
     fn retry_canceled(&self, id: i64) -> PipelineResult<()> {
