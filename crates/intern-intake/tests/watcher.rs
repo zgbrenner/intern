@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -31,6 +31,7 @@ struct FakeHost {
     statuses: Mutex<Vec<IntakeStatus>>,
     fail_enqueue: AtomicBool,
     admission: Mutex<Option<IntakeAdmission>>,
+    admission_calls: AtomicUsize,
 }
 
 impl FakeHost {
@@ -40,6 +41,10 @@ impl FakeHost {
 
     fn abandoned(&self) -> Vec<PathBuf> {
         self.abandoned.lock().unwrap().clone()
+    }
+
+    fn admission_calls(&self) -> usize {
+        self.admission_calls.load(Ordering::SeqCst)
     }
 
     fn set_state(&self, path: &Path, state: ItemState) {
@@ -53,6 +58,7 @@ impl FakeHost {
 impl IntakeHost for FakeHost {
     // The existing tests exercise the explicitly local-only protocol.
     fn admission(&self, _path: &Path) -> IntakeAdmission {
+        self.admission_calls.fetch_add(1, Ordering::SeqCst);
         self.admission
             .lock()
             .unwrap()
@@ -700,7 +706,83 @@ fn other_uploads_are_held_and_a_later_revocation_abandons_owned_work() {
     *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Verified);
     rig.step();
     assert_eq!(rig.host.enqueued().len(), 1);
-    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Unknown);
+    // A revocation is a verdict; an unverifiable moment is not, and is covered
+    // by a_transient_verification_error_does_not_cancel_owned_work.
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Revoked);
     rig.step();
     assert!(rig.host.abandoned().contains(&path));
+}
+
+/// Microsoft being briefly unreachable is not the same as an upload having
+/// been revoked. Cancelling the queue item and dropping the claim on a blip
+/// throws away work that was legitimately admitted, and the next scan has to
+/// start the document over.
+#[test]
+fn a_transient_verification_error_does_not_cancel_owned_work() {
+    let rig = Rig::start(false, &[]);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Verified);
+    let path = rig.write("contract.pdf", b"a document being processed");
+    rig.step();
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Unknown);
+    rig.step();
+    assert!(
+        rig.host.abandoned().is_empty(),
+        "work in flight must survive an unverifiable moment"
+    );
+    assert_eq!(rig.read_claim(&key).state, ClaimState::Claimed);
+    assert_eq!(rig.watcher.status().uploader_unknown, 1);
+
+    // A verdict, rather than a blip, still stops the work.
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Revoked);
+    rig.step();
+    assert_eq!(rig.host.abandoned(), vec![path]);
+    assert!(!rig.claim_file(&key).exists());
+}
+
+/// Verifying an uploader costs a Microsoft audit search, and only 32 can be
+/// pending at once. Spending them on documents this machine has already
+/// finished, or that another machine is processing, starves the documents that
+/// actually need a verdict.
+#[test]
+fn held_and_done_files_are_not_reverified_each_scan() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let mine = rig.write("mine.pdf", b"already filed here");
+    rig.step();
+    rig.step();
+    rig.host.set_state(
+        &mine,
+        ItemState::Done {
+            outcome: DoneOutcome::Renamed,
+            result_filename: Some("2026 Contract.pdf".to_string()),
+        },
+    );
+    rig.step();
+
+    rig.write("theirs.pdf", b"another machine is on it");
+    let facts = facts_for(rig.temp.path(), "theirs.pdf");
+    let other = ClaimStore::new(rig.temp.path(), identity("other-machine", "elsewhere")).unwrap();
+    other.write_origin(&facts).unwrap();
+    assert!(matches!(
+        other.acquire(&facts),
+        intern_intake::AcquireOutcome::Acquired
+    ));
+    rig.step();
+    rig.step();
+
+    let before = rig.host.admission_calls();
+    rig.step();
+    rig.step();
+    assert_eq!(
+        rig.host.admission_calls(),
+        before,
+        "neither a tombstoned document nor one another machine holds is ours to verify"
+    );
+    let status = rig.watcher.status();
+    assert_eq!(status.processed_here, 1);
+    assert_eq!(status.claimed_by_others, 1);
 }

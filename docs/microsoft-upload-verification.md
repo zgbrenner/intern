@@ -95,6 +95,13 @@ protected folder does not become unprotected merely by changing that checkbox.
 Disconnect disables authorization immediately even if credential deletion
 fails. Unknown/missing identity, expired sessions, rejected permissions,
 malformed responses, offline sync, throttling or a changed revision hold files.
+Holding and revoking are not the same thing. A file whose uploader cannot be
+established right now — Microsoft unreachable, throttled, or the audit event
+not delivered yet — is never admitted, but a document already claimed and
+queued keeps its claim and its place in the queue, because every pipeline
+stage authorizes again before it acts. Only a verdict — disconnection, a
+changed account, or an upload that no longer verifies — cancels work in
+flight.
 The existing `.intern` machine claims still coordinate processing but never
 prove a Microsoft uploader. Their sync-based leases are best-effort, not
 an exactly-once guarantee across offline machines.

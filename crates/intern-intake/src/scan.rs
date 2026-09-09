@@ -50,12 +50,23 @@ pub enum ItemState {
 /// The boundary to whatever processes documents (the pipeline in the real
 /// app, a fake in tests). The watcher only hands over paths and asks about
 /// their fate; it never reads document content itself.
+/// What the host can say about who uploaded a document.
+///
+/// `Unknown` and `Revoked` are both holds, and neither ever admits a document,
+/// but they mean opposite things about work already in flight. `Unknown` is
+/// "we could not check right now" — Microsoft unreachable, throttled, or the
+/// audit event not delivered yet — and must leave a document that is already
+/// claimed and queued exactly where it is, because the queue re-checks at
+/// every stage anyway. `Revoked` is a verdict: the connection was dropped, the
+/// account changed, or this file no longer verifies, and the work in flight
+/// is cancelled.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IntakeAdmission {
     LocalOnly,
     Verified,
     Other,
     Unknown,
+    Revoked,
 }
 
 pub trait IntakeHost: Send + Sync {

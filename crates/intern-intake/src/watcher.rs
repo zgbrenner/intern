@@ -340,41 +340,24 @@ impl Scanner<'_> {
         };
         let key = doc.key();
         self.visited.insert(key.clone());
-        let admission = self.host.admission(&facts.path);
-        if matches!(admission, IntakeAdmission::Other | IntakeAdmission::Unknown) {
-            if admission == IntakeAdmission::Other {
-                self.status.held_for_others += 1;
-            } else {
-                self.status.uploader_unknown += 1;
-            }
-            if self.owned.remove(&key).is_some()
-                || self.store.read(&key).is_some_and(|claim| {
-                    claim.machine_id == self.identity.id && claim.state == ClaimState::Claimed
-                })
-            {
-                self.host.abandon(&facts.path);
-                let _ = self.store.release(&key);
-            }
-            return;
-        }
 
         if self.owned.contains_key(&key) {
-            if self.store.verify(&key) {
-                self.manage_owned(&key, &facts.path, true);
-            } else {
-                self.owned.remove(&key);
-                self.host.abandon(&facts.path);
-            }
+            self.manage_admitted(&key, facts);
             return;
         }
 
+        // Asking the host about a document only when this machine might act on
+        // it: an uploader check can cost a Microsoft audit search, and only 32
+        // of those can be pending at once. Spending them on documents already
+        // tombstoned here, or claimed by another machine, starves the ones that
+        // actually need a verdict.
         match self.store.read(&key) {
             Some(claim) if claim.machine_id == self.identity.id => match claim.state {
                 ClaimState::Claimed => {
                     // A claim from a previous run of this machine: adopt it and
                     // let the host's item state drive it forward again.
                     self.owned.insert(key.clone(), facts.path.clone());
-                    self.manage_owned(&key, &facts.path, true);
+                    self.manage_admitted(&key, facts);
                 }
                 ClaimState::Done => self.status.processed_here += 1,
             },
@@ -383,10 +366,57 @@ impl Scanner<'_> {
                     self.status.claimed_by_others += 1;
                 }
             }
-            None if admission == IntakeAdmission::Verified => {
-                self.attempt_claim(&doc, &key, &facts.path)
+            None => match self.host.admission(&facts.path) {
+                IntakeAdmission::Verified => self.attempt_claim(&doc, &key, &facts.path),
+                IntakeAdmission::LocalOnly => self.consider_unclaimed(&doc, &key, facts),
+                IntakeAdmission::Other => self.status.held_for_others += 1,
+                IntakeAdmission::Unknown | IntakeAdmission::Revoked => {
+                    self.status.uploader_unknown += 1
+                }
+            },
+        }
+    }
+
+    /// Re-checks the uploader of a document this machine already holds, then
+    /// drives the claim.
+    ///
+    /// Only a verdict ends the work. "We could not check right now" — an
+    /// unreachable Microsoft, a throttled connection, an audit event that has
+    /// not been delivered yet — leaves the claim and the queue item alone: the
+    /// queue authorizes again at every stage of its own, so nothing is
+    /// processed on stale evidence, and cancelling here would throw away work
+    /// that was legitimately admitted a moment ago.
+    fn manage_admitted(&mut self, key: &str, facts: &FileFacts) {
+        let admission = self.host.admission(&facts.path);
+        match admission {
+            IntakeAdmission::Other | IntakeAdmission::Revoked => {
+                if admission == IntakeAdmission::Other {
+                    self.status.held_for_others += 1;
+                } else {
+                    self.status.uploader_unknown += 1;
+                }
+                self.owned.remove(key);
+                self.host.abandon(&facts.path);
+                let _ = self.store.release(key);
+                return;
             }
-            None => self.consider_unclaimed(&doc, &key, facts),
+            IntakeAdmission::Unknown => {
+                self.status.uploader_unknown += 1;
+                if self.store.verify(key) {
+                    let _ = self.store.renew(key);
+                } else {
+                    self.owned.remove(key);
+                    self.host.abandon(&facts.path);
+                }
+                return;
+            }
+            IntakeAdmission::Verified | IntakeAdmission::LocalOnly => {}
+        }
+        if self.store.verify(key) {
+            self.manage_owned(key, &facts.path, true);
+        } else {
+            self.owned.remove(key);
+            self.host.abandon(&facts.path);
         }
     }
 
