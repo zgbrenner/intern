@@ -280,8 +280,9 @@ from free text, so every name in a filename has been found in the document.
 Names longer than 120 characters shed the second party, then the party clause,
 then truncate the type — detail is lost from the least identifying end first.
 Windows-hostile characters, reserved device names, trailing dots and spaces, and
-bidirectional control characters are removed; the original extension is always
-preserved; collisions get a ` (2)` suffix. The engine checks collisions
+invisible formatting characters — the bidirectional controls, a soft hyphen, a
+zero-width space, a byte-order mark — are removed; the original extension is
+always preserved; collisions get a ` (2)` suffix. The engine checks collisions
 against the only folder it knows, the document's own; the queue recomposes the
 name against the folder the document is actually going to, so a suffix means
 a real collision at the destination and never a phantom one at the source.
