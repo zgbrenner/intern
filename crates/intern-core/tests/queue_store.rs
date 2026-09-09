@@ -779,6 +779,31 @@ impl FileSystem for RenameRefusedFileSystem {
 }
 
 #[test]
+fn the_duplicate_lookup_is_indexed_on_a_fresh_and_on_a_migrated_database() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("queue.sqlite3");
+    drop(QueueStore::open(&path).unwrap());
+    // Reopening is what an upgraded install does, and the index has to arrive
+    // for a database that already exists as well as for a new one.
+    drop(QueueStore::open(&path).unwrap());
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let plan = connection
+        .query_row(
+            "EXPLAIN QUERY PLAN
+             SELECT id FROM queue_items
+             WHERE status = 'completed' AND source_hash = ?1 AND source_path_key <> ?2",
+            ["hash", "key"],
+            |row| row.get::<_, String>(3),
+        )
+        .unwrap();
+    assert!(
+        plan.contains("queue_items_source_hash"),
+        "the duplicate lookup should read an index, not scan: {plan}"
+    );
+}
+
+#[test]
 fn duplicate_report_names_the_applied_file_after_a_rolled_back_undo() {
     let temp = TempDir::new().unwrap();
     let db = Arc::new(store(&temp));

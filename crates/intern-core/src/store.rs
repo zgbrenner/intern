@@ -93,6 +93,13 @@ impl QueueStore {
                updated_at INTEGER NOT NULL,
                UNIQUE(source_path_key, source_hash)
              );
+             -- Every file added to the queue asks whether its content was filed
+             -- before, and the UNIQUE index above is no use for that question
+             -- because it leads with the path. Without this one the answer is a
+             -- scan of the whole queue, once per file, on the intake path.
+             CREATE INDEX IF NOT EXISTS queue_items_source_hash
+               ON queue_items(source_hash);
+
              CREATE TABLE IF NOT EXISTS proposals (
                queue_item_id INTEGER PRIMARY KEY REFERENCES queue_items(id) ON DELETE CASCADE,
                proposal_json TEXT NOT NULL,
