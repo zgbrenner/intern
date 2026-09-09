@@ -298,8 +298,23 @@ pub fn page_needs_ocr(page: &PdfPageInspection) -> bool {
     } else {
         replacements as f32 / considered as f32
     };
-    (meaningful < 20 && page.image_coverage >= 0.65) || replacement_ratio > 0.03
+    // A page that is essentially all image is a scan, and a scan's text layer
+    // is whatever the scanner or the review platform stamped on it: a Bates
+    // number, a confidentiality legend, an exhibit label. Those clear the
+    // twenty-character veto while carrying none of the document, so a
+    // stamped scan has to reach OCR on the strength of its coverage.
+    let stamped_scan = meaningful < STAMP_CHARACTERS && page.image_coverage >= FULL_PAGE_IMAGE;
+    (meaningful < 20 && page.image_coverage >= 0.65) || stamped_scan || replacement_ratio > 0.03
 }
+
+/// Native text this short on a page that is all image is a stamp, not the
+/// document.
+const STAMP_CHARACTERS: usize = 200;
+
+/// Image coverage at or above which a page is a picture of a page rather
+/// than a page with a picture on it. A scanner covers the sheet; a chart or a
+/// letterhead on a page of prose does not come close.
+const FULL_PAGE_IMAGE: f32 = 0.9;
 
 fn page_needs_vision(page: &PdfPageInspection) -> bool {
     let meaningful = page

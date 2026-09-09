@@ -31,7 +31,9 @@ knows anything about models.
 
 Native text first, always. PDFium supplies each page's text and how much of the
 page is covered by images. A page goes to OCR only when it has fewer than 20
-meaningful characters under heavy image coverage, or when more than 3% of its
+meaningful characters under heavy image coverage, when it has fewer than 200 on
+a page that is essentially all image — a scan whose text layer is a Bates
+number or a "CONFIDENTIAL" stamp and nothing else — or when more than 3% of its
 characters came back as replacement glyphs. Office containers go through AnyDoc
 to Markdown, which preserves headings and tables, and only when the container's
 content is what its extension names: routing here is by extension, so a

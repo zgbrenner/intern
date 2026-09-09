@@ -133,6 +133,11 @@ fn selective_ocr_threshold_boundaries_are_exact() {
     assert!(page_needs_ocr(&page(&"a".repeat(19), 0.65)));
     assert!(!page_needs_ocr(&page(&"a".repeat(20), 0.65)));
 
+    // The stamp rule: short text on a page that is all image.
+    assert!(page_needs_ocr(&page(&"a".repeat(199), 0.9)));
+    assert!(!page_needs_ocr(&page(&"a".repeat(200), 0.9)));
+    assert!(!page_needs_ocr(&page(&"a".repeat(199), 0.899)));
+
     let exactly_three_percent = format!("{}{}", "a".repeat(97), "�".repeat(3));
     let over_three_percent = format!("{}{}", "a".repeat(96), "�".repeat(4));
     assert!(!page_needs_ocr(&page(&exactly_three_percent, 0.0)));
@@ -323,4 +328,27 @@ fn vision_image_long_edge_is_reduced_to_1344_pixels() {
     let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).unwrap();
 
     assert_eq!(decoded.dimensions(), (1_344, 672));
+}
+
+/// A litigation scan carries a stamp in its text layer and nothing else. The
+/// stamp is long enough to clear the twenty-character veto, so the page used
+/// to be filed as native text and the entire document came back as the words
+/// "CONFIDENTIAL - SUBJECT TO PROTECTIVE ORDER".
+#[test]
+fn a_scanned_page_with_a_confidentiality_stamp_is_still_ocred() {
+    let (document, renders) = route(
+        vec![page("CONFIDENTIAL - SUBJECT TO PROTECTIVE ORDER", 0.99)],
+        vec![OcrResult::new(
+            "Settlement Agreement and Mutual Release between Acme Corporation and Ridgeline LLC",
+            92.0,
+        )],
+    );
+
+    assert_eq!(renders, 1);
+    assert_eq!(document.pages[0].source, PageSource::Ocr);
+    assert!(
+        document.pages[0].text.contains("Settlement Agreement"),
+        "{}",
+        document.pages[0].text
+    );
 }
