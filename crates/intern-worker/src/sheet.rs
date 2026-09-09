@@ -16,7 +16,7 @@ use std::io::BufReader;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
-use calamine::{Data, Range, Reader, Xlsx};
+use calamine::{Data, DataRef, Reader, Xlsx};
 
 use crate::extract::{
     CancellationToken, ExtractedDocument, ExtractedPage, ExtractionError, ExtractionWarning,
@@ -29,6 +29,11 @@ pub const MAX_SHEET_ROWS: usize = 200;
 /// Columns rendered per sheet before elision.
 pub const MAX_SHEET_COLS: usize = 30;
 
+/// How many cells may pile up before the window is pruned again. Pruning on
+/// every cell would be quadratic; pruning when the buffer reaches a few times
+/// the rendered window keeps the cost amortised and the memory bounded.
+const CELLS_BEFORE_PRUNE: usize = 4 * MAX_SHEET_ROWS * MAX_SHEET_COLS;
+
 /// Runs one calamine operation behind a panic barrier: calamine can panic on
 /// crafted or corrupt containers, and a dependency panic must degrade to a
 /// parse error that routes the document to review. `AssertUnwindSafe` is
@@ -38,6 +43,15 @@ fn contained<T>(operation: &str, run: impl FnOnce() -> T) -> Result<T, Extractio
     catch_unwind(AssertUnwindSafe(run)).map_err(|_| {
         ExtractionError::parse_failed(format!("workbook parser aborted during {operation}"))
     })
+}
+
+/// The part of a worksheet that will be rendered, plus the corners of the
+/// used range the elision marker counts against.
+struct CappedSheet {
+    /// Absolute `(row, column, text)` of every cell inside the rendered window.
+    cells: Vec<(u32, u32, String)>,
+    start: (u32, u32),
+    end: (u32, u32),
 }
 
 pub fn extract_xlsx(
@@ -62,14 +76,13 @@ pub fn extract_xlsx(
     let mut truncated = false;
     for name in &sheet_names {
         cancel.check()?;
-        let range =
-            contained("worksheet read", || workbook.worksheet_range(name))?.map_err(|error| {
-                ExtractionError::parse_failed(format!("worksheet {name:?} did not read: {error}"))
-            })?;
-        if range.is_empty() {
+        let sheet = contained("worksheet read", || {
+            read_capped_sheet(&mut workbook, name, cancel)
+        })??;
+        let Some(sheet) = sheet else {
             continue;
-        }
-        let (text, sheet_truncated) = render_sheet(name, &range, cancel)?;
+        };
+        let (text, sheet_truncated) = render_sheet(name, &sheet);
         truncated |= sheet_truncated;
         pages.push(ExtractedPage {
             page_number: pages.len() + 1,
@@ -96,36 +109,101 @@ pub fn extract_xlsx(
     })
 }
 
-/// Renders one worksheet as `## name` plus a pipe table, returning the text
-/// and whether any rows or columns were elided.
-fn render_sheet(
+/// Streams one worksheet's cells and keeps only the ones the cap can render.
+///
+/// `worksheet_range` materialises the used range densely — one slot per cell
+/// of the bounding box — before any cap of ours applies. A three-kilobyte
+/// workbook whose only two cells are `A1` and `XFD1048576` therefore asks the
+/// allocator for half a terabyte and aborts the process, which no panic
+/// barrier can turn back into a parse error. Reading cell by cell keeps at
+/// most a few thousand of them, whatever the sheet claims its corners are.
+///
+/// `None` is a sheet with no cell values at all, which the caller skips.
+fn read_capped_sheet(
+    workbook: &mut Xlsx<BufReader<File>>,
     name: &str,
-    range: &Range<Data>,
     cancel: &CancellationToken,
-) -> Result<(String, bool), ExtractionError> {
-    let height = range.height();
-    let width = range.width();
-    let shown_rows = height.min(MAX_SHEET_ROWS);
-    let shown_cols = width.min(MAX_SHEET_COLS);
-
-    let mut text = format!("## {}\n\n", sanitize_cell(name));
-    for (index, row) in range.rows().take(shown_rows).enumerate() {
-        if index % 64 == 0 {
+) -> Result<Option<CappedSheet>, ExtractionError> {
+    let read_error = |error: calamine::XlsxError| {
+        ExtractionError::parse_failed(format!("worksheet {name:?} did not read: {error}"))
+    };
+    let mut reader = workbook.worksheet_cells_reader(name).map_err(read_error)?;
+    let mut cells: Vec<(u32, u32, String)> = Vec::new();
+    let mut start: Option<(u32, u32)> = None;
+    let mut end = (0_u32, 0_u32);
+    let mut seen = 0_u64;
+    while let Some(cell) = reader.next_cell().map_err(read_error)? {
+        if seen % 1_024 == 0 {
             cancel.check()?;
         }
-        let cells = row
-            .iter()
-            .take(shown_cols)
-            .map(cell_text)
-            .collect::<Vec<_>>();
-        text.push_str(&format!("| {} |\n", cells.join(" | ")));
+        seen += 1;
+        if matches!(cell.get_value(), DataRef::Empty) {
+            continue;
+        }
+        let (row, column) = cell.get_position();
+        let corner = start.get_or_insert((row, column));
+        corner.0 = corner.0.min(row);
+        corner.1 = corner.1.min(column);
+        end = (end.0.max(row), end.1.max(column));
+        let value: Data = cell.get_value().clone().into();
+        cells.push((row, column, cell_text(&value)));
+        if cells.len() >= CELLS_BEFORE_PRUNE {
+            prune_to_window(&mut cells, *corner);
+        }
+    }
+    let Some(start) = start else {
+        return Ok(None);
+    };
+    prune_to_window(&mut cells, start);
+    Ok(Some(CappedSheet { cells, start, end }))
+}
+
+/// Drops every cell outside the rows and columns the renderer can show. A
+/// cell is unreachable once it sits more than a windowful past the top-left
+/// corner, and that corner only ever moves up and to the left.
+fn prune_to_window(cells: &mut Vec<(u32, u32, String)>, start: (u32, u32)) {
+    cells.retain(|(row, column, _)| {
+        (row - start.0) < MAX_SHEET_ROWS as u32 && (column - start.1) < MAX_SHEET_COLS as u32
+    });
+}
+
+/// Renders one worksheet as `## name` plus a pipe table, returning the text
+/// and whether any rows or columns were elided.
+///
+/// Rows and columns past the last cell inside the window count as elided
+/// rather than being drawn as empty table cells: a sheet whose used range
+/// runs out to one stray far-away cell would otherwise render two hundred
+/// blank rows before admitting it left anything out.
+fn render_sheet(name: &str, sheet: &CappedSheet) -> (String, bool) {
+    let height = u64::from(sheet.end.0 - sheet.start.0) + 1;
+    let width = u64::from(sheet.end.1 - sheet.start.1) + 1;
+    let shown_rows = sheet
+        .cells
+        .iter()
+        .map(|(row, _, _)| (row - sheet.start.0) as usize + 1)
+        .max()
+        .unwrap_or(0);
+    let shown_cols = sheet
+        .cells
+        .iter()
+        .map(|(_, column, _)| (column - sheet.start.1) as usize + 1)
+        .max()
+        .unwrap_or(0);
+    let mut grid = vec![vec![String::new(); shown_cols]; shown_rows];
+    for (row, column, value) in &sheet.cells {
+        grid[(row - sheet.start.0) as usize][(column - sheet.start.1) as usize] = value.clone();
+    }
+
+    let mut text = format!("## {}\n\n", sanitize_cell(name));
+    for (index, row) in grid.iter().enumerate() {
+        text.push_str(&format!("| {} |\n", row.join(" | ")));
         if index == 0 {
             text.push_str(&format!("| {} |\n", vec!["---"; shown_cols].join(" | ")));
         }
     }
 
-    let hidden_rows = height - shown_rows;
-    let hidden_cols = width - shown_cols;
+    let hidden_rows = height - shown_rows as u64;
+    let hidden_cols = width - shown_cols as u64;
     let elided = hidden_rows > 0 || hidden_cols > 0;
     if elided {
         let marker = match (hidden_rows, hidden_cols) {
@@ -137,7 +215,7 @@ fn render_sheet(
         text.push_str(&marker);
         text.push('\n');
     }
-    Ok((text, elided))
+    (text, elided)
 }
 
 fn cell_text(data: &Data) -> String {

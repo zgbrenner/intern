@@ -253,3 +253,31 @@ fn a_corrupt_workbook_reports_a_parse_error_instead_of_panicking() {
     assert_eq!(error.code(), "PARSE_FAILED");
     assert!(!error.retryable());
 }
+
+/// Two cells at opposite corners of the sheet describe a bounding box of
+/// seventeen billion cells. Reading the sheet as a dense range asks the
+/// allocator for that box before any cap applies, and the process aborts;
+/// only the window that is actually rendered may be materialised.
+#[test]
+fn a_sheet_with_a_far_away_cell_renders_the_cap_without_allocating_the_bounding_box() {
+    let sheet_data = concat!(
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Statement of Account</t></is></c></row>",
+        "<row r=\"1048576\"><c r=\"XFD1048576\" t=\"inlineStr\"><is><t>stray</t></is></c></row>",
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let path = write_xlsx(&directory, &[("Ledger", sheet_data.to_owned())]);
+
+    let document =
+        extract_xlsx(&path, &ResourceLimits::default(), &CancellationToken::new()).unwrap();
+    let text = &document.pages[0].text;
+
+    assert!(
+        text.starts_with("## Ledger\n\n| Statement of Account |\n"),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("[... 1048575 more rows and 16383 more columns not shown]\n"),
+        "{text}"
+    );
+    assert!(document.truncated);
+}
