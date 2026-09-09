@@ -1199,9 +1199,9 @@ impl Pipeline {
         let local = self
             .repository
             .find_similar(fingerprint, item_id)
-            .ok()
-            .flatten()
-            .filter(|similar| {
+            .unwrap_or_default()
+            .into_iter()
+            .find(|similar| {
                 same_document(similar.distance, &similar.filing.filename, date.as_deref())
             })
             .map(|similar| similar.filing.describe());
@@ -2163,13 +2163,18 @@ impl PipelineRepository {
         Ok(())
     }
 
-    /// The closest filing to `fingerprint` within the near-duplicate
-    /// distance, other than `except_item`'s own.
+    /// The filings within the near-duplicate distance of `fingerprint`,
+    /// closest first, other than `except_item`'s own.
+    ///
+    /// All of them, not only the closest. Last year's renewal of an agreement
+    /// can be nearer in text than this year's second scan of it is, and
+    /// answering with that one alone hid the filing the document really
+    /// repeats behind a date that says "another document".
     fn find_similar(
         &self,
         fingerprint: u64,
         except_item: i64,
-    ) -> PipelineResult<Option<SimilarFiling>> {
+    ) -> PipelineResult<Vec<SimilarFiling>> {
         let connection = self.lock()?;
         let mut statement = connection
             .prepare("SELECT fingerprint, filed_name FROM fingerprints WHERE queue_item_id <> ?1")
@@ -2179,14 +2184,12 @@ impl PipelineRepository {
                 Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?))
             })
             .map_err(database_error)?;
-        let mut closest: Option<SimilarFiling> = None;
+        let mut similar = Vec::new();
         for row in rows {
             let (stored, filed_name) = row.map_err(database_error)?;
             let distance = fingerprint::hamming(fingerprint, stored);
-            if distance <= NEAR_DUPLICATE_DISTANCE
-                && closest.as_ref().is_none_or(|best| distance < best.distance)
-            {
-                closest = Some(SimilarFiling {
+            if distance <= NEAR_DUPLICATE_DISTANCE {
+                similar.push(SimilarFiling {
                     filing: KnownFiling {
                         filename: filed_name,
                         filed_by: None,
@@ -2195,7 +2198,8 @@ impl PipelineRepository {
                 });
             }
         }
-        Ok(closest)
+        similar.sort_by_key(|candidate| candidate.distance);
+        Ok(similar)
     }
 
     fn forget_rule_for(&self, kind: RuleKind, from: &str) -> PipelineResult<()> {

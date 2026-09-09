@@ -411,7 +411,11 @@ decide: this month's statement and last month's share almost every word, and
 a fingerprint barely sees the date and the figures that differ. So the dates
 have to agree - the filed name's leading date against the date the analysis
 found or the model read - and without a date on one side only a
-near-identical text counts. A match sends the document to review with
+near-identical text counts. Every filing within the
+distance is considered, not only the nearest one: last year's renewal of an
+agreement can be nearer in text than this year's second scan of it is, and
+looking only at the nearest hid the filing the document really repeats behind
+a date that said "another document". A match sends the document to review with
 `NEAR_DUPLICATE`, named after the filing it repeats and the machine that made
 it; it is never filed on its own, and an undo forgets the fingerprint.
 

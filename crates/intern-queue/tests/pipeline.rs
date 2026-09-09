@@ -2731,6 +2731,105 @@ fn a_second_scan_of_a_filed_document_waits_and_names_the_filing_it_repeats() {
     assert_eq!(fourth.proposal.as_ref().unwrap().near_duplicate_of, None);
 }
 
+/// Closeness alone does not decide, and neither does the closest row. A
+/// renewal of the same agreement is nearer in text than a scan of the
+/// original is, and used to be the only filing the duplicate check looked at:
+/// its date said "another document", and the filing this scan really repeats
+/// was never mentioned.
+#[test]
+fn the_closest_fingerprint_with_the_wrong_date_does_not_hide_the_true_duplicate() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    let filed = temp.path().join("filed");
+    std::fs::create_dir_all(&inbox).unwrap();
+    std::fs::create_dir_all(&filed).unwrap();
+    let rescan_text = AGREEMENT
+        .replace("employs John", "emplcys John")
+        .replace("cartographer", "cartograpner")
+        .replace("thirly", "thirty");
+    let renewal_text = AGREEMENT.replace("April 12, 2024", "April 12, 2025");
+    let original = fingerprint::source_fingerprint(&parsed(AGREEMENT)).unwrap();
+    let to_rescan = fingerprint::hamming(
+        original,
+        fingerprint::source_fingerprint(&parsed(&rescan_text)).unwrap(),
+    );
+    let to_renewal = fingerprint::hamming(
+        original,
+        fingerprint::source_fingerprint(&parsed(&renewal_text)).unwrap(),
+    );
+    assert!(
+        to_renewal < to_rescan && to_rescan <= fingerprint::NEAR_DUPLICATE_DISTANCE,
+        "the renewal must be the nearer filing and the rescan a near duplicate          ({to_renewal} then {to_rescan})"
+    );
+    let renewal = ModelProposal {
+        document_date: Some("2025-04-12".into()),
+        evidence: Evidence {
+            date: Some("signed April 12, 2025".into()),
+            ..proposal(0.94, false).evidence
+        },
+        ..proposal(0.94, false)
+    };
+    let worker = Arc::new(FakeWorker::new(vec![
+        Ok(parsed(&rescan_text)),
+        Ok(parsed(&renewal_text)),
+        Ok(parsed(AGREEMENT)),
+    ]));
+    let model = Arc::new(FakeModel::new(vec![
+        Ok(proposal(0.94, false)),
+        Ok(renewal),
+        Ok(proposal(0.94, false)),
+    ]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings
+        .save(&AppSettings {
+            destination: filed.to_string_lossy().into_owned(),
+            automatic_rename: true,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    let pipeline = Pipeline::with_local_files(
+        temp.path().join("queue.sqlite3"),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+
+    for name in ["scan-1.pdf", "renewal.pdf"] {
+        let path = source(&inbox, name);
+        pipeline.enqueue_files(std::slice::from_ref(&path)).unwrap();
+        pipeline.run_until_idle().unwrap();
+    }
+    let filings = pipeline.filed_documents().unwrap();
+    assert_eq!(filings.len(), 2, "{filings:?}");
+
+    let again = source(&inbox, "scan-2.pdf");
+    pipeline
+        .enqueue_files(std::slice::from_ref(&again))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+
+    let third = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.source_path == again)
+        .unwrap();
+    assert_eq!(third.status, QueueStatus::NeedsReview);
+    let record = third.proposal.as_ref().unwrap();
+    assert!(
+        record.reasons.iter().any(|reason| reason == NEAR_DUPLICATE),
+        "{:?}",
+        record.reasons
+    );
+    assert_eq!(
+        record.near_duplicate_of.as_deref(),
+        Some("2024-04-12 Employment Agreement between John Smith and Acme Corporation.pdf"),
+        "the filing that shares this document's date, not the nearer one"
+    );
+}
+
 /// The shared index answers for teammates' machines. Its answer is held to
 /// the same date test, and names the machine.
 #[test]
