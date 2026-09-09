@@ -1345,6 +1345,125 @@ fn a_source_the_sync_client_releases_is_applied_rather_than_sent_to_review() {
     assert!(!source.exists());
 }
 
+/// A destination an indexer grabs the instant it appears: the first
+/// `remaining_holds` attempts to open the renamed file, and to rename a
+/// temporary onto it, fail the way Windows reports ERROR_SHARING_VIOLATION.
+struct HeldDestinationFileSystem {
+    inner: StdFileSystem,
+    same_volume: bool,
+    remaining_holds: AtomicUsize,
+}
+
+impl HeldDestinationFileSystem {
+    fn take_hold(&self) -> Option<io::Error> {
+        let held =
+            self.remaining_holds
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                });
+        held.ok().map(|_| io::Error::from_raw_os_error(32))
+    }
+}
+
+fn is_named(path: &Path) -> bool {
+    path.file_name().and_then(|value| value.to_str()) == Some("named.pdf")
+}
+
+impl FileSystem for HeldDestinationFileSystem {
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+    fn hash(&self, path: &Path) -> io::Result<String> {
+        self.inner.hash(path)
+    }
+    fn same_volume(&self, _source: &Path, _destination: &Path) -> io::Result<bool> {
+        Ok(self.same_volume)
+    }
+    fn rename_no_replace(&self, source: &Path, destination: &Path) -> io::Result<()> {
+        // Only the publish rename is held; the plain source-to-destination
+        // rename is already retried and would absorb the holds first.
+        if is_named(destination)
+            && !is_named(source)
+            && source.extension() == Some("intern-tmp".as_ref())
+            && let Some(error) = self.take_hold()
+        {
+            return Err(error);
+        }
+        self.inner.rename_no_replace(source, destination)
+    }
+    fn copy_new_locked(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> io::Result<Box<dyn LockedFile>> {
+        self.inner.copy_new_locked(source, destination)
+    }
+    fn lock_for_delete(&self, path: &Path) -> io::Result<Box<dyn LockedFile>> {
+        if is_named(path)
+            && let Some(error) = self.take_hold()
+        {
+            return Err(error);
+        }
+        self.inner.lock_for_delete(path)
+    }
+}
+
+fn held_destination(same_volume: bool, holds: usize) -> Arc<HeldDestinationFileSystem> {
+    Arc::new(HeldDestinationFileSystem {
+        inner: StdFileSystem,
+        same_volume,
+        remaining_holds: AtomicUsize::new(holds),
+    })
+}
+
+#[cfg(windows)]
+#[test]
+fn verification_waits_out_a_hold_on_the_renamed_destination() {
+    // The same-volume rename lands and an indexer opens the new name before
+    // the verification can. Two holds, then it lets go.
+    let renamed = TempDir::new().unwrap();
+    let source = renamed.path().join("source.pdf");
+    let destination = renamed.path().join("named.pdf");
+    write(&source, b"original");
+    let (applier, _store, item_id) = applying(&renamed, &source, held_destination(true, 2));
+    let applier = applier.with_lock_retry(LockRetry::new(5, Duration::from_millis(1)));
+
+    let receipt = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &StdFileSystem.hash(&source).unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(receipt.stage, OperationStage::Complete);
+    assert_eq!(fs::read(&destination).unwrap(), b"original");
+    assert!(!source.exists());
+
+    // The same hold on the cross-volume publish: the rename of the verified
+    // temporary onto the destination is waited out too.
+    let published = TempDir::new().unwrap();
+    let source = published.path().join("source.pdf");
+    let destination = published.path().join("named.pdf");
+    write(&source, b"original");
+    let (applier, _store, item_id) = applying(&published, &source, held_destination(false, 2));
+    let applier = applier.with_lock_retry(LockRetry::new(5, Duration::from_millis(1)));
+
+    let receipt = applier
+        .apply(
+            item_id,
+            &source,
+            &destination,
+            &StdFileSystem.hash(&source).unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(receipt.stage, OperationStage::Complete);
+    assert_eq!(fs::read(&destination).unwrap(), b"original");
+    assert!(!source.exists());
+}
+
 #[cfg(windows)]
 #[test]
 fn a_hold_taken_before_the_volume_check_is_waited_out() {

@@ -955,8 +955,17 @@ impl FileApplier {
                 )
             })?;
 
-        let mut published_locked = match self.filesystem.lock_for_delete(&receipt.destination) {
+        // The rename has landed, so the new name is exactly what an indexer or
+        // a sync client opens next - and that hold arrives between the rename
+        // and this verification. Waiting it out is the difference between a
+        // finished filing and a document sent to review over a lock that was
+        // already released.
+        let mut published_locked = match self
+            .lock_retry
+            .run(|| self.filesystem.lock_for_delete(&receipt.destination))
+        {
             Ok(locked) => locked,
+
             Err(_) => {
                 return Err(self.reconciliation_error(
                     receipt,
@@ -1034,10 +1043,13 @@ impl FileApplier {
                     "rollback intent could not be journaled",
                 )
             })?;
-        match self
-            .filesystem
-            .rename_no_replace(&receipt.destination, &receipt.source)
-        {
+        // Putting the document back is the one rename that must not be given
+        // up on lightly: a hold on the destination is a moment, and failing
+        // here leaves both names to a person to sort out.
+        match self.lock_retry.run(|| {
+            self.filesystem
+                .rename_no_replace(&receipt.destination, &receipt.source)
+        }) {
             Ok(()) => {
                 receipt.source_exists = true;
                 receipt.destination_exists = false;
@@ -1181,10 +1193,13 @@ impl FileApplier {
         }
         drop(temporary_locked);
 
-        if let Err(_publish_error) = self
-            .filesystem
-            .rename_no_replace(&temporary, &receipt.destination)
-        {
+        // Publishing the verified copy is a rename onto a name nothing holds
+        // yet, but the folder it lands in is watched, so the same transient
+        // holds apply here as anywhere else.
+        if let Err(_publish_error) = self.lock_retry.run(|| {
+            self.filesystem
+                .rename_no_replace(&temporary, &receipt.destination)
+        }) {
             receipt.temporary_exists = self.filesystem.exists(&temporary);
             receipt.destination_exists = self.filesystem.exists(&receipt.destination);
             return match self
