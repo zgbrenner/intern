@@ -185,16 +185,25 @@ pub(crate) fn proposal_from_text(content: &str) -> Result<ModelProposal, Attempt
 /// Recovers the JSON object from a reply that may be fenced or prefixed.
 pub fn extract_json_object(content: &str) -> Option<&str> {
     let trimmed = content.trim();
-    if let Some(fenced) = trimmed
+    // A fence is bounded by its own closing marker, not by the end of the
+    // reply: a hosted model that fences the object and then adds a sentence
+    // has still answered, and requiring the fence to be the last thing in the
+    // reply threw that answer away twice and paused the queue. Everything
+    // outside the fence is chatter, so its braces never enter the scan.
+    let body = match trimmed
         .strip_prefix("```json")
         .or_else(|| trimmed.strip_prefix("```JSON"))
         .or_else(|| trimmed.strip_prefix("```"))
     {
-        return fenced.strip_suffix("```").map(str::trim);
-    }
-    let start = trimmed.find('{')?;
-    let end = trimmed.rfind('}')?;
-    (end > start).then(|| trimmed[start..=end].trim())
+        Some(fenced) => match fenced.find("```") {
+            Some(close) => &fenced[..close],
+            None => fenced,
+        },
+        None => trimmed,
+    };
+    let start = body.find('{')?;
+    let end = body.rfind('}')?;
+    (end > start).then(|| body[start..=end].trim())
 }
 
 #[derive(Deserialize)]
@@ -351,6 +360,28 @@ mod tests {
             Some("{\"a\":1}")
         );
         assert_eq!(extract_json_object("no object here"), None);
+    }
+
+    /// Hosted models fence the object and then add a closing sentence. That
+    /// reply was read as malformed, retried, read as malformed again, and the
+    /// queue paused - over a reply that contained exactly what was asked for.
+    #[test]
+    fn json_is_recovered_from_a_fence_followed_by_chatter() {
+        assert_eq!(
+            extract_json_object("```json\n{\"a\":1}\n```\nLet me know if you need anything else."),
+            Some("{\"a\":1}")
+        );
+        assert_eq!(
+            extract_json_object("Here you go:\n```\n{\"a\":1}\n```\nHope that helps!"),
+            Some("{\"a\":1}")
+        );
+        // A fence the model never closed still carries the object.
+        assert_eq!(extract_json_object("```json\n{\"a\":1}"), Some("{\"a\":1}"));
+        // Prose after the fence must not be scanned for braces of its own.
+        assert_eq!(
+            extract_json_object("```json\n{\"a\":1}\n```\nNote the {braces} above."),
+            Some("{\"a\":1}")
+        );
     }
 
     #[test]
