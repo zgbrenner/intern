@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 
 use intern_worker::extract::{
     CancellationToken, ExtractedDocument, ExtractionError, OcrBackend, RenderedPage,
-    apply_detected_rotation, extract_anydoc, extract_pdf, extract_text, load_oriented_image,
-    normalize_vision_image, snapshot_source,
+    extract_anydoc, extract_image, extract_pdf, extract_text, snapshot_source,
 };
 use intern_worker::limits::ResourceLimits;
 use intern_worker::ocr::TesseractOcr;
@@ -73,33 +72,7 @@ fn extract_path(
         "msg" => intern_worker::email::extract_msg(path, &limits, &cancel),
         "txt" | "md" | "markdown" => extract_text(path, &limits, &cancel),
         "pdf" => extract_pdf(path, &pdf_backend()?, &LAZY_OCR, &limits, &cancel),
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" => {
-            cancel.check()?;
-            let image = load_oriented_image(path, &limits)?;
-            let rendered = RenderedPage::new(0, image);
-            let result = LAZY_OCR.recognize(&rendered, &cancel)?;
-            let low_confidence = result.mean_confidence < 75.0;
-            let optional_image = Some(normalize_vision_image(
-                0,
-                apply_detected_rotation(rendered.image, result.rotation_degrees)?,
-            )?);
-            Ok(ExtractedDocument {
-                pages: vec![intern_worker::extract::ExtractedPage {
-                    page_number: 1,
-                    text: result.text,
-                    source: intern_worker::extract::PageSource::Ocr,
-                    ocr_confidence: Some(result.mean_confidence),
-                    vision_escalated: true,
-                }],
-                warnings: if low_confidence {
-                    vec![intern_worker::extract::ExtractionWarning::LowOcrConfidence]
-                } else {
-                    vec![]
-                },
-                truncated: false,
-                optional_image,
-            })
-        }
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" => extract_image(path, &LAZY_OCR, &limits, &cancel),
         _ => Err(ExtractionError::unsupported(
             "supported formats are PDF, DOCX, PPTX, XLSX, EML, MSG, TXT, Markdown, PNG, JPEG, and TIFF",
         )),

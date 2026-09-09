@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Cursor, Read};
+use std::io::{BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -584,6 +584,131 @@ pub fn extract_text(
         truncated: false,
         optional_image: None,
     })
+}
+
+/// Reads a standalone image file as a one-page document. There is no text
+/// layer to prefer, so the page is OCR'd and kept as the page image.
+///
+/// A TIFF can hold a page per frame - a fax or a batch scan usually does -
+/// and only the first frame is read here, because neither this decoder nor
+/// the CCITT-compressed files these arrive in support the rest. What the
+/// caller must not do is believe it received the whole document, so unread
+/// frames are reported as truncation.
+pub fn extract_image(
+    path: &Path,
+    ocr: &dyn OcrBackend,
+    limits: &ResourceLimits,
+    cancel: &CancellationToken,
+) -> Result<ExtractedDocument, ExtractionError> {
+    cancel.check()?;
+    let image = load_oriented_image(path, limits)?;
+    let rendered = RenderedPage::new(0, image);
+    let result = ocr.recognize(&rendered, cancel)?;
+    let mut warnings = Vec::new();
+    if result.mean_confidence < CONFIDENT_READING {
+        warnings.push(ExtractionWarning::LowOcrConfidence);
+    }
+    let truncated = has_unread_frames(path);
+    if truncated {
+        warnings.push(ExtractionWarning::TextTruncated);
+    }
+    let optional_image = Some(normalize_vision_image(
+        0,
+        apply_detected_rotation(rendered.image, result.rotation_degrees)?,
+    )?);
+    Ok(ExtractedDocument {
+        pages: vec![ExtractedPage {
+            page_number: 1,
+            text: result.text,
+            source: PageSource::Ocr,
+            ocr_confidence: Some(result.mean_confidence),
+            vision_escalated: true,
+        }],
+        warnings,
+        truncated,
+        optional_image,
+    })
+}
+
+/// Whether an image file holds frames after the one that was read.
+///
+/// A TIFF is a chain of image file directories; the first one's link to the
+/// next is all this needs, and it is read rather than decoded so a
+/// twelve-frame fax costs one seek. Anything that does not read as a TIFF
+/// holds one image by construction, and a file whose chain cannot be
+/// followed is reported as single-framed rather than as an error: the frame
+/// that was read is still the document's first page.
+fn has_unread_frames(path: &Path) -> bool {
+    fn next_directory(path: &Path) -> Option<u64> {
+        let mut file = File::open(path).ok()?;
+        let mut header = [0_u8; 8];
+        file.read_exact(&mut header).ok()?;
+        let big_endian = match &header[..2] {
+            b"II" => false,
+            b"MM" => true,
+            _ => return None,
+        };
+        let word = |bytes: [u8; 2]| {
+            if big_endian {
+                u16::from_be_bytes(bytes)
+            } else {
+                u16::from_le_bytes(bytes)
+            }
+        };
+        let long = |bytes: [u8; 4]| {
+            if big_endian {
+                u32::from_be_bytes(bytes)
+            } else {
+                u32::from_le_bytes(bytes)
+            }
+        };
+        let quad = |bytes: [u8; 8]| {
+            if big_endian {
+                u64::from_be_bytes(bytes)
+            } else {
+                u64::from_le_bytes(bytes)
+            }
+        };
+        // Classic TIFF marks itself 42 and counts in 32-bit words; BigTIFF
+        // marks itself 43 and counts in 64-bit ones, with wider entries.
+        let (first, entry_bytes, big) = match word([header[2], header[3]]) {
+            42 => (
+                u64::from(long([header[4], header[5], header[6], header[7]])),
+                12_u64,
+                false,
+            ),
+            43 => {
+                let mut offset = [0_u8; 8];
+                file.read_exact(&mut offset).ok()?;
+                (quad(offset), 20_u64, true)
+            }
+            _ => return None,
+        };
+        file.seek(SeekFrom::Start(first)).ok()?;
+        let entries = if big {
+            let mut count = [0_u8; 8];
+            file.read_exact(&mut count).ok()?;
+            quad(count)
+        } else {
+            let mut count = [0_u8; 2];
+            file.read_exact(&mut count).ok()?;
+            u64::from(word(count))
+        };
+        file.seek(SeekFrom::Current(
+            i64::try_from(entries.checked_mul(entry_bytes)?).ok()?,
+        ))
+        .ok()?;
+        if big {
+            let mut next = [0_u8; 8];
+            file.read_exact(&mut next).ok()?;
+            Some(quad(next))
+        } else {
+            let mut next = [0_u8; 4];
+            file.read_exact(&mut next).ok()?;
+            Some(u64::from(long(next)))
+        }
+    }
+    next_directory(path).is_some_and(|next| next != 0)
 }
 
 pub fn load_oriented_image(
