@@ -369,12 +369,33 @@ impl TypeKind {
         };
         let lowered = document_type.to_lowercase();
         let has = |words: &[&str]| words.iter().any(|word| lowered.contains(word));
+        // The agreement family is tested first because its names contain
+        // the other families' words: a statement *of work* is an agreement,
+        // not a statement, and the entry for it was unreachable while
+        // "statement" was tested first.
         if has(&["amendment", "addendum", "modification"]) {
             Self::Amendment
         } else if has(&["notice", "notification"]) {
             Self::Notice
         } else if has(&["invoice", "bill", "statement of account", "credit note"]) {
             Self::Invoice
+        } else if has(&[
+            "agreement",
+            "contract",
+            "lease",
+            "statement of work",
+            "terms",
+            "policy",
+            "license",
+            "licence",
+            "deed",
+            "warranty",
+            "guarantee",
+            "waiver",
+            "release",
+            "consent",
+        ]) {
+            Self::Agreement
         } else if has(&[
             "order",
             "slip",
@@ -398,23 +419,6 @@ impl TypeKind {
             "statement",
         ]) {
             Self::Issued
-        } else if has(&[
-            "agreement",
-            "contract",
-            "lease",
-            "statement of work",
-            "terms",
-            "policy",
-            "license",
-            "licence",
-            "deed",
-            "warranty",
-            "guarantee",
-            "waiver",
-            "release",
-            "consent",
-        ]) {
-            Self::Agreement
         } else {
             Self::Unknown
         }
@@ -971,6 +975,30 @@ Invoice Date: April 30, 2025    Due Date: May 30, 2025",
         assert_eq!(
             infer_date_role(&digest, "2025-04-30", Some("Invoice")),
             Some(DateRole::Invoice)
+        );
+    }
+
+    /// A statement of work is an agreement, not a statement, and the list
+    /// says so - but "statement" was tested first, so the entry was never
+    /// reached and a bare "Date:" read as an issuance date.
+    #[test]
+    fn a_bare_date_on_a_statement_of_work_is_its_effective_date() {
+        let digest = digest_of(
+            "STATEMENT OF WORK NO. 4
+Date: April 1, 2026",
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2026-04-01", Some("Statement of Work")),
+            Some(DateRole::Effective)
+        );
+        // An account statement is still something issued on a date.
+        let digest = digest_of(
+            "ACCOUNT STATEMENT
+Date: April 1, 2026",
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2026-04-01", Some("Account Statement")),
+            Some(DateRole::Issuance)
         );
     }
 
