@@ -63,7 +63,7 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
     }
 
     let (document_date, date_role, date_supported, date_evidence_override) =
-        validate_date(&candidate, digest);
+        validate_date(&candidate, digest, document_type.as_deref());
     if !date_supported {
         push(&mut reasons, ReviewReason::DateUnsupported);
     }
@@ -90,8 +90,21 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
     } else {
         candidate.party_relation
     };
-    let (parties, party_relation) =
+    let (mut parties, party_relation) =
         repair_issued_relation(document_type.as_deref(), parties, party_relation, digest);
+    // A stated one-sided relation is about one party. "to [John Smith,
+    // Northstar Lantern Works LLC]" reads as a notice to both, which the
+    // document does not say and the filename does not carry - it names the
+    // first party only. So the relation the model stated decides how many
+    // names the proposal may keep. `none` is left alone: it asserts nothing
+    // about anybody, so a second validated name there is still just a name
+    // the document contains.
+    if matches!(
+        party_relation,
+        PartyRelation::For | PartyRelation::With | PartyRelation::From | PartyRelation::To
+    ) {
+        parties.truncate(1);
+    }
 
     let description = validate_description(&candidate.description, digest, &mut reasons);
 
@@ -184,6 +197,7 @@ fn validate_document_type(
 fn validate_date(
     candidate: &ModelProposal,
     digest: &DocumentDigest,
+    document_type: Option<&str>,
 ) -> (
     Option<String>,
     Option<crate::domain::DateRole>,
@@ -214,13 +228,28 @@ fn validate_date(
         .iter()
         .flat_map(|segment| segment.lines())
         .collect();
+    // The taint is judged over wrapped lines, not raw ones. A PDF breaks
+    // "... Northstar Lantern Works LLC dated" from "March 3, 2024" wherever
+    // the margin falls, and read raw the second half looks like a date
+    // nothing introduced - which clears the taint and lets the referenced
+    // agreement's date through. The search for a replacement below stays on
+    // raw lines, because there a line break is a real boundary: "effective
+    // as of April 1, 2026 and continues" / "through March 31, 2027" states
+    // one effective date and one end of term, not two candidates.
+    let wrapped: Vec<String> = digest
+        .segments
+        .iter()
+        .flat_map(|segment| crate::infer::wrapped_lines(segment))
+        .collect();
     let mut stated = false;
     let mut tainted = true;
-    for line in &lines {
+    for line in &wrapped {
         let normalized = normalize(line);
         for position in date_match_positions(date, &normalized) {
             stated = true;
-            if !reference_introduced(&normalized, position) {
+            if names_this_document(&normalized, position, document_type)
+                || !reference_introduced(&normalized, position)
+            {
                 tainted = false;
             }
         }
@@ -269,7 +298,10 @@ fn validate_date(
 /// phrase begins with "this", which is how a document dates itself.
 pub(crate) fn reference_introduced(normalized: &str, position: usize) -> bool {
     const NEAR: usize = 12;
-    const WIDE: usize = 48;
+    // Wide enough to reach back over a party's full name - "the Employment
+    // Agreement between you and Northstar Lantern Works LLC dated" is 70
+    // characters - and no wider than the window the date's role is read in.
+    const WIDE: usize = 96;
     fn window(normalized: &str, position: usize, span: usize) -> &str {
         let mut start = position.saturating_sub(span);
         while !normalized.is_char_boundary(start) {
@@ -281,16 +313,47 @@ pub(crate) fn reference_introduced(normalized: &str, position: usize) -> bool {
         // "dated" only references another document when a document noun
         // introduces it - "the Master Services Agreement dated June 2, 2023".
         // A bare "Dated January 8, 2025" on a title block is the document
-        // dating itself, and "This Agreement dated ..." is too.
+        // dating itself, and "This Agreement dated ..." is too. It is the
+        // determiner on the noun nearest the date that decides which of
+        // those it is, not a "this" anywhere in the window: "This First
+        // Amendment to the Consulting Agreement dated September 1, 2020"
+        // states the *consulting agreement's* date, and opens with "This".
+        // Punctuation between the two is typography - a defined term is
+        // introduced as `(this "Amendment")` - so it is stepped over.
         let wide = window(normalized, position, WIDE);
-        let names_a_document = ["agreement", "contract", "order", "amendment", "memorandum"]
+        let noun_ends_at = ["agreement", "contract", "order", "amendment", "memorandum"]
             .iter()
-            .any(|noun| wide.contains(noun));
-        return names_a_document && !wide.contains("this ");
+            .filter_map(|noun| wide.rfind(noun))
+            .max();
+        return match noun_ends_at {
+            Some(at) => !wide[..at]
+                .trim_end_matches(|character: char| !character.is_alphanumeric())
+                .ends_with("this"),
+            None => false,
+        };
     }
     ["issued under", "pursuant to", "as amended", "amending "]
         .iter()
         .any(|cue| window(normalized, position, WIDE).contains(cue))
+}
+
+/// Whether the wording before the date is the document naming itself:
+/// "SERVICES AGREEMENT dated as of March 1, 2026" is a cover page dating
+/// itself, not a reference to somebody else's agreement, and the referencing
+/// guard would otherwise throw away the only date the document has.
+///
+/// Only the document's own validated type counts as that naming. Every
+/// referencing line in the corpus says more than the type - "the Employment
+/// Agreement between you and Northstar Lantern Works LLC dated" - so the
+/// guard against trap dates is untouched.
+fn names_this_document(normalized: &str, position: usize, document_type: Option<&str>) -> bool {
+    let Some(document_type) = document_type else {
+        return false;
+    };
+    let lead = normalized[..position].trim_end();
+    let lead = lead.strip_suffix("as of").unwrap_or(lead).trim_end();
+    let lead = lead.strip_suffix("dated").unwrap_or(lead).trim_end();
+    !lead.is_empty() && lead == normalize(document_type)
 }
 
 const EFFECTIVE_CUES: &[&str] = &[
@@ -337,10 +400,17 @@ fn validate_description(
 ) -> String {
     let trimmed = description.trim();
     let mut sentence = trimmed.to_owned();
-    // Keep the first sentence; a small model sometimes keeps going.
+    // Keep the first sentence; a small model sometimes keeps going. A
+    // terminator only ends a sentence when a space follows it, because the
+    // period inside "$1,248.00" is a decimal point and cutting there left
+    // "An invoice for $1,248." - four words, which the sentence check then
+    // called invalid and sent a perfectly good invoice to review.
     for (index, character) in trimmed.char_indices() {
         if matches!(character, '.' | '!' | '?')
-            && index + character.len_utf8() < trimmed.len()
+            && trimmed[index + character.len_utf8()..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
             && !is_abbreviation_period(trimmed, index)
         {
             sentence = trimmed[..index + character.len_utf8()].to_owned();
@@ -585,6 +655,62 @@ with services commencing on October 1, 2026",
         let outcome = validate(candidate, &digest_of(&document));
         assert!(outcome.proposal.document_date.is_none());
         assert!(outcome.reasons.contains(&ReviewReason::DateUnsupported));
+    }
+
+    /// A PDF breaks the referencing phrase wherever the margin falls, and
+    /// the corpus's termination notice does exactly that: "... Northstar
+    /// Lantern Works LLC dated" ends one line and "March 3, 2024" opens the
+    /// next. Read as raw lines the second statement looks unintroduced, the
+    /// whole date stops counting as tainted, and the trap date the corpus
+    /// forbids becomes a filename.
+    #[test]
+    fn a_referenced_date_wrapped_onto_the_next_line_is_still_a_reference() {
+        let document = "NOTICE OF TERMINATION
+
+Re: Termination of the Employment Agreement
+
+This letter constitutes formal notice under Section 9.2 of the
+Employment Agreement between you and Northstar Lantern Works LLC dated
+March 3, 2024 (the \"Employment Agreement\") that the Company is
+terminating the Employment Agreement without cause.
+
+Your employment with the Company will end effective January 31, 2027.
+";
+        let mut candidate = proposal();
+        candidate.document_type = Some("Notice of Termination".into());
+        candidate.document_date = Some("2024-03-03".into());
+        candidate.parties = vec!["Northstar Lantern Works LLC".into()];
+        candidate.party_relation = PartyRelation::From;
+        let outcome = validate(candidate, &digest_of(document));
+        assert_ne!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2024-03-03"),
+            "the terminated agreement's date must never date the notice"
+        );
+    }
+
+    /// A cover page that names the document and dates it in one breath -
+    /// "SERVICES AGREEMENT dated as of March 1, 2026" - is the document
+    /// dating itself, but the referencing guard sees a document noun before
+    /// "dated" and throws the only date the document has away.
+    #[test]
+    fn a_title_line_dated_as_of_is_the_documents_own_date() {
+        let document = "SERVICES AGREEMENT dated as of March 1, 2026
+
+by and between Acme Corporation and Vistage Worldwide, Inc.
+
+The work covers the 2026 CRM implementation, its deliverables, and its fees.
+";
+        let mut candidate = proposal();
+        candidate.document_type = Some("Services Agreement".into());
+        candidate.document_date = Some("2026-03-01".into());
+        let outcome = validate(candidate, &digest_of(document));
+        assert_eq!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2026-03-01"),
+            "{:?}",
+            outcome.reasons
+        );
     }
 
     /// One line, two dates, two roles: the referenced contract's and the
@@ -896,6 +1022,35 @@ Countersigned June 2, 2023.
         assert!(outcome.reasons.contains(&ReviewReason::PartyUnsupported));
     }
 
+    /// The filename grammar gives a second name only to "between"; every
+    /// other connecting word takes the first party alone. Keeping the
+    /// second one on the proposal published a party the name never carries,
+    /// and the corpus scored the termination notice's "Northstar Lantern
+    /// Works LLC" as a spurious party for exactly that reason.
+    #[test]
+    fn a_one_sided_relation_keeps_one_party() {
+        let mut candidate = proposal();
+        candidate.party_relation = PartyRelation::To;
+        let outcome = validate(candidate, &digest_of(DOCUMENT));
+        assert_eq!(
+            outcome.proposal.parties,
+            vec!["Acme Corporation".to_owned()],
+            "{:?}",
+            outcome.reasons
+        );
+        assert_eq!(outcome.proposal.party_relation, PartyRelation::To);
+
+        // "between" still carries both, and so does an unstated relation,
+        // which asserts nothing about either name.
+        let outcome = validate(proposal(), &digest_of(DOCUMENT));
+        assert_eq!(outcome.proposal.parties.len(), 2);
+
+        let mut candidate = proposal();
+        candidate.party_relation = PartyRelation::None;
+        let outcome = validate(candidate, &digest_of(DOCUMENT));
+        assert_eq!(outcome.proposal.parties.len(), 2);
+    }
+
     #[test]
     fn a_description_may_reshape_a_fact_it_quotes_but_not_invent_one() {
         let document = format!(
@@ -920,6 +1075,31 @@ Countersigned June 2, 2023.
                 .reasons
                 .contains(&ReviewReason::DescriptionUnsupported)
         );
+    }
+
+    /// The corpus invoice reads "An invoice for $1,248.00 from Nimbus
+    /// Orchard Supply Co. ..." and the first-sentence cut kept "An invoice
+    /// for $1,248." - four words, so the sentence check then called it
+    /// invalid and the whole document went to review over a decimal point.
+    #[test]
+    fn a_decimal_amount_does_not_end_the_description() {
+        let document = format!(
+            "{DOCUMENT}
+The total fee is $248,000.00 payable on delivery.
+"
+        );
+        let mut candidate = proposal();
+        candidate.description =
+            "Statement of work for Acme Corporation covering the 2026 CRM implementation at a fee of $248,000.00."
+                .into();
+        let outcome = validate(candidate, &digest_of(&document));
+        assert_eq!(
+            outcome.proposal.description,
+            "Statement of work for Acme Corporation covering the 2026 CRM implementation at a fee of $248,000.00.",
+            "{:?}",
+            outcome.reasons
+        );
+        assert!(!outcome.reasons.contains(&ReviewReason::DescriptionInvalid));
     }
 
     #[test]

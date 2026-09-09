@@ -264,7 +264,11 @@ YYYY-MM-DD <document type> <relation> <party>[ and <party>].<ext>
 `<relation>` is one of `between`, `for`, `with`, `from`, `to`, or — when the model
 declines to state one — a bare `-`, which keeps a validated party in the name
 without asserting a relationship the document never established. Only `between`
-takes two names; the others take the first. Real names from the scored corpus:
+takes two names; the others take the first, and a stated one-sided relation
+keeps only that one on the validated proposal too - `to John Smith and
+Northstar Lantern Works LLC` would assert a relationship the notice never
+stated. A declined relation asserts nothing about anybody, so it keeps every
+validated name for the reviewer to read. Real names from the scored corpus:
 
 ```text
 2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf
@@ -292,8 +296,9 @@ from free text, so every name in a filename has been found in the document.
 Names longer than 120 characters shed the second party, then the party clause,
 then truncate the type — detail is lost from the least identifying end first.
 Windows-hostile characters, reserved device names, trailing dots and spaces, and
-bidirectional control characters are removed; the original extension is always
-preserved; collisions get a ` (2)` suffix. The engine checks collisions
+invisible formatting characters — the bidirectional controls, a soft hyphen, a
+zero-width space, a byte-order mark — are removed; the original extension is
+always preserved; collisions get a ` (2)` suffix. The engine checks collisions
 against the only folder it knows, the document's own; the queue recomposes the
 name against the folder the document is actually going to, so a suffix means
 a real collision at the destination and never a phantom one at the source.

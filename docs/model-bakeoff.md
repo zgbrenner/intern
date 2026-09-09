@@ -152,13 +152,13 @@ recording as follows.
 | --- | ---: | ---: | ---: |
 | Date correct | 12/12 | 2/6 | 14/18 |
 | Filed under a corpus-marked trap date | **0** | 0 | **0** |
-| Date *role* correct | **11/12** | 2/2 | **13/14** |
+| Date *role* correct | **12/12** | 2/2 | **14/14** |
 | Document type | **12/12** | 6/6 | **18/18** |
-| Parties | 12/13 | 3/6 | 15/19 |
+| Parties | **13/13** | 3/6 | **16/19** |
 | Named a party the corpus marks as not defining | 0/13 | 0/6 | 0/19 |
 | Description covers the listed facts | 10/12 | 6/6 | 16/18 |
-| Agreed with the corpus on review-or-name | 11/13 | 6/6 | 17/19 |
-| Review rate | 23% | 100% | 47% |
+| Agreed with the corpus on review-or-name | 12/13 | 6/6 | 18/19 |
+| Review rate | 15% | 100% | 42% |
 
 Live inference on that machine took a median of 13.9 seconds per document
 (7.0 to 56.7), which is the recording's only number that replay cannot
@@ -189,7 +189,7 @@ model's real replies rather than a guess at them.
   now completed from the title, whole - never with an exhibit label, a party's
   name, or the "No" a stripped number leaves behind.
 
-Text-document date role went from the 6/13 reported above to 11/11, and
+Text-document date role went from the 6/13 reported above to 12/12, and
 document type from 13/17 to 17/17, on the same model. What remains is listed
 under known misses.
 
@@ -283,13 +283,6 @@ Reported rather than tuned away, because thirteen documents is a small corpus an
 fitting a prompt to it is not the same as being right. What the recorded
 corpus still misses, as of the baseline above:
 
-* The termination notice names its sender, Northstar Lantern Works LLC, as a
-  second party beside John Smith. The filename is right - a notice takes one
-  name - but the corpus counts the sender as spurious, and the description
-  record carries it.
-* The short invoice's description is "An invoice for $1,248." The prompt
-  forbids exactly that sentence and the model wrote it anyway; validation
-  sends the document to review for it, which the corpus does not expect.
 * The 100-page journal is typed, dated, and named correctly, and goes to
   review because the model reports low confidence and asks for it.
 * The meeting minutes are described without the word "minutes", which the
@@ -297,10 +290,7 @@ corpus still misses, as of the baseline above:
 * The scanned fixtures read digits badly enough (`24h24`, `2625`) that four
   of six cannot be dated from their own text, exactly as the corpus expects
   of them; see the paragraph on OCR fidelity below.
-* The review deck (round six) is dated, typed, and named for both parties
-  correctly and goes straight to ready, but its date is labelled `notice`:
-  "Presented on May 21, 2026" carries no cue the role reader knows, so the
-  model's label stood. The corpus calls it `issuance`.
+* The settlement agreement's description omits a fact the corpus lists.
 
 The bullets that follow predate the recording and are kept as the history of
 how the numbers above were reached:
