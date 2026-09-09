@@ -83,7 +83,7 @@ impl HostedProvider {
 }
 
 /// Everything needed to reach one hosted model.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct HostedModelConfig {
     pub provider: HostedProvider,
     /// The API root, `https://api.anthropic.com/v1` or the like. Empty means
@@ -93,6 +93,22 @@ pub struct HostedModelConfig {
     /// default, where there is one.
     pub model: String,
     pub api_key: String,
+}
+
+/// The key is kept out of the printed form for the same reason it is kept out
+/// of the settings file: it is stored in the credential store, and anything
+/// that prints a config - a log line, a panic message, a debug assertion -
+/// would otherwise put it somewhere nobody meant it to be.
+impl std::fmt::Debug for HostedModelConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostedModelConfig")
+            .field("provider", &self.provider)
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("api_key", &"[redacted]")
+            .finish()
+    }
 }
 
 impl HostedModelConfig {
@@ -668,5 +684,12 @@ mod tests {
         let debug = format!("{client:?}");
         assert!(!debug.contains("sk-test"));
         assert!(debug.contains("[redacted]"));
+
+        // Nor does the configuration it was built from: it is what the desktop
+        // app holds on to, and anything that prints it - a log line, a panic
+        // message - would otherwise carry the key with it.
+        let settings = format!("{:?}", config(HostedProvider::Anthropic, "", ""));
+        assert!(!settings.contains("sk-test"), "{settings}");
+        assert!(settings.contains("[redacted]"));
     }
 }
