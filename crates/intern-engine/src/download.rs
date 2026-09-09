@@ -24,7 +24,6 @@ pub const DISK_RESERVE_BYTES: u64 = 512 * 1024 * 1024;
 const BUFFER_BYTES: usize = 1024 * 1024;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(30);
-const DEFAULT_OVERALL_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 const CANCELLATION_POLL: Duration = Duration::from_millis(10);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -99,36 +98,43 @@ pub struct ReqwestHttpTransport {
 }
 
 impl ReqwestHttpTransport {
+    /// No ceiling on the whole transfer. The download is 1.19 GiB, so any
+    /// fixed deadline is a connection speed below which the download can
+    /// never succeed however many times it is retried: the two hours this
+    /// used to allow meant every link under about 178 KB/s failed, every
+    /// time, with nothing to show for the hours it spent. What "stalled"
+    /// actually means is that bytes stopped arriving, and the read timeout
+    /// says that; cancellation covers the person who changes their mind.
     pub fn new() -> ModelResult<Self> {
-        Self::with_timeouts(
-            DEFAULT_CONNECT_TIMEOUT,
-            DEFAULT_READ_TIMEOUT,
-            DEFAULT_OVERALL_TIMEOUT,
-        )
+        Self::with_timeouts(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT, None)
     }
 
     pub fn with_timeouts(
         connect_timeout: Duration,
         read_timeout: Duration,
-        overall_timeout: Duration,
+        overall_timeout: Option<Duration>,
     ) -> ModelResult<Self> {
-        if connect_timeout.is_zero() || read_timeout.is_zero() || overall_timeout.is_zero() {
+        if connect_timeout.is_zero()
+            || read_timeout.is_zero()
+            || overall_timeout.is_some_and(|timeout| timeout.is_zero())
+        {
             return Err(ModelError::new(
                 ModelErrorCode::DownloadFailed,
                 "download timeouts must be bounded and nonzero",
             ));
         }
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
-            .read_timeout(read_timeout)
-            .timeout(overall_timeout)
-            .build()
-            .map_err(|_| {
-                ModelError::new(
-                    ModelErrorCode::DownloadFailed,
-                    "download client could not be created",
-                )
-            })?;
+            .read_timeout(read_timeout);
+        if let Some(overall_timeout) = overall_timeout {
+            builder = builder.timeout(overall_timeout);
+        }
+        let client = builder.build().map_err(|_| {
+            ModelError::new(
+                ModelErrorCode::DownloadFailed,
+                "download client could not be created",
+            )
+        })?;
         Ok(Self { client })
     }
 }
