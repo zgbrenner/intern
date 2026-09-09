@@ -95,6 +95,42 @@ struct State {
     allow_refresh: bool,
 }
 
+/// A failed Graph request, and whether it says anything about the connection.
+///
+/// Only a failure of the connection itself justifies pausing every other
+/// file's verification. A 404 for one file the sync client has not finished
+/// uploading is a verdict about that file, and holding the whole folder
+/// behind it means the slowest document in a share decides how fast every
+/// other document is checked.
+struct Failure {
+    message: String,
+    back_off: bool,
+}
+
+impl Failure {
+    fn connection(message: String) -> Self {
+        Self {
+            message,
+            back_off: true,
+        }
+    }
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            back_off: false,
+        }
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(message: &str) -> Self {
+        Self::from(message.to_string())
+    }
+}
+
 pub struct MicrosoftClient {
     transport: Arc<dyn Transport>,
     tokens: Arc<dyn TokenStore>,
@@ -289,7 +325,7 @@ impl MicrosoftClient {
         if self.clock.now() < state.retry_at {
             return Err("Microsoft verification is waiting to retry. Files remain held.".into());
         }
-        let result = (|| {
+        let result = (|| -> Result<(Account, Value), Failure> {
             if state
                 .session
                 .as_ref()
@@ -313,33 +349,43 @@ impl MicrosoftClient {
                 {
                     return Err("Microsoft organization changed. Sign in again.".into());
                 }
-                let reply = self.transport.request(
-                    state.config.endpoint("token")?,
-                    Some(&[
-                        ("client_id", &state.config.client_id),
-                        ("grant_type", "refresh_token"),
-                        ("refresh_token", &stored.refresh_token),
-                        ("scope", SCOPES),
-                    ]),
-                    None,
-                )?;
+                let reply = self
+                    .transport
+                    .request(
+                        state.config.endpoint("token")?,
+                        Some(&[
+                            ("client_id", &state.config.client_id),
+                            ("grant_type", "refresh_token"),
+                            ("refresh_token", &stored.refresh_token),
+                            ("scope", SCOPES),
+                        ]),
+                        None,
+                    )
+                    .map_err(Failure::connection)?;
                 if reply.status != 200 {
-                    return Err("Microsoft sign-in needs attention. Reconnect your account; files remain held.".into());
+                    return Err(Failure::connection("Microsoft sign-in needs attention. Reconnect your account; files remain held.".into()));
                 }
-                state.session = Some(self.establish(&state.config, &reply.body, Some(&stored))?);
+                state.session = Some(
+                    self.establish(&state.config, &reply.body, Some(&stored))
+                        .map_err(Failure::connection)?,
+                );
             }
             let session = state
                 .session
                 .as_ref()
                 .ok_or("Connect Microsoft before verifying uploads.")?;
             let reply = if let Some(body) = body {
-                self.transport.audit_query(body, &session.token)?
+                self.transport
+                    .audit_query(body, &session.token)
+                    .map_err(Failure::connection)?
             } else {
-                self.transport.request(
-                    url.ok_or("Microsoft metadata URL is missing.")?,
-                    None,
-                    Some(&session.token),
-                )?
+                self.transport
+                    .request(
+                        url.ok_or("Microsoft metadata URL is missing.")?,
+                        None,
+                        Some(&session.token),
+                    )
+                    .map_err(Failure::connection)?
             };
             match reply.status {
                 200 | 201 => Ok((session.account.clone(),reply.body)),
@@ -350,10 +396,12 @@ impl MicrosoftClient {
                 _ => Err("Microsoft could not verify this upload. Files remain held.".into()),
             }
         })();
-        if result.is_err() {
-            state.retry_at = state.retry_at.max(self.clock.now() + 10);
-        }
-        result
+        result.map_err(|failure| {
+            if failure.back_off {
+                state.retry_at = state.retry_at.max(self.clock.now() + 10);
+            }
+            failure.message
+        })
     }
     fn establish(
         &self,
@@ -625,6 +673,46 @@ mod tests {
         }
         assert!(http.calls.lock().unwrap().is_empty());
     }
+    /// A file the sync client has not finished uploading yet answers 404, and
+    /// that is a verdict about one file. Pausing the whole client for it holds
+    /// every other file in the folder behind the slowest one.
+    #[test]
+    fn a_per_file_404_does_not_block_other_requests() {
+        let (client, http, _, time) = rig(vec![
+            device(),
+            token(),
+            me(),
+            reply(404, json!({})),
+            reply(200, json!({"id": "item"})),
+        ]);
+        client.begin(config()).unwrap();
+        time.0.store(1005, Ordering::SeqCst);
+        client.poll().unwrap();
+        assert!(client.metadata(item()).is_err());
+        assert!(
+            client.metadata(item()).is_ok(),
+            "the next file must still be checked"
+        );
+        assert_eq!(http.calls.lock().unwrap().len(), 5);
+    }
+
+    /// Microsoft being unreachable is not a verdict about any one file, so the
+    /// client does back off before trying again.
+    #[test]
+    fn an_unreachable_microsoft_pauses_verification() {
+        let (client, http, _, time) = rig(vec![device(), token(), me()]);
+        client.begin(config()).unwrap();
+        time.0.store(1005, Ordering::SeqCst);
+        client.poll().unwrap();
+        assert!(client.metadata(item()).is_err());
+        assert!(client.metadata(item()).is_err());
+        assert_eq!(
+            http.calls.lock().unwrap().len(),
+            4,
+            "the second attempt must not reach the network"
+        );
+    }
+
     #[test]
     fn authentication_failure_does_not_echo_provider_response_or_tokens() {
         let (client, _, _, _) = rig(vec![reply(
