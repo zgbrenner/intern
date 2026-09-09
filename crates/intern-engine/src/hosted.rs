@@ -332,7 +332,15 @@ impl Proposer for HostedClient {
 /// What an HTTP failure means to the person who has to fix it.
 pub(crate) fn failure_for_status(status: StatusCode) -> EngineErrorCode {
     match status.as_u16() {
+        // Redirects are refused, so a 3xx reaches this point as an answer:
+        // the configured address has moved. Reporting it as an outage sends
+        // a person looking at their network for a wrong address.
+        300..=399 => EngineErrorCode::HostedModelMisconfigured,
         401 | 403 => EngineErrorCode::HostedModelUnauthorized,
+        // An unknown or retired model name, or an API root that is not one.
+        // Every document in the backlog would meet the same answer, so this
+        // pauses the queue once instead of failing them one at a time.
+        404 => EngineErrorCode::HostedModelMisconfigured,
         429 => EngineErrorCode::HostedModelRateLimited,
         400..=499 => EngineErrorCode::HostedModelRejected,
         _ => EngineErrorCode::HostedModelUnreachable,
@@ -400,7 +408,7 @@ const fn hosted_error(code: EngineErrorCode) -> EngineError {
         ),
         EngineErrorCode::HostedModelUnreachable => unreachable_error(),
         EngineErrorCode::HostedModelMisconfigured => {
-            misconfigured("the hosted model is not configured")
+            misconfigured("the hosted service does not know that address or model name")
         }
         _ => EngineError::new(
             EngineErrorCode::ModelResponseInvalid,
@@ -626,10 +634,22 @@ mod tests {
             failure_for_status(StatusCode::TOO_MANY_REQUESTS),
             EngineErrorCode::HostedModelRateLimited
         );
+        // An unknown or retired model name, or an API root that is not one.
+        // Every document in the backlog would meet it, so it is a
+        // configuration problem that pauses the queue once.
         assert_eq!(
             failure_for_status(StatusCode::NOT_FOUND),
-            EngineErrorCode::HostedModelRejected
+            EngineErrorCode::HostedModelMisconfigured
         );
+        // Redirects are refused, so a base URL that has moved arrives here as
+        // a 3xx. That is a wrong address, not a network outage.
+        for moved in [301, 302, 303, 307, 308] {
+            assert_eq!(
+                failure_for_status(StatusCode::from_u16(moved).unwrap()),
+                EngineErrorCode::HostedModelMisconfigured,
+                "{moved}"
+            );
+        }
         assert_eq!(
             failure_for_status(StatusCode::BAD_REQUEST),
             EngineErrorCode::HostedModelRejected

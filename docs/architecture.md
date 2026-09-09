@@ -369,8 +369,9 @@ that never gets filed. What goes out is the distilled digest of the document,
 condensed but verbatim; what comes back is read through the same JSON
 recovery and the same evidence checks as a local reply. A refusal from the
 model is reported as one and sends the document to review, never re-routed
-elsewhere; a rejected key or an unreachable service pauses the queue rather
-than failing the backlog one item at a time; a busy service earns one retry.
+elsewhere; a rejected key, an unreachable service, a model name the service
+does not know, and an address that has moved all pause the queue rather than
+failing the backlog one item at a time; a busy service earns one retry.
 
 The key is stored in the operating system's credential store under Intern's
 name, never in the settings file, and never travels anywhere but the address
