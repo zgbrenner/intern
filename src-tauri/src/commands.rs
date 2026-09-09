@@ -1101,15 +1101,26 @@ fn intake_state_conflict() -> CommandError {
     }
 }
 
+/// The queue as the window shows it.
+///
+/// Blocking: every reviewable item is stat'd for its last-modified date, and
+/// the documents can be on a network share, so the listing runs off the
+/// thread WebView2 delivers invokes on.
 #[tauri::command]
-pub fn queue_list(state: State<'_, AppState>) -> Result<Vec<QueueItemDto>, CommandError> {
-    let items = state.pipeline.list()?;
-    // The window asks for the list on every queue change, which makes this
-    // the one place that always knows the current counts - so the tray's
-    // tooltip is kept here rather than on a second event path.
-    let (needs_review, ready) = attention_counts(&items);
-    crate::tray::update_tooltip(&state.app, needs_review, ready);
-    items.into_iter().map(queue_item_dto).collect()
+pub async fn queue_list(state: State<'_, AppState>) -> Result<Vec<QueueItemDto>, CommandError> {
+    let app = state.app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let items = state.pipeline.list()?;
+        // The window asks for the list on every queue change, which makes this
+        // the one place that always knows the current counts - so the tray's
+        // tooltip is kept here rather than on a second event path.
+        let (needs_review, ready) = attention_counts(&items);
+        crate::tray::update_tooltip(&app, needs_review, ready);
+        items.into_iter().map(queue_item_dto).collect()
+    })
+    .await
+    .map_err(|_| background_task_failed("queue listing"))?
 }
 
 /// How many items wait on a person: those needing review, and those ready
@@ -1180,9 +1191,18 @@ pub fn queue_resume(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.schedule()
 }
 
+/// Stops the document being analysed.
+///
+/// Blocking: cancelling the local model kills llama-server and starts it
+/// again, which reloads 1.19 GiB and waits for the new process to answer, so
+/// this cannot run on the thread WebView2 delivers invokes on.
 #[tauri::command]
-pub fn queue_cancel(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    state.pipeline.cancel(parse_item_id(&id)?)?;
+pub async fn queue_cancel(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    let pipeline = Arc::clone(&state.pipeline);
+    let id = parse_item_id(&id)?;
+    tauri::async_runtime::spawn_blocking(move || pipeline.cancel(id))
+        .await
+        .map_err(|_| background_task_failed("cancel"))??;
     Ok(())
 }
 
@@ -1271,11 +1291,24 @@ fn display_folder(folder: &str) -> String {
     }
 }
 
+/// Saves the settings.
+///
+/// Blocking: the folders are canonicalized, which reaches whatever they live
+/// on and can be an unreachable network share, and a changed intake folder
+/// restarts the watcher, which joins its scan thread. None of that may happen
+/// on the thread WebView2 delivers invokes on.
 #[tauri::command]
-pub fn settings_save(
-    mut settings: AppSettings,
+pub async fn settings_save(
+    settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
+    let app = state.app.clone();
+    tauri::async_runtime::spawn_blocking(move || save_settings(&app.state::<AppState>(), settings))
+        .await
+        .map_err(|_| background_task_failed("settings save"))?
+}
+
+fn save_settings(state: &AppState, mut settings: AppSettings) -> Result<(), CommandError> {
     let previous = state.settings.load().unwrap_or_default();
     validate_intake_settings(&mut settings, &|path| canonical_folder(path).ok())?;
     // With intake enabled the destination was already canonicalized (with the
@@ -1458,11 +1491,14 @@ pub fn hosted_model_clear_key(state: State<'_, AppState>) -> Result<(), CommandE
 /// `settings` - the dialog's draft, so what is tested is what is on screen -
 /// with the stored key.
 #[tauri::command]
-pub fn hosted_model_test(
+pub async fn hosted_model_test(
     settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<HostedModelTestDto, CommandError> {
-    state.hosted.test(&settings)
+    let hosted = Arc::clone(&state.hosted);
+    tauri::async_runtime::spawn_blocking(move || hosted.test(&settings))
+        .await
+        .map_err(|_| background_task_failed("hosted model test"))?
 }
 
 /// The OneDrive accounts and SharePoint libraries the sync client keeps on
@@ -2138,6 +2174,31 @@ mod intake_tests {
         ));
         // Clock skew across machines: a future stamp still counts as active.
         assert!(presence_active(now + 60, now));
+    }
+}
+
+#[cfg(test)]
+mod ipc_thread_tests {
+    use super::{hosted_model_test, queue_cancel, queue_list, settings_save};
+
+    /// Accepts a command only if calling it returns a future. WebView2
+    /// delivers every invoke on one thread, so a command whose body blocks
+    /// there freezes the whole window while it runs.
+    fn leaves_the_ipc_thread<A, R: std::future::Future, F: FnOnce(A) -> R>(_: F) {}
+    fn leaves_the_ipc_thread_2<A, B, R: std::future::Future, F: FnOnce(A, B) -> R>(_: F) {}
+
+    #[test]
+    fn commands_that_can_block_for_seconds_do_not_run_on_the_ipc_thread() {
+        // Reloads the 1.2 GiB model and waits for it to answer.
+        leaves_the_ipc_thread_2(queue_cancel);
+        // Sends the calibration document to a hosted service, which can take
+        // three minutes to decide it cannot be reached.
+        leaves_the_ipc_thread_2(hosted_model_test);
+        // Canonicalizes folders, which reaches a network share, and restarts
+        // the intake watcher, which joins its scan thread.
+        leaves_the_ipc_thread_2(settings_save);
+        // One file stat per reviewable item, on whatever the documents live on.
+        leaves_the_ipc_thread(queue_list);
     }
 }
 
