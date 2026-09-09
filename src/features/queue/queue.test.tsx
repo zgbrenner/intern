@@ -146,7 +146,7 @@ describe('queue interactions', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Apply all ready' }));
 
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('2 renames applied. 1 could not be applied. Destination is locked.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('2 renames applied. 1 could not be applied. Destination is locked.');
     expect(screen.getByRole('row', { name: /NDA - Acme Corp/i })).toHaveTextContent('Ready');
     expect(approve).toHaveBeenCalledTimes(3);
   });
@@ -159,7 +159,7 @@ describe('queue interactions', () => {
     await selectRow(await screen.findByRole('row', { name: /Employment Agreement/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Apply rename' }));
 
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('Destination is unavailable.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('Destination is unavailable.');
     expect(screen.getByRole('button', { name: 'Apply rename' })).toBeEnabled();
     expect(screen.getByRole('complementary', { name: 'Review item' })).toBeVisible();
   });
@@ -225,7 +225,7 @@ describe('queue interactions', () => {
     await selectRow(await screen.findByRole('row', { name: new RegExp(item.originalFilename, 'i') }));
     fireEvent.click(screen.getByRole('button', { name: actionName }));
 
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent(`${actionName} failed.`);
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent(`${actionName} failed.`);
     expect(screen.getByRole('button', { name: actionName })).toBeEnabled();
   });
 
@@ -235,7 +235,7 @@ describe('queue interactions', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Completed' }));
     fireEvent.click(screen.getByRole('button', { name: 'Clear history' }));
 
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('History is locked.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('History is locked.');
     expect(screen.getByRole('row', { name: /Completed lease.pdf/i })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Clear history' })).toBeEnabled();
   });

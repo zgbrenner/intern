@@ -298,7 +298,12 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   return <main className="app-shell" aria-label="Intern">
     <p className="sr-only" role="status" aria-label="Queue status" aria-live="polite" aria-atomic="true">{queueStatus}</p>
     <p className="sr-only" role="status" aria-label="Action status" aria-live="polite" aria-atomic="true">{actionMessage}</p>
-    {actionError && <p className="operation-feedback" role="status" aria-label="Action error" aria-live="polite" aria-atomic="true">{actionError}</p>}
+    {/*
+      An alert, not a polite status: this paragraph is created with its
+      sentence already in it, and a live region that arrives complete is not
+      reliably spoken. Every other error banner in the app is an alert too.
+    */}
+    {actionError && <p className="operation-feedback" role="alert" aria-label="Action error">{actionError}</p>}
     <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} hosted={settings.modelSource === 'hosted'} onAddFiles={() => { if (selection) void importSelection(async () => ({ files: await selection.pickFiles() })); }} onAddFolder={() => { if (selection) void importSelection(async () => ({ folder: await selection.pickFolder() })); }} onTogglePause={() => void (async () => { if (await runQueueAction(() => paused ? bridge.resumeQueue() : bridge.pauseQueue(), `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
     <Sidebar inert={drawerOpen} active={view} items={items} onChange={(next) => { focusRestoreVersion.current += 1; reviewTrigger.current = null; setView(next); setSelectedId(undefined); }} onSettings={openSettings} onHelp={() => void openGuide()} />
     <div className="workspace"><section className="queue-panel" aria-label="Queue items" inert={drawerOpen || undefined}>

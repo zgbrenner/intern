@@ -342,7 +342,7 @@ describe('review actions', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Help & support' }));
 
-    expect(await screen.findByRole('status', { name: 'Action error' }))
+    expect(await screen.findByRole('alert', { name: 'Action error' }))
       .toHaveTextContent('https://zgbrenner.github.io/intern/guide.html');
   });
 

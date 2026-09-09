@@ -42,23 +42,23 @@ const ready: QueueItem = {
     const pickFiles = vi.fn().mockRejectedValueOnce('The file picker could not open.').mockResolvedValue([]);
     render(<App bridge={createInMemoryBridge({ items: [] })} selection={selection({ pickFiles })} />);
     fireEvent.click(await screen.findByRole('button', { name: /^Add files$/i }));
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('The file picker could not open.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('The file picker could not open.');
     await waitFor(() => expect(screen.getByRole('button', { name: /^Add files$/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /^Add files$/i }));
     await waitFor(() => expect(pickFiles).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByRole('status', { name: 'Action error' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('alert', { name: 'Action error' })).not.toBeInTheDocument());
   });
 
   it('reports folder picker errors', async () => {
     render(<App bridge={createInMemoryBridge({ items: [] })} selection={selection({ pickFolder: async () => { throw new Error('Folder access denied.'); } })} />);
     fireEvent.click(await screen.findByRole('button', { name: /^Add folder$/i }));
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('Folder access denied.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('Folder access denied.');
   });
 
   it('reports drop resolution errors without removing the existing queue', async () => {
     render(<App bridge={createInMemoryBridge({ items: [ready] })} selection={selection({ resolveDrop: async () => { throw new Error('Dropped file is unavailable.'); } })} />);
     fireEvent.drop(await screen.findByRole('region', { name: /drag files/i }));
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('Dropped file is unavailable.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('Dropped file is unavailable.');
     expect(screen.getByRole('button', { name: 'Select agreement.pdf' })).toBeVisible();
   });
 
@@ -66,7 +66,7 @@ const ready: QueueItem = {
     const addFiles = vi.fn(async () => { throw new Error('The shared folder is offline.'); });
     render(<App bridge={{ ...createInMemoryBridge({ items: [ready] }), addFiles }} selection={selection({ pickFiles: async () => [{ path: 'browser://new.pdf', displayName: 'new.pdf' }] })} />);
     fireEvent.click(await screen.findByRole('button', { name: /^Add files$/i }));
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
     expect(screen.getByRole('button', { name: 'Select agreement.pdf' })).toBeVisible();
     expect(addFiles).toHaveBeenCalledOnce();
   });
@@ -77,7 +77,7 @@ const ready: QueueItem = {
     fireEvent.click(await screen.findByRole('button', { name: /^Add files$/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Add files$/i })).toBeEnabled());
     expect(addFiles).not.toHaveBeenCalled();
-    expect(screen.queryByRole('status', { name: 'Action error' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'Action error' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Action status' })).toBeEmptyDOMElement();
   });
 
@@ -88,7 +88,7 @@ const ready: QueueItem = {
     const zone = await screen.findByRole('region', { name: /drag files/i });
     act(() => { fireEvent.drop(zone); fireEvent.drop(zone); });
     expect(resolveDrop).toHaveBeenCalledOnce();
-    expect(screen.getByRole('status', { name: 'Action error' })).toHaveTextContent('Add these files again when it finishes.');
+    expect(screen.getByRole('alert', { name: 'Action error' })).toHaveTextContent('Add these files again when it finishes.');
     await act(async () => { pending.resolve({}); await pending.promise; });
     await waitFor(() => expect(screen.getByRole('button', { name: /^Add files$/i })).toBeEnabled());
   });
@@ -145,7 +145,7 @@ const ready: QueueItem = {
 
     await act(async () => { drop({ files: [{ path: 'C:\Docs\dropped.pdf', displayName: 'dropped.pdf' }] }); });
 
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
     expect(addFiles).toHaveBeenCalledOnce();
   });
 
@@ -186,8 +186,20 @@ const ready: QueueItem = {
     fireEvent.click(screen.getByRole('button', { name: 'Apply rename' }));
 
     await waitFor(() => expect(screen.getByRole('status', { name: 'Action status' })).toHaveTextContent('Rename applied.'));
-    expect(screen.queryByRole('status', { name: 'Action error' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'Action error' })).not.toBeInTheDocument();
     expect(await screen.findByRole('alert', { name: 'Queue connection error' })).toHaveTextContent('Queue database is busy.');
+  });
+
+  // A polite live region is only spoken when its contents change while it is
+  // already on the page. This one is created with its sentence already in it,
+  // so a screen reader reached the failure only if the person happened to
+  // wander into it. An alert is the role for something that appears.
+  it('announces an action error with the role that is spoken when it appears', async () => {
+    render(<App bridge={createInMemoryBridge({ items: [] })} selection={selection({ pickFolder: async () => { throw new Error('Folder access denied.'); } })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Add folder$/i }));
+
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('Folder access denied.');
   });
 
   it('gates same-tick rename submissions before React has rerendered', async () => {

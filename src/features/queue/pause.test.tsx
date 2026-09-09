@@ -33,11 +33,11 @@ describe('pausing through the desktop bridge', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Pause queue' }));
 
     await waitFor(() => expect(commands).toContain('queue_pause'));
-    expect(screen.queryByRole('status', { name: 'Action error' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'Action error' })).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Resume queue' }));
 
     await waitFor(() => expect(commands).toContain('queue_resume'));
-    expect(screen.queryByRole('status', { name: 'Action error' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'Action error' })).not.toBeInTheDocument();
   });
 });
