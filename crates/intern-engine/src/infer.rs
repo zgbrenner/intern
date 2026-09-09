@@ -132,6 +132,20 @@ const EXECUTION_CUES: &[&str] = &[
 ];
 /// A label that says "this is the date" without saying what kind.
 const GENERIC_DATE_CUES: &[&str] = &["date:", "dated", "date of this"];
+/// Words that qualify "Date" as some other event's date. "Due Date: May 30,
+/// 2025" labels when the money is owed, not when the invoice was written,
+/// and a document type's default role must not be read onto it.
+const OTHER_DATE_LABELS: &[&str] = &[
+    "due",
+    "expiration",
+    "expiry",
+    "expires",
+    "renewal",
+    "end",
+    "return",
+    "deadline",
+    "payable",
+];
 
 /// How far before a date the wording that names its role can sit. Long
 /// enough for "This First Amendment to Consulting Agreement (this
@@ -259,12 +273,26 @@ fn continues_sentence(line: &str) -> bool {
 /// "Dated", "Date of this ...", or a bare "DATE" the way a stamped form
 /// writes it.
 fn is_generic_label(window: &str) -> bool {
+    if labels_another_date(window) {
+        return false;
+    }
     GENERIC_DATE_CUES.iter().any(|cue| window.contains(cue))
         || window
             .trim_end()
             .rsplit(|character: char| !character.is_alphanumeric())
             .next()
             .is_some_and(|word| word == "date")
+}
+
+/// Whether the label nearest the date qualifies it as another event's date -
+/// "Due Date", "Expiration Date", "Return Date". The qualifier sits directly
+/// on the word, so only the word immediately before it is read.
+fn labels_another_date(window: &str) -> bool {
+    let Some(at) = window.rfind("date") else {
+        return false;
+    };
+    let before = window[..at].trim_end();
+    OTHER_DATE_LABELS.iter().any(|word| before.ends_with(word))
 }
 
 fn window_before(normalized: &str, position: usize) -> String {
@@ -887,6 +915,28 @@ mod tests {
             &contradictory,
         );
         assert_eq!(kept.len(), 2);
+    }
+
+    /// "Due Date:" is a label, but it is not a label for *this* document's
+    /// date, and reading it as one made the invoice's due date into an
+    /// invoice date. The document says what kind of date it is not, so the
+    /// wording says nothing and the model's own answer stands.
+    #[test]
+    fn a_due_date_label_never_becomes_an_invoice_date() {
+        let digest = digest_of(
+            "INVOICE INV-2048
+Invoice Date: April 30, 2025
+Due Date: May 30, 2025",
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2025-05-30", Some("Invoice")),
+            None,
+            "a due date is not the invoice's date"
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2025-04-30", Some("Invoice")),
+            Some(DateRole::Invoice)
+        );
     }
 
     /// Replay of the recorded corpus: the amendment's PDF wraps "is dated"
