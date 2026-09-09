@@ -537,7 +537,11 @@ fn expected_anydoc_format(path: &Path, bytes: &[u8]) -> Result<anydoc::Format, E
     let named = anydoc::Format::from_extension(&extension).ok_or_else(|| {
         ExtractionError::unsupported(format!("no Office reader handles a .{extension} file"))
     })?;
-    if anydoc::Format::from_bytes(bytes) != Some(named) {
+    // Content that identifies as nothing at all - an encrypted package, a
+    // container this version cannot recognise - is still handed to the parser
+    // the extension names, which reports what is actually wrong with it far
+    // better than a routing refusal would.
+    if anydoc::Format::from_bytes(bytes).is_some_and(|detected| detected != named) {
         return Err(ExtractionError::unsupported(format!(
             "file content is not what its .{extension} extension names"
         )));

@@ -36,9 +36,11 @@ a page that is essentially all image — a scan whose text layer is a Bates
 number or a "CONFIDENTIAL" stamp and nothing else — or when more than 3% of its
 characters came back as replacement glyphs. Office containers go through AnyDoc
 to Markdown, which preserves headings and tables, and only when the container's
-content is what its extension names: routing here is by extension, so a
-workbook renamed `.docx` — which AnyDoc would otherwise render through its
-uncapped Excel path — is a routing failure for review rather than a document.
+content is not something else: routing here is by extension, so a workbook
+renamed `.docx` — which AnyDoc would otherwise render through its uncapped
+Excel path — is a routing failure for review rather than a document, while
+content that identifies as nothing at all (an encrypted package) still reaches
+the parser its extension names, which says what is wrong with it.
 Plain text and Markdown are read directly, by byte-order mark: UTF-16 in
 either order and a marked UTF-8 file all decode, the mark itself never reaches
 the text, and bytes in some legacy encoding are read lossily with a corruption
