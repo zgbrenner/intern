@@ -190,7 +190,7 @@ struct ReconciliationDto {
     error_code: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum SetupStatus {
     Ready,
@@ -510,10 +510,42 @@ impl SetupManager {
         self.start_operation(SetupSource::Existing(selection))
     }
 
+    /// Starts and verifies a model that is already installed, on the setup
+    /// thread.
+    ///
+    /// Verification loads 1.19 GiB into llama-server, waits for it to answer
+    /// its health check, and runs a real inference through it. Launch used to
+    /// do that inline in Tauri's setup hook, which runs before the window
+    /// paints, so Intern opened as an unresponsive white rectangle for as long
+    /// as the machine took - and for the full three minutes the health check
+    /// allows when the server was slow to answer. It runs behind the window
+    /// instead, and reports where it ended on `setup://progress` like any
+    /// other setup operation.
+    fn verify_installed(self: &Arc<Self>) {
+        if let Err(error) = self.start_operation(SetupSource::Installed) {
+            eprintln!(
+                "intern: the installed local model could not be verified: {}",
+                error.code
+            );
+        }
+    }
+
+    /// Holds the queue without changing what the interface shows. The model
+    /// is installed and the window may open on the queue, but no document may
+    /// meet a server that has not finished loading - `RuntimeModel::analyze`
+    /// would fail it outright with MODEL_NOT_READY.
+    fn hold_local_model(&self) {
+        self.local_ready.store(false, Ordering::SeqCst);
+        self.refresh_ready();
+    }
+
     fn start_operation(self: &Arc<Self>, source: SetupSource) -> Result<(), CommandError> {
         let completed = self.get()?.downloaded_bytes;
         let cancellation = self.operation.begin()?;
-        self.set_state(SetupStatus::Downloading, completed, None);
+        match setup_progress_status(&source) {
+            Some(status) => self.set_state(status, completed, None),
+            None => self.hold_local_model(),
+        }
         let manager = Arc::clone(self);
         std::thread::Builder::new()
             .name("intern-model-setup".into())
@@ -572,6 +604,7 @@ impl SetupManager {
         let manifest = ModelManifest::embedded()?;
         let total = manifest.total_bytes();
         match source {
+            SetupSource::Installed => {}
             SetupSource::Download => {
                 let downloader = Downloader::new(ReqwestHttpTransport::new()?, SystemDiskSpace);
                 let mut completed_before = 0;
@@ -637,6 +670,23 @@ fn model_ready(local_ready: bool, hosted_active: bool) -> bool {
 enum SetupSource {
     Download,
     Existing(ExistingModelSelection),
+    /// A model that was already installed when Intern launched, which needs
+    /// only to be started and verified.
+    Installed,
+}
+
+/// The status to show while a setup operation runs, or `None` to leave the
+/// interface saying what it already says.
+///
+/// A download or an install has bytes to move and no model to run, so the
+/// setup screen takes the window. Verifying a model that is already installed
+/// is not a download and must not look like one: the screen would offer to
+/// fetch 1.19 GiB that is already on disk.
+fn setup_progress_status(source: &SetupSource) -> Option<SetupStatus> {
+    match source {
+        SetupSource::Download | SetupSource::Existing(_) => Some(SetupStatus::Downloading),
+        SetupSource::Installed => None,
+    }
 }
 
 fn setup_canceled_error() -> CommandError {
@@ -796,11 +846,8 @@ impl AppState {
             Arc::clone(&runtime),
             &manifest,
         ));
-        if runtime.installed(&manifest)
-            && let Err(error) = runtime.start_verified(&manifest, &CancellationToken::new())
-        {
-            let installed_bytes = manifest.total_bytes();
-            setup.set_state(SetupStatus::Failed, installed_bytes, Some(error.code));
+        if runtime.installed(&manifest) {
+            setup.verify_installed();
         }
         let settings = SettingsStore::new(data.join("settings.json"));
         let worker_temp_root = data.join("worker-temp");
@@ -2091,6 +2138,36 @@ mod intake_tests {
         ));
         // Clock skew across machines: a future stamp still counts as active.
         assert!(presence_active(now + 60, now));
+    }
+}
+
+#[cfg(test)]
+mod setup_source_tests {
+    use std::path::PathBuf;
+
+    use intern_engine::setup::ExistingModelSelection;
+
+    use super::{SetupSource, SetupStatus, setup_progress_status};
+
+    #[test]
+    fn verifying_an_installed_model_does_not_take_over_the_window() {
+        // A download or an install has files to fetch and a model that cannot
+        // answer yet, so the setup screen takes the window.
+        assert_eq!(
+            setup_progress_status(&SetupSource::Download),
+            Some(SetupStatus::Downloading)
+        );
+        assert_eq!(
+            setup_progress_status(&SetupSource::Existing(ExistingModelSelection {
+                model_path: PathBuf::from("C:/models/model.gguf"),
+            })),
+            Some(SetupStatus::Downloading)
+        );
+        // A model that was already installed when Intern launched is only
+        // being verified. The interface goes on saying what is true - it is
+        // installed - and the window opens on the queue instead of on a
+        // download screen for a download that is not happening.
+        assert_eq!(setup_progress_status(&SetupSource::Installed), None);
     }
 }
 
