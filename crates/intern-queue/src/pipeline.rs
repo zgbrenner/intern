@@ -1579,6 +1579,7 @@ impl Pipeline {
                     prune_empty_layout_folders(
                         &destination_root(&settings, &item.source_path),
                         &receipt.source,
+                        settings.destination_layout,
                     );
                 }
             }
@@ -2470,12 +2471,23 @@ pub fn layout_subfolder(
 /// in, walking up from its folder to (but never including) the destination
 /// root. A folder holding anything else is left where it is; so is a folder
 /// outside the root.
-fn prune_empty_layout_folders(root: &Path, vacated: &Path) {
+///
+/// Never more folders than `layout` itself creates, either. A destination
+/// changed to a folder that contains the old one puts everything ever filed
+/// "inside the root", and walking up until the root then emptied out the
+/// previous destination - somebody's filing, not Intern's scaffolding.
+fn prune_empty_layout_folders(root: &Path, vacated: &Path, layout: DestinationLayout) {
+    let mut remaining = match layout {
+        DestinationLayout::Flat => 0,
+        DestinationLayout::Year | DestinationLayout::Type | DestinationLayout::Party => 1,
+        DestinationLayout::YearType => 2,
+    };
     let mut folder = vacated.parent();
     while let Some(current) = folder {
-        if current == root || !current.starts_with(root) {
+        if remaining == 0 || current == root || !current.starts_with(root) {
             break;
         }
+        remaining -= 1;
         let empty = fs::read_dir(current).is_ok_and(|mut entries| entries.next().is_none());
         if !empty || fs::remove_dir(current).is_err() {
             break;
@@ -2872,13 +2884,36 @@ mod layout_tests {
         );
     }
 
+    /// The destination can be changed to a folder that contains the old one.
+    /// Everything under the old destination is then "inside the root", and
+    /// walking up until the root emptied out the previous destination itself,
+    /// which is somebody's filing rather than Intern's scaffolding. Only as
+    /// many folders as the layout in force could have made are ever removed.
+    #[test]
+    fn pruning_never_reaches_above_the_folders_the_layout_makes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let previous_destination = root.join("filed");
+        let vacated = previous_destination
+            .join("2026")
+            .join("Invoice")
+            .join("a.pdf");
+        std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
+        prune_empty_layout_folders(&root, &vacated, DestinationLayout::YearType);
+        assert!(!previous_destination.join("2026").exists());
+        assert!(
+            previous_destination.exists(),
+            "the folder that used to be the destination is not Intern's to remove"
+        );
+    }
+
     #[test]
     fn pruning_stops_at_the_root_and_at_the_first_folder_with_contents() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("filed");
         let vacated = root.join("2026").join("Invoice").join("a.pdf");
         std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
-        prune_empty_layout_folders(&root, &vacated);
+        prune_empty_layout_folders(&root, &vacated, DestinationLayout::YearType);
         assert!(!root.join("2026").exists());
         assert!(root.exists());
 
@@ -2887,7 +2922,7 @@ mod layout_tests {
         std::fs::write(&sibling, b"x").unwrap();
         let vacated = root.join("2025").join("Notice").join("c.pdf");
         std::fs::create_dir_all(vacated.parent().unwrap()).unwrap();
-        prune_empty_layout_folders(&root, &vacated);
+        prune_empty_layout_folders(&root, &vacated, DestinationLayout::YearType);
         assert!(!root.join("2025").join("Notice").exists());
         assert!(
             root.join("2025").join("Invoice").exists(),
@@ -2897,7 +2932,7 @@ mod layout_tests {
         // A path outside the root is never touched.
         let elsewhere = temp.path().join("elsewhere").join("d.pdf");
         std::fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
-        prune_empty_layout_folders(&root, &elsewhere);
+        prune_empty_layout_folders(&root, &elsewhere, DestinationLayout::YearType);
         assert!(elsewhere.parent().unwrap().exists());
     }
 }
