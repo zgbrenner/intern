@@ -550,7 +550,6 @@ impl FileApplier {
                 .with_receipt(receipt.clone()));
             }
         }
-
         self.store
             .renew_operation_lease(receipt.queue_item_id, receipt.id, receipt.stage)
             .map_err(|_| {
@@ -675,7 +674,6 @@ impl FileApplier {
                     )
                     .with_receipt(receipt.clone())
                 })?;
-
             let source_identity = source.identity().map_err(|_| {
                 InternError::new(
                     ErrorCode::FileChanged,

@@ -65,7 +65,6 @@ impl ErrorCode {
             "MODEL_DECLINED" => Self::ModelDeclined,
             "UPLOADER_UNVERIFIED" => Self::UploaderUnverified,
             "RECONCILIATION_REQUIRED" => Self::ReconciliationRequired,
-
             _ => return None,
         })
     }
