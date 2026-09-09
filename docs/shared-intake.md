@@ -119,10 +119,15 @@ process it again. Done claims are pruned after 30 days.
 
 A crashed or unplugged machine must not strand its documents, so claims can be
 taken over — but only when **both** the lease deadline has passed **and** the
-owner's heartbeat has been silent for the full lease period. One clock being
-wrong, or one sync being slow, is not enough to steal work from a live
-machine. This is the same two-factor liveness rule Intern's local queue uses
-between processes.
+owner's heartbeat has been silent for the full lease period. Silence is
+measured on the machine doing the taking: what counts is that the heartbeat
+has not *changed* there for a whole lease, not how old the timestamp inside it
+looks, because that timestamp comes from the owner's own clock and a machine
+running behind the rest of the folder would otherwise appear dead the moment
+it wrote one. A machine that has only just started watching therefore waits
+out a full lease before taking anything over. One clock being wrong, or one
+sync being slow, is not enough to steal work from a live machine. This is the
+same two-factor liveness rule Intern's local queue uses between processes.
 
 Sync engines are eventually consistent, so claims are honest about being
 best-effort: two machines that race a claim while offline can both think they
