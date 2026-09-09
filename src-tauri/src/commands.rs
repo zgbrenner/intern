@@ -1771,16 +1771,17 @@ pub fn history_list(state: State<'_, AppState>) -> Result<Vec<HistoryEntryDto>, 
         .collect())
 }
 
-/// Writes the rename history to `path` as RFC 4180 CSV and reports how many
-/// operations were written.
+/// Where the history CSV may be written.
 ///
 /// The path comes from the native save dialog, so it is expected to be
-/// absolute with an existing parent folder; anything else is refused before a
-/// byte is written rather than being resolved against whatever the process's
-/// working directory happens to be.
-#[tauri::command]
-pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize, CommandError> {
-    let destination = Path::new(&path);
+/// absolute, in a folder that exists, and named the way the dialog's own
+/// filter names it. Anything else is refused before a byte is written rather
+/// than being resolved against whatever the process's working directory
+/// happens to be - and the extension matters because the window is what
+/// chooses the path, so this is the only thing standing between a page that
+/// should not be there and a file elsewhere on the machine being overwritten.
+fn history_export_destination(path: &str) -> Result<&Path, CommandError> {
+    let destination = Path::new(path);
     if !destination.is_absolute() {
         return Err(history_export_failed("the export path must be absolute"));
     }
@@ -1791,6 +1792,20 @@ pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize,
     if !parent.is_dir() {
         return Err(history_export_failed("the export folder does not exist"));
     }
+    if destination
+        .extension()
+        .is_none_or(|extension| !extension.eq_ignore_ascii_case("csv"))
+    {
+        return Err(history_export_failed("the export must be a CSV file"));
+    }
+    Ok(destination)
+}
+
+/// Writes the rename history to `path` as RFC 4180 CSV and reports how many
+/// operations were written.
+#[tauri::command]
+pub fn history_export(path: String, state: State<'_, AppState>) -> Result<usize, CommandError> {
+    let destination = history_export_destination(&path)?;
     let entries = state
         .history
         .list_operation_history(HISTORY_LIMIT)
@@ -2552,6 +2567,40 @@ mod history_tests {
             original_path: PathBuf::from(original),
             new_path: PathBuf::from(new),
         }
+    }
+
+    #[test]
+    fn the_history_export_refuses_a_path_the_save_dialog_would_not_produce() {
+        use super::history_export_destination;
+        let message = |path: &std::path::Path| {
+            history_export_destination(&path.to_string_lossy())
+                .expect_err("refused")
+                .message
+        };
+        let folder = std::env::temp_dir();
+        assert!(
+            history_export_destination(&folder.join("intern-history.csv").to_string_lossy())
+                .is_ok()
+        );
+        assert!(
+            history_export_destination(&folder.join("INTERN-HISTORY.CSV").to_string_lossy())
+                .is_ok()
+        );
+        // The dialog offers one extension. Anything else is the window
+        // steering Intern into overwriting something it has no business
+        // writing to.
+        assert!(message(&folder.join("hosts")).contains("CSV"));
+        assert!(message(&folder.join("intern-history.csv.exe")).contains("CSV"));
+        assert!(
+            history_export_destination("intern-history.csv")
+                .expect_err("refused")
+                .message
+                .contains("absolute")
+        );
+        assert!(
+            message(&folder.join("no-such-folder").join("intern-history.csv"))
+                .contains("folder does not exist")
+        );
     }
 
     #[test]
