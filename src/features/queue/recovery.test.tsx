@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import type { SelectionBoundary, SelectionResult } from '../../lib/bridge';
-import { createInMemoryBridge } from '../../lib/inMemoryBridge';
+import { createBrowserSelectionBoundary, createInMemoryBridge } from '../../lib/inMemoryBridge';
 import type { QueueBridgeEvent } from '../../lib/tauriBridge';
 import type { QueueItem } from '../../types';
 
@@ -147,6 +147,29 @@ const ready: QueueItem = {
 
     expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
     expect(addFiles).toHaveBeenCalledOnce();
+  });
+
+  // Browsers report a dismissed file dialog as a `cancel` event and nothing
+  // else. Waiting only for `change` meant the promise never settled, and the
+  // queue's one-action-at-a-time guard stayed closed for the rest of the
+  // session: every later Add files, Add folder, or drop was turned away.
+  it('releases the queue when the browser file picker is dismissed', async () => {
+    const inputs: HTMLInputElement[] = [];
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const element = createElement(tag);
+      if (tag === 'input') inputs.push(element as HTMLInputElement);
+      return element;
+    });
+    render(<App bridge={createInMemoryBridge({ items: [] })} selection={createBrowserSelectionBoundary()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Add files$/i }));
+    await waitFor(() => expect(inputs).toHaveLength(1));
+
+    await act(async () => { inputs[0].dispatchEvent(new Event('cancel')); });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Add files$/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /^Add files$/i }));
+    await waitFor(() => expect(inputs).toHaveLength(2));
   });
 
   it('gates same-tick rename submissions before React has rerendered', async () => {
