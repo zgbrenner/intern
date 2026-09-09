@@ -63,7 +63,7 @@ pub fn validate(candidate: ModelProposal, digest: &DocumentDigest) -> Validation
     }
 
     let (document_date, date_role, date_supported, date_evidence_override) =
-        validate_date(&candidate, digest);
+        validate_date(&candidate, digest, document_type.as_deref());
     if !date_supported {
         push(&mut reasons, ReviewReason::DateUnsupported);
     }
@@ -197,6 +197,7 @@ fn validate_document_type(
 fn validate_date(
     candidate: &ModelProposal,
     digest: &DocumentDigest,
+    document_type: Option<&str>,
 ) -> (
     Option<String>,
     Option<crate::domain::DateRole>,
@@ -246,7 +247,9 @@ fn validate_date(
         let normalized = normalize(line);
         for position in date_match_positions(date, &normalized) {
             stated = true;
-            if !reference_introduced(&normalized, position) {
+            if names_this_document(&normalized, position, document_type)
+                || !reference_introduced(&normalized, position)
+            {
                 tainted = false;
             }
         }
@@ -332,6 +335,25 @@ pub(crate) fn reference_introduced(normalized: &str, position: usize) -> bool {
     ["issued under", "pursuant to", "as amended", "amending "]
         .iter()
         .any(|cue| window(normalized, position, WIDE).contains(cue))
+}
+
+/// Whether the wording before the date is the document naming itself:
+/// "SERVICES AGREEMENT dated as of March 1, 2026" is a cover page dating
+/// itself, not a reference to somebody else's agreement, and the referencing
+/// guard would otherwise throw away the only date the document has.
+///
+/// Only the document's own validated type counts as that naming. Every
+/// referencing line in the corpus says more than the type - "the Employment
+/// Agreement between you and Northstar Lantern Works LLC dated" - so the
+/// guard against trap dates is untouched.
+fn names_this_document(normalized: &str, position: usize, document_type: Option<&str>) -> bool {
+    let Some(document_type) = document_type else {
+        return false;
+    };
+    let lead = normalized[..position].trim_end();
+    let lead = lead.strip_suffix("as of").unwrap_or(lead).trim_end();
+    let lead = lead.strip_suffix("dated").unwrap_or(lead).trim_end();
+    !lead.is_empty() && lead == normalize(document_type)
 }
 
 const EFFECTIVE_CUES: &[&str] = &[
@@ -664,6 +686,30 @@ Your employment with the Company will end effective January 31, 2027.
             outcome.proposal.document_date.as_deref(),
             Some("2024-03-03"),
             "the terminated agreement's date must never date the notice"
+        );
+    }
+
+    /// A cover page that names the document and dates it in one breath -
+    /// "SERVICES AGREEMENT dated as of March 1, 2026" - is the document
+    /// dating itself, but the referencing guard sees a document noun before
+    /// "dated" and throws the only date the document has away.
+    #[test]
+    fn a_title_line_dated_as_of_is_the_documents_own_date() {
+        let document = "SERVICES AGREEMENT dated as of March 1, 2026
+
+by and between Acme Corporation and Vistage Worldwide, Inc.
+
+The work covers the 2026 CRM implementation, its deliverables, and its fees.
+";
+        let mut candidate = proposal();
+        candidate.document_type = Some("Services Agreement".into());
+        candidate.document_date = Some("2026-03-01".into());
+        let outcome = validate(candidate, &digest_of(document));
+        assert_eq!(
+            outcome.proposal.document_date.as_deref(),
+            Some("2026-03-01"),
+            "{:?}",
+            outcome.reasons
         );
     }
 
