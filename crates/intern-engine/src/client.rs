@@ -21,6 +21,12 @@ use crate::prompt::{RESPONSE_GRAMMAR, SYSTEM_INSTRUCTION, build_prompt};
 /// writing prose, so this stays small and generation stays fast.
 const MAX_REPLY_TOKENS: u32 = 420;
 
+/// How much of a reply body is worth reading. A reply is a short JSON object;
+/// even a thinking model's whole visible answer is a few tens of kilobytes.
+/// Two megabytes is far above anything real and far below anything that would
+/// hurt a laptop already running the model.
+const MAX_REPLY_BYTES: u64 = 2 * 1024 * 1024;
+
 /// What actually gets sent to the model for one document.
 ///
 /// Text only, by construction. Intern reads documents as text and the local
@@ -125,8 +131,8 @@ impl ModelClient {
         if !response.status().is_success() {
             return Err(AttemptError(EngineErrorCode::ModelRequestFailed));
         }
-        let completion: ChatCompletion = response
-            .json()
+        let bytes = read_capped(response, EngineErrorCode::ModelResponseInvalid)?;
+        let completion: ChatCompletion = serde_json::from_slice(&bytes)
             .map_err(|_| AttemptError(EngineErrorCode::ModelResponseInvalid))?;
         decode(completion)
     }
@@ -150,6 +156,29 @@ impl ModelClient {
             "chat_template_kwargs": {"enable_thinking": false}
         })
     }
+}
+
+/// Reads a reply body, refusing one that could not be a reply.
+///
+/// Whatever is at the other end of the socket decides how many bytes arrive,
+/// and a proxy's error page or a stream nobody asked for should not be read
+/// into memory without a limit. A body over the cap is a malformed reply;
+/// `on_io_failure` is what a body that simply stopped arriving means to the
+/// caller, which differs between the local server and a hosted service.
+pub(crate) fn read_capped(
+    body: impl std::io::Read,
+    on_io_failure: EngineErrorCode,
+) -> Result<Vec<u8>, AttemptError> {
+    use std::io::Read as _;
+
+    let mut bytes = Vec::new();
+    body.take(MAX_REPLY_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| AttemptError(on_io_failure))?;
+    if bytes.len() as u64 > MAX_REPLY_BYTES {
+        return Err(AttemptError(EngineErrorCode::ModelResponseInvalid));
+    }
+    Ok(bytes)
 }
 
 /// Reads a proposal out of a chat-completion reply: the local server's, or
@@ -480,6 +509,27 @@ mod tests {
 
         assert_eq!(error.code(), EngineErrorCode::ModelRequestFailed);
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    /// Whatever answers the socket decides how many bytes arrive, and the
+    /// machine on the other end of a hosted endpoint is not Intern's.
+    #[test]
+    fn a_reply_body_is_read_only_up_to_a_cap() {
+        assert_eq!(
+            read_capped(
+                &b"{\"choices\":[]}"[..],
+                EngineErrorCode::ModelRequestFailed
+            )
+            .unwrap(),
+            b"{\"choices\":[]}"
+        );
+        let flood = std::io::Read::take(std::io::repeat(b'{'), 8 * 1024 * 1024);
+        assert_eq!(
+            read_capped(flood, EngineErrorCode::ModelRequestFailed)
+                .unwrap_err()
+                .0,
+            EngineErrorCode::ModelResponseInvalid
+        );
     }
 
     #[test]

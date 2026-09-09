@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::client::{
-    AttemptError, ChatCompletion, ModelRequest, Proposer, decode, proposal_from_text,
+    AttemptError, ChatCompletion, ModelRequest, Proposer, decode, proposal_from_text, read_capped,
 };
 use crate::domain::{DocumentAnalysis, ModelProposal};
 use crate::engine::Engine;
@@ -300,9 +300,7 @@ impl HostedClient {
         if !status.is_success() {
             return Err(AttemptError(failure_for_status(status)));
         }
-        let bytes = response
-            .bytes()
-            .map_err(|_| AttemptError(EngineErrorCode::HostedModelUnreachable))?;
+        let bytes = read_capped(response, EngineErrorCode::HostedModelUnreachable)?;
         match self.config.provider {
             HostedProvider::Anthropic => decode_anthropic(&bytes),
             HostedProvider::OpenAiCompatible => {
