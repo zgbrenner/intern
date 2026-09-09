@@ -50,9 +50,8 @@ pub enum ItemState {
 /// The boundary to whatever processes documents (the pipeline in the real
 /// app, a fake in tests). The watcher only hands over paths and asks about
 /// their fate; it never reads document content itself.
-/// What the host can say about who uploaded a document.
 ///
-/// `Unknown` and `Revoked` are both holds, and neither ever admits a document,
+/// `Unknown` and `Revoked` are both holds and neither ever admits a document,
 /// but they mean opposite things about work already in flight. `Unknown` is
 /// "we could not check right now" — Microsoft unreachable, throttled, or the
 /// audit event not delivered yet — and must leave a document that is already
@@ -203,7 +202,14 @@ pub(crate) fn walk_intake(root: &Path, extensions: &[String]) -> io::Result<Walk
             if !file_type.is_file() || !supported(&path, extensions) {
                 continue;
             }
-            let Ok(metadata) = entry.metadata() else {
+            // Not `entry.metadata()`: Windows updates a directory entry
+            // lazily, so a listing reports the size a file had at its last
+            // flush and a document the sync client is still writing looks
+            // settled. Opening the file for its attributes costs a handle but
+            // hydrates nothing, and a file held so exclusively that even this
+            // is refused is one that is still being written, so skipping it is
+            // the right answer too.
+            let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
             if metadata.len() == 0 {
@@ -401,6 +407,33 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["keep.pdf".to_string()]);
         assert_eq!(walk.unreadable_folders, 0);
+    }
+
+    /// Windows updates a file's directory entry lazily, so the size a listing
+    /// reports for a file that is open for writing is the size it had at the
+    /// last flush. Believing it lets the stability check pass a document the
+    /// sync client is still writing, and the claim key is then computed from a
+    /// torn snapshot that the settled file will never match.
+    #[test]
+    fn a_file_held_open_for_writing_is_not_stable() {
+        use std::{fs::OpenOptions, io::Write};
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("uploading.pdf");
+        fs::write(&path, b"first chunk").unwrap();
+        let settled = walk_intake(temp.path(), &extensions()).unwrap().files[0].size;
+
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(b" and a great deal more, not yet flushed")
+            .unwrap();
+        let growing = walk_intake(temp.path(), &extensions()).unwrap().files[0].size;
+        drop(file);
+
+        assert_ne!(
+            growing, settled,
+            "a file still being written must not look unchanged"
+        );
+        assert_eq!(growing, fs::metadata(&path).unwrap().len());
     }
 
     /// A shared drive grants permissions per folder. One folder this machine
