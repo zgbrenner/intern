@@ -234,24 +234,6 @@ impl TesseractOcr {
         })?;
         Ok(self.parse_tsv(&output)?.with_rotation(rotation))
     }
-
-    /// Of two readings of the same page, the one Tesseract is more confident in.
-    /// A tie keeps the incumbent, so the orientation OSD chose wins by default
-    /// and behaviour on a blank page stays predictable.
-    ///
-    /// Orientation detection is trained on prose with ascenders and descenders.
-    /// On a dense all-caps form it can report a rotation that is 180 degrees
-    /// wrong, and OCR then returns a full page of gibberish rather than
-    /// obviously empty output - same word count, plausible shape, useless text.
-    /// Volume cannot tell those apart; word confidence can. Measured on one
-    /// corpus page, the four orientations scored 23, 14, 14, and 76.
-    fn better_reading(incumbent: OcrResult, challenger: OcrResult) -> OcrResult {
-        if challenger.mean_confidence > incumbent.mean_confidence {
-            challenger
-        } else {
-            incumbent
-        }
-    }
 }
 
 #[cfg(feature = "native-tesseract")]
@@ -339,7 +321,7 @@ impl OcrBackend for TesseractOcr {
                 &format!("try-{candidate}"),
                 cancel,
             )?;
-            best = Self::better_reading(best, attempt);
+            best = crate::extract::better_reading(best, attempt);
         }
         Ok(best)
     }
@@ -348,7 +330,6 @@ impl OcrBackend for TesseractOcr {
 #[cfg(all(test, feature = "native-tesseract"))]
 mod tests {
     use super::{RECOGNITION_SEGMENTATION, TSV_RENDERER, TesseractOcr};
-    use crate::extract::OcrResult;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -394,40 +375,6 @@ mod tests {
         assert!(
             !TSV_RENDERER.contains(&"tsv"),
             "a bare `tsv` argument names tessdata/configs/tsv, which is not shipped"
-        );
-    }
-
-    /// Measured on the corpus: a page read in the orientation OSD asked for
-    /// scored 44 while the same page read as-is scored 95, with both readings
-    /// returning eleven words. Volume cannot choose between them; confidence
-    /// can.
-    #[test]
-    fn a_confidently_misdetected_rotation_loses_to_the_page_as_it_was() {
-        let oriented = OcrResult::new("O71 TIVL3Y MOGVAW ZLYVNO", 44.1).with_rotation(180);
-        let unrotated = OcrResult::new("PACKING SLIP PS-311 DATE JULY 15 2025", 95.2);
-        let chosen = TesseractOcr::better_reading(oriented, unrotated);
-        assert_eq!(chosen.text, "PACKING SLIP PS-311 DATE JULY 15 2025");
-        assert_eq!(chosen.rotation_degrees, 0);
-    }
-
-    #[test]
-    fn a_genuinely_rotated_page_keeps_the_rotation_that_read_it() {
-        let oriented = OcrResult::new("DELIVERY RECEIPT DR-771", 92.0).with_rotation(270);
-        let unrotated = OcrResult::new("gibberish", 31.0);
-        let chosen = TesseractOcr::better_reading(oriented, unrotated);
-        assert_eq!(chosen.text, "DELIVERY RECEIPT DR-771");
-        assert_eq!(chosen.rotation_degrees, 270);
-    }
-
-    /// A tie keeps the detected orientation rather than silently preferring the
-    /// unrotated read, so behaviour on a blank page stays predictable.
-    #[test]
-    fn an_equal_score_keeps_the_detected_orientation() {
-        let oriented = OcrResult::new("", 0.0).with_rotation(90);
-        let unrotated = OcrResult::new("", 0.0);
-        assert_eq!(
-            TesseractOcr::better_reading(oriented, unrotated).rotation_degrees,
-            90
         );
     }
 }

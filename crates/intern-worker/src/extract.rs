@@ -183,6 +183,32 @@ impl OcrResult {
 /// re-reading in another orientation before any of that.
 pub const CONFIDENT_READING: f32 = 75.0;
 
+/// Of two readings of the same page, the one to keep. A tie keeps the
+/// incumbent, so the orientation OSD chose wins by default and behaviour on a
+/// blank page stays predictable.
+///
+/// Orientation detection is trained on prose with ascenders and descenders.
+/// On a dense all-caps form it can report a rotation that is 180 degrees
+/// wrong, and OCR then returns a full page of gibberish rather than obviously
+/// empty output - same word count, plausible shape, useless text. Volume
+/// cannot tell those apart; word confidence can. Measured on one corpus page,
+/// the four orientations scored 23, 14, 14, and 76.
+///
+/// Confidence alone cannot arbitrate either, because it is a mean over
+/// whatever was read: three tokens picked out of a rotated page at 80 outrank
+/// three hundred words of the real document at 74.9, and the page then comes
+/// back as three tokens. A reading has to be about as dense as the one it
+/// displaces before its confidence counts.
+pub fn better_reading(incumbent: OcrResult, challenger: OcrResult) -> OcrResult {
+    let words = |reading: &OcrResult| reading.text.split_whitespace().count();
+    let comparably_dense = words(&challenger) * 2 >= words(&incumbent);
+    if challenger.mean_confidence > incumbent.mean_confidence && comparably_dense {
+        challenger
+    } else {
+        incumbent
+    }
+}
+
 pub fn apply_detected_rotation(
     image: DynamicImage,
     rotation_degrees: u16,
