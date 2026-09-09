@@ -1455,12 +1455,20 @@ impl Pipeline {
             self.events.queue_changed();
             return Ok(());
         }
+        let proposal = self.repository.load_proposal(item.id)?;
+        // The name to apply is the one the record holds now, not the one the
+        // caller read a moment ago. Nothing holds the queue still between a
+        // scheduler pass deciding what to file and the file operation itself,
+        // and an edit approved in that moment is the name the person expects
+        // to see on the document.
+        let filename = proposal
+            .as_ref()
+            .map_or(filename, |record| record.filename.as_str());
         if leading_date(filename).is_none() {
             self.repository.mark_needs_review(item.id, DATE_REQUIRED)?;
             self.events.queue_changed();
             return Ok(());
         }
-        let proposal = self.repository.load_proposal(item.id)?;
         let target = match proposal.as_ref() {
             Some(record) => target_folder(
                 settings,
