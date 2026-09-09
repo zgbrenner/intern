@@ -145,6 +145,20 @@ describe('TauriBridge', () => {
     expect(items[5].cancelable).toBe(false);
   });
 
+  // The backend's status vocabulary can grow ahead of this build. An unmapped
+  // one used to fall out of the switch as undefined, and the row then failed
+  // every view's status filter and disappeared from the queue entirely.
+  it('keeps a row with a status this build does not know, as failed', async () => {
+    const fake = fakeTransport({
+      queue_list: [{ id: 1, originalFilename: 'mystery.pdf', status: 'quarantined', reason: 'SOURCE_LOCKED' }],
+    });
+
+    const items = await new TauriBridge(fake.transport).listItems();
+
+    expect(items).toHaveLength(1);
+    expect(items[0].status).toBe('failed');
+  });
+
   it('normalizes queue events and unsubscribes every listener exactly once', async () => {
     const fake = fakeTransport();
     const bridge = new TauriBridge(fake.transport);

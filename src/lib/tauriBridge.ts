@@ -401,6 +401,11 @@ function normalizeStatus(status: BackendStatus): QueueItem['status'] {
     case 'failed':
     case 'canceled': return 'failed';
   }
+  // A status this build has no name for - a newer backend, or a bug. Falling
+  // out of the switch left the row with no status at all, and it then failed
+  // every view's filter and vanished from the queue rather than being wrong
+  // in a way anyone could see.
+  return 'failed';
 }
 
 async function openDialog(transport: TauriTransport, directory: boolean): Promise<string[]> {
