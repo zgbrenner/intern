@@ -83,7 +83,13 @@ pub struct MicrosoftIntake {
     settings: SettingsStore,
     data: PathBuf,
     config: Mutex<PublicConfig>,
-    config_error: Option<String>,
+    /// Why the stored configuration could not be read. Behind a lock because
+    /// connecting Microsoft again rewrites the file, and that repair has to
+    /// take effect without restarting Intern.
+    config_error: Mutex<Option<String>>,
+    /// Why no Microsoft request can be made at all. Nothing inside the app
+    /// repairs it, so it stands for the life of the process.
+    client_error: Option<String>,
     client: Option<MicrosoftClient>,
     audit: AuditVerifier,
     generation: AtomicU64,
@@ -92,17 +98,15 @@ pub struct MicrosoftIntake {
 impl MicrosoftIntake {
     pub fn new(settings: SettingsStore, data: PathBuf) -> Self {
         let loaded = read_config(&data.join("microsoft-intake.json"));
-        let (config, mut config_error) = match loaded {
+        let (config, config_error) = match loaded {
             Ok(value) => (value, None),
             Err(error) => (PublicConfig::default(), Some(error)),
         };
-        let client = match MicrosoftClient::new(config.auth.clone(), Arc::new(CredentialStore)) {
-            Ok(client) => Some(client),
-            Err(error) => {
-                config_error = Some(error);
-                None
-            }
-        };
+        let (client, client_error) =
+            match MicrosoftClient::new(config.auth.clone(), Arc::new(CredentialStore)) {
+                Ok(client) => (Some(client), None),
+                Err(error) => (None, Some(error)),
+            };
         let documents = fs::read(data.join("intake-attribution.json"))
             .ok()
             .filter(|bytes| bytes.len() <= 1024 * 1024)
@@ -116,12 +120,24 @@ impl MicrosoftIntake {
             settings,
             data,
             config: Mutex::new(config),
-            config_error,
+            config_error: Mutex::new(config_error),
+            client_error,
             client,
             audit: AuditVerifier::default(),
             generation: AtomicU64::new(0),
             documents: Mutex::new(documents),
         }
+    }
+    /// Why Microsoft verification cannot be relied on right now, if anything
+    /// is wrong. A document only inherits this when it is inside a folder the
+    /// verification actually covers.
+    fn unavailable(&self) -> Option<String> {
+        self.client_error.clone().or_else(|| {
+            self.config_error
+                .lock()
+                .ok()
+                .and_then(|error| error.clone())
+        })
     }
     fn client(&self) -> Result<&MicrosoftClient, String> {
         self.client
@@ -157,20 +173,26 @@ impl MicrosoftIntake {
             client_id: config.auth.client_id,
             binding,
             documents,
-            error: self.config_error.clone(),
+            error: self.unavailable(),
         }
     }
+    /// Writes the configuration, replacing whatever was there.
+    ///
+    /// A successful write is also the repair for a file that could not be
+    /// read: what is on disk is now exactly what is in memory, so the earlier
+    /// read error no longer describes anything.
     fn save(&self, config: &PublicConfig) -> Result<(), String> {
         let bytes = serde_json::to_vec_pretty(config)
             .map_err(|_| "Microsoft configuration could not be encoded.")?;
-        atomic_write(&self.data.join("microsoft-intake.json"), &bytes)
+        atomic_write(&self.data.join("microsoft-intake.json"), &bytes)?;
+        if let Ok(mut error) = self.config_error.lock() {
+            *error = None;
+        }
+        Ok(())
     }
     /// Remember strict intake roots before saving settings. Disabling watching
     /// or choosing a new root cannot bypass checks on already queued documents.
     pub fn protect_settings(&self, settings: &AppSettings) -> Result<(), String> {
-        if let Some(error) = &self.config_error {
-            return Err(error.clone());
-        }
         if settings.intake_local_only
             && classify(Path::new(&settings.intake_folder), &detect_cloud_roots()).is_some()
         {
@@ -179,6 +201,13 @@ impl MicrosoftIntake {
         self.generation.fetch_add(1, Ordering::SeqCst);
         if settings.intake_folder.trim().is_empty() || settings.intake_local_only {
             return Ok(());
+        }
+        // Only a save that names a folder Microsoft verification must cover
+        // needs the configuration. Refusing every other save - a destination,
+        // a house rule, turning intake off - left a broken configuration with
+        // no way to reach the panel that repairs it.
+        if let Some(error) = self.unavailable() {
+            return Err(error);
         }
         let mut config = self
             .config
@@ -201,9 +230,9 @@ impl MicrosoftIntake {
             return Err("Confirm the Microsoft permissions notice before connecting. Audit read access is broader than the selected folder.".into());
         }
         auth.validate()?;
-        if let Some(error) = &self.config_error {
-            return Err(error.clone());
-        }
+        // Deliberately not refused when the stored configuration cannot be
+        // read: connecting again writes it from what the person just entered,
+        // which is the only repair for that file available inside the app.
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.audit.clear();
         {
@@ -328,9 +357,6 @@ impl MicrosoftIntake {
         Ok(binding)
     }
     fn scope(&self, path: &Path, settings: &AppSettings) -> Result<Option<FolderBinding>, String> {
-        if let Some(error) = &self.config_error {
-            return Err(error.clone());
-        }
         let config = self
             .config
             .lock()
@@ -341,6 +367,14 @@ impl MicrosoftIntake {
             && within(path, &settings.intake_folder);
         if !protected {
             return Ok(None);
+        }
+        // Whether the path is covered is decided before the configuration is
+        // asked anything, so a file that could never have been a Microsoft
+        // upload is not held by a configuration that cannot be read. The
+        // watched intake folder itself, which the settings still name, stays
+        // held.
+        if let Some(error) = self.unavailable() {
+            return Err(error);
         }
         if !config.enabled {
             return Err(
@@ -621,6 +655,63 @@ mod tests {
         assert!(within(Path::new("C:/Intake/one.pdf"), "C:/Intake"));
         assert!(!within(Path::new("C:/IntakeOther/one.pdf"), "C:/Intake"));
     }
+    /// A Microsoft intake whose stored configuration cannot be read, in a
+    /// directory of its own.
+    fn unreadable_config(name: &str) -> (PathBuf, MicrosoftIntake) {
+        let data =
+            std::env::temp_dir().join(format!("intern-microsoft-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&data);
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("microsoft-intake.json"), b"not json").unwrap();
+        let intake =
+            MicrosoftIntake::new(SettingsStore::new(data.join("settings.json")), data.clone());
+        assert!(intake.status().error.is_some(), "the trouble is reported");
+        (data, intake)
+    }
+
+    #[test]
+    fn a_corrupt_microsoft_config_does_not_hold_local_files() {
+        let (data, intake) = unreadable_config("corrupt");
+        let elsewhere = AppSettings::default();
+        // A file from an ordinary local folder was never a Microsoft upload,
+        // so nothing about it depends on the configuration.
+        assert!(
+            intake
+                .scope(&data.join("Desktop/scan.pdf"), &elsewhere)
+                .unwrap()
+                .is_none()
+        );
+        // And a settings save that names no Microsoft intake folder must go
+        // through, or Settings cannot be reached to repair the configuration.
+        assert!(intake.protect_settings(&elsewhere).is_ok());
+
+        // The folder the guard exists for is still held.
+        let watched = AppSettings {
+            intake_folder: data.to_string_lossy().into_owned(),
+            ..AppSettings::default()
+        };
+        assert!(intake.scope(&data.join("upload.pdf"), &watched).is_err());
+        assert!(intake.protect_settings(&watched).is_err());
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn reconnecting_repairs_a_configuration_that_cannot_be_read() {
+        let (data, intake) = unreadable_config("repair");
+        // Connecting Microsoft again writes the configuration from what the
+        // person just entered, which is the only repair available inside the
+        // app for a file nothing else can parse.
+        intake.save(&PublicConfig::default()).unwrap();
+        assert!(read_config(&data.join("microsoft-intake.json")).is_ok());
+        assert!(intake.status().error.is_none());
+        let watched = AppSettings {
+            intake_folder: data.to_string_lossy().into_owned(),
+            ..AppSettings::default()
+        };
+        assert!(intake.protect_settings(&watched).is_ok());
+        let _ = fs::remove_dir_all(&data);
+    }
+
     #[test]
     fn malformed_config_is_not_treated_as_disconnected_defaults() {
         let path =
