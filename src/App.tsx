@@ -31,6 +31,10 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const [selectedId, setSelectedId] = useState<string>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Until the real settings arrive these are placeholders, not the person's
+  // configuration, and saving them would overwrite a destination, a watched
+  // folder, and a machine name with defaults.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({ destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' });
   const [setup, setSetup] = useState<SetupState | undefined>(suppliedBridge ? undefined : { state: 'ready', downloadedBytes: 0, totalBytes: 0 });
   const [setupAction, setSetupAction] = useState<'start' | 'cancel' | 'choose'>();
@@ -42,7 +46,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const narrowInspector = useMediaQuery('(max-width: 1100px)');
 
   useEffect(() => {
-    void bridge.getSettings().then(setSettings);
+    void bridge.getSettings().then((loaded) => { setSettings(loaded); setSettingsLoaded(true); }).catch(() => setSettingsLoaded(false));
     void bridge.getSetup().then(setSetup).catch((error) => setSetupError(describeSetupError(error)));
   }, [bridge]);
   useEffect(() => {
@@ -195,6 +199,11 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     try { await bridge.openGuide(); }
     catch { setActionError(`The guide could not be opened. You can reach it at ${GUIDE_URL}.`); }
   };
+  const saveSettings = async (next: AppSettings) => {
+    if (!settingsLoaded) throw new Error('Intern could not read your settings, so saving now would replace them with defaults. Restart Intern and try again.');
+    await bridge.saveSettings(next);
+    setSettings(next);
+  };
   const openSettings = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; settingsTrigger.current = trigger; setSettingsOpen(true); };
   const closeSettings = () => { setSettingsOpen(false); settingsTrigger.current?.focus(); };
   const openHistory = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; historyTrigger.current = trigger; setHistoryOpen(true); };
@@ -280,7 +289,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
       onChooseExisting={chooseExistingModel}
       onUseHostedModel={() => setSettingsOpen(true)}
     />
-    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={() => setSettingsOpen(false)} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); setSettingsOpen(false); setSetup(await bridge.getSetup()); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
+    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={() => setSettingsOpen(false)} onSave={async (next) => { await saveSettings(next); setSettingsOpen(false); setSetup(await bridge.getSetup()); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
   </>;
   return <main className="app-shell" aria-label="Intern">
     <p className="sr-only" role="status" aria-label="Queue status" aria-live="polite" aria-atomic="true">{queueStatus}</p>
@@ -339,7 +348,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
       {selected && <ReviewInspector busy={actionPending} drawer={drawerOpen} item={selected} onClose={closeReview} onApprove={(filename, description) => void refreshAndClear(() => bridge.approve(selected.id, filename, description), 'Rename applied.')} onKeep={() => void refreshAndClear(() => bridge.keepOriginal(selected.id), 'Original filename kept.')} onCancel={() => void refreshAndClear(() => bridge.cancel(selected.id), 'Processing canceled.')} onRetry={() => void refreshAndClear(() => bridge.retry(selected.id), 'Item queued for retry.')} onRemove={() => void refreshAndClear(() => bridge.remove(selected.id), 'Item removed.')} onUndo={() => void refreshAndClear(() => bridge.undo(selected.id), 'Operation undone.')} />}
     </div>
     {historyOpen && <HistoryDialog bridge={bridge} selection={selection} onClose={closeHistory} />}
-    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={closeSettings} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); closeSettings(); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
+    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={closeSettings} onSave={async (next) => { await saveSettings(next); closeSettings(); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
   </main>;
 }
 
