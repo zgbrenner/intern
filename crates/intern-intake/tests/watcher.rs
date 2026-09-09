@@ -110,6 +110,8 @@ struct Rig {
 #[derive(Default)]
 struct FakeHydration {
     dehydrated: Mutex<HashSet<PathBuf>>,
+    /// Whether a request for a placeholder's content would succeed.
+    reachable: AtomicBool,
 }
 
 impl FakeHydration {
@@ -128,6 +130,16 @@ impl Hydration for FakeHydration {
     /// attribute probe reports too.
     fn is_dehydrated(&self, path: &Path) -> bool {
         path.exists() && self.dehydrated.lock().unwrap().contains(path)
+    }
+
+    /// The sync client fetches the bytes when something opens the file;
+    /// offline, the open fails and the file stays a placeholder.
+    fn hydrate(&self, path: &Path) -> bool {
+        if !self.reachable.load(Ordering::SeqCst) {
+            return false;
+        }
+        self.dehydrated.lock().unwrap().remove(path);
+        true
     }
 }
 
@@ -833,4 +845,35 @@ fn a_labelled_machine_still_recognises_its_own_hostname_conflict_copies() {
     rig.step();
     rig.step();
     assert_eq!(rig.watcher.status().sync_conflicts, 2);
+}
+
+/// Nothing else ever opens a placeholder, so a claim held waiting for content
+/// waits for ever unless the scan asks the sync client for the bytes.
+#[test]
+fn a_held_placeholder_is_hydrated_when_the_host_can_reach_the_cloud() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("contract.pdf", b"an online-only document");
+    rig.step();
+    rig.step();
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+
+    // Offline: the content cannot be fetched, so the claim is held open.
+    rig.hydration.set_dehydrated(&path, true);
+    rig.host.set_state(&path, ItemState::Failed);
+    rig.step();
+    assert_eq!(rig.watcher.status().awaiting_hydration, 1);
+
+    rig.hydration.reachable.store(true, Ordering::SeqCst);
+    rig.step();
+    assert!(
+        !rig.hydration.is_dehydrated(&path),
+        "the scan must ask for the content it is waiting on"
+    );
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+    assert!(
+        !rig.claim_file(&key).exists(),
+        "the released claim lets the next scan give the document a real attempt"
+    );
 }

@@ -524,6 +524,18 @@ impl Scanner<'_> {
     /// forgive a document exactly once per trip through the cloud.
     fn finish_failed(&mut self, key: &str, path: &Path) {
         if self.hydration.is_dehydrated(path) {
+            // Nothing else will ever open a placeholder, and a placeholder is
+            // only recalled when something opens it, so a claim held waiting
+            // for content would wait for ever unless the scan asks for the
+            // bytes itself. Once they arrive the claim is released rather than
+            // retried in place, exactly as it is when they arrive some other
+            // way.
+            if self.hydration.hydrate(path) {
+                let _ = self.store.release(key);
+                self.owned.remove(key);
+                self.awaiting_hydration.remove(key);
+                return;
+            }
             // Counted only once the lease is actually held: a document we just
             // abandoned is not one we are waiting on.
             if self.store.renew(key).is_err() {

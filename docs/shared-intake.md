@@ -34,9 +34,11 @@ initial connector.
 A failure while the content is still in the cloud is not a verdict on the
 document, because nothing ever read it. Intern holds the claim open in that
 case rather than closing it, and Settings counts the documents waiting on
-their contents. When the bytes arrive the claim is released, the next scan
-re-acquires it, and the document goes through the pipeline with something to
-read. A second failure with the content local is a real failure and is
+their contents. Each scan asks the sync client for the content it is waiting
+on — a placeholder is only fetched when something opens it, so a held document
+would wait for ever if nobody asked — and when the bytes arrive the claim is
+released, the next scan re-acquires it, and the document goes through the
+pipeline with something to read. A second failure with the content local is a real failure and is
 recorded as one. A laptop that spends a trip offline therefore returns to a
 folder it can still work on, instead of one full of tombstones.
 

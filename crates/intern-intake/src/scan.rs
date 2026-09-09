@@ -280,6 +280,17 @@ fn supported(path: &Path, extensions: &[String]) -> bool {
 /// A seam, because no test can conjure a real Files On-Demand placeholder.
 pub trait Hydration: Send + Sync {
     fn is_dehydrated(&self, path: &Path) -> bool;
+
+    /// Asks the sync client for a placeholder's content, and reports whether
+    /// the bytes are on this disk afterwards.
+    ///
+    /// A placeholder is only recalled when something opens it, so a claim held
+    /// waiting for content waits for ever unless the scan asks. The default is
+    /// to ask for nothing and simply report what is already there, which is
+    /// the honest answer for anything that is not a sync client.
+    fn hydrate(&self, path: &Path) -> bool {
+        !self.is_dehydrated(path)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -313,6 +324,20 @@ impl Hydration for SystemHydration {
     #[cfg(not(windows))]
     fn is_dehydrated(&self, _path: &Path) -> bool {
         false
+    }
+
+    /// Opening a placeholder is what makes Files On-Demand fetch it; one byte
+    /// is enough to start it and the sync client brings down the whole file.
+    /// That download happens on the scan thread, which is why it is asked for
+    /// only for a document this machine already holds and has already failed
+    /// to read. Offline the open fails quickly and the attributes still say
+    /// the content is in the cloud, which is the answer the caller wants.
+    #[cfg(windows)]
+    fn hydrate(&self, path: &Path) -> bool {
+        use std::io::Read;
+
+        let _ = fs::File::open(path).and_then(|mut file| file.read(&mut [0_u8; 1]));
+        !self.is_dehydrated(path)
     }
 }
 
