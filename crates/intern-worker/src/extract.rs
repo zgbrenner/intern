@@ -346,9 +346,18 @@ pub fn extract_pdf(
 
     for inspection in inspections {
         timed_check(cancel, started, limits)?;
-        limits.validate_page_pixels(inspection.width_pixels, inspection.height_pixels)?;
+        // The render cap belongs to rendering. A large-format sheet - an A1
+        // drawing, a plan set - is over it at 300 DPI while carrying a
+        // perfectly good text layer, and failing the whole document over a
+        // page nobody was going to rasterise loses the document. A page that
+        // is too large to render also cannot be escalated to vision, but it
+        // keeps its text: the page image is the optional part.
+        let renderable = limits
+            .validate_page_pixels(inspection.width_pixels, inspection.height_pixels)
+            .is_ok();
         if !page_needs_ocr(&inspection) {
-            let vision_escalated = page_needs_vision(&inspection) && vision_candidate.is_none();
+            let vision_escalated =
+                renderable && page_needs_vision(&inspection) && vision_candidate.is_none();
             if vision_escalated {
                 let rendered = pdf.render(path, inspection.page_index, cancel)?;
                 let (render_width, render_height) = rendered.image.dimensions();
@@ -373,6 +382,9 @@ pub fn extract_pdf(
         {
             warnings.push(ExtractionWarning::NativeTextCorrupt);
         }
+        // This page has no text worth keeping, so it has to be rendered to be
+        // read at all, and being too large to render is a resource limit.
+        limits.validate_page_pixels(inspection.width_pixels, inspection.height_pixels)?;
         let rendered = pdf.render(path, inspection.page_index, cancel)?;
         let (render_width, render_height) = rendered.image.dimensions();
         limits.validate_page_pixels(render_width, render_height)?;

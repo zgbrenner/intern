@@ -352,3 +352,51 @@ fn a_scanned_page_with_a_confidentiality_stamp_is_still_ocred() {
         document.pages[0].text
     );
 }
+
+/// An engineering drawing on an A1 sheet is over the render cap at 300 DPI,
+/// and it has a perfectly good text layer. Enforcing the cap before deciding
+/// whether the page is ever rendered failed the whole document over a page
+/// nobody was going to rasterise.
+#[test]
+fn a_large_format_text_page_is_extracted_without_rendering() {
+    let mut drawing = page(
+        "SHEET 3 OF 8 - FOUNDATION PLAN - REVISION C - ISSUED FOR CONSTRUCTION - \
+         SCALE 1:50 - DRAWN BY R. OKONKWO - CHECKED BY T. HALVORSEN",
+        0.2,
+    );
+    drawing.width_pixels = 7_020;
+    drawing.height_pixels = 9_930;
+
+    let (document, renders) = route(vec![drawing], vec![]);
+
+    assert_eq!(renders, 0);
+    assert_eq!(document.pages[0].source, PageSource::Native);
+    assert!(document.pages[0].text.contains("FOUNDATION PLAN"));
+}
+
+/// The same sheet with nothing in its text layer still cannot be read
+/// without rendering it, and that is a resource limit rather than a silent
+/// empty page.
+#[test]
+fn a_large_format_scanned_page_is_still_a_resource_limit() {
+    let mut scan = page("", 1.0);
+    scan.width_pixels = 7_020;
+    scan.height_pixels = 9_930;
+    let renders = Arc::new(AtomicUsize::new(0));
+    let pdf = FakePdf {
+        pages: vec![scan],
+        renders: Arc::clone(&renders),
+    };
+
+    let error = extract_pdf(
+        Path::new("drawing.pdf"),
+        &pdf,
+        &FakeOcr { results: vec![] },
+        &ResourceLimits::default(),
+        &CancellationToken::new(),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "RESOURCE_LIMIT_EXCEEDED");
+    assert_eq!(renders.load(Ordering::SeqCst), 0);
+}
