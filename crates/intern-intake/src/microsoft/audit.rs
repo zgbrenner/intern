@@ -118,7 +118,9 @@ impl AuditVerifier {
                 let end = DateTime::<Utc>::from_timestamp(now, 0)
                     .ok_or("Verification time is invalid.")?
                     .to_rfc3339_opts(SecondsFormat::Secs, true);
-                let body = json!({"displayName":"Intern upload identity verification","filterStartDateTime":start,"filterEndDateTime":end,"recordTypeFilters":["sharePointFileOperation","oneDrive"],"objectIdFilters":[candidate.web_url]});
+                // The filter is matched against the address the audit service
+                // stored, which is the unescaped one; see `object_id`.
+                let body = json!({"displayName":"Intern upload identity verification","filterStartDateTime":start,"filterEndDateTime":end,"recordTypeFilters":["sharePointFileOperation","oneDrive"],"objectIdFilters":[percent_decode(&candidate.web_url)]});
                 let (_, response) = client.start_audit_query(&body)?;
                 let id = text(&response, "/id").map_err(str::to_owned)?;
                 if !is_guid(id) {
@@ -206,6 +208,44 @@ impl AuditVerifier {
     }
 }
 
+/// The address of one item, in the one form both Microsoft services agree on.
+///
+/// An audit record's `objectId` is the file's address as the audit service
+/// stored it, which is not byte-for-byte the `webUrl` Graph returns for the
+/// same item: a default library is called "Shared Documents", and that arrives
+/// percent-encoded from one and spelled with a literal space from the other.
+/// Host casing varies between records too. Comparing the raw strings therefore
+/// never matched in a default library, and no file in one could ever be
+/// admitted.
+fn object_id(value: &str) -> String {
+    percent_decode(value)
+        .to_lowercase()
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Decodes `%XX` escapes. Anything that is not a well-formed escape is kept
+/// verbatim, because a filename may legitimately contain a bare `%`.
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let Some(high) = (bytes[index + 1] as char).to_digit(16)
+            && let Some(low) = (bytes[index + 2] as char).to_digit(16)
+        {
+            decoded.push((high * 16 + low) as u8);
+            index += 3;
+            continue;
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 /// Deliberately conservative: support fresh, unchanged uploads. Moves, copies,
 /// overwrites, application actors, conflicting identities, or missing IDs are
 /// not inferred from Created By, Modified By, email, or a machine marker.
@@ -213,7 +253,7 @@ pub fn upload_actor(records: &[Value], candidate: &Candidate) -> Result<Account,
     let mut upload: Option<&Value> = None;
     for record in records {
         if !text(record, "/organizationId")?.eq_ignore_ascii_case(&candidate.uploader.tenant_id)
-            || text(record, "/objectId")? != candidate.web_url
+            || object_id(text(record, "/objectId")?) != object_id(&candidate.web_url)
         {
             return Err("Microsoft upload history does not match this tenant and file.");
         }
@@ -414,6 +454,26 @@ mod tests {
         v["userId"] = json!(c.uploader.email);
         assert!(upload_actor(&[v], &c).is_err());
     }
+    /// A default document library is called "Shared Documents", and Graph
+    /// returns that path percent-encoded while the audit service records it
+    /// with a literal space. Comparing the raw strings never matched there.
+    #[test]
+    fn upload_actor_matches_object_ids_after_decoding_and_case_folding() {
+        let mut c = candidate();
+        c.web_url =
+            "https://Example.sharepoint.com/sites/Legal/Shared%20Documents/intake/file.pdf".into();
+        let mut v = event();
+        v["objectId"] =
+            json!("https://example.sharepoint.com/sites/Legal/Shared Documents/intake/file.pdf");
+        assert!(upload_actor(&[v], &c).is_ok());
+
+        // A genuinely different file in the same library still does not match.
+        let mut other = event();
+        other["objectId"] =
+            json!("https://example.sharepoint.com/sites/Legal/Shared Documents/intake/other.pdf");
+        assert!(upload_actor(&[other], &c).is_err());
+    }
+
     #[test]
     fn conflicting_upn_fields_do_not_authorize() {
         let mut v = event();
