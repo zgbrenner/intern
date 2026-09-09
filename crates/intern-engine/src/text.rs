@@ -218,9 +218,16 @@ pub fn split_sentences(value: &str, max_characters: usize) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut current = String::new();
     let mut sentence = String::new();
-    for character in value.chars() {
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
         sentence.push(character);
-        let terminal = matches!(character, '.' | '!' | '?' | ';' | '\n');
+        // A terminator only ends a sentence when whitespace follows it. The
+        // period inside "$1,248.00" is a decimal point, and splitting there
+        // put half of a fee in one block and half in the next, which is the
+        // separation distillation exists to prevent.
+        let terminal = character == '\n'
+            || (matches!(character, '.' | '!' | '?' | ';')
+                && characters.peek().is_none_or(|next| next.is_whitespace()));
         if !terminal {
             continue;
         }
@@ -278,6 +285,18 @@ mod tests {
     fn digit_masking_collapses_running_page_footers() {
         assert_eq!(digit_masked("Page 3 of 10"), digit_masked("Page 7 of 10"));
         assert_ne!(digit_masked("Page 3 of 10"), digit_masked("Exhibit A"));
+    }
+
+    /// A chunk boundary inside "$1,248.00" put half of a fee in one block
+    /// and half in the next, and a block that carries half a number is a
+    /// block that cannot support the fact it was kept for.
+    #[test]
+    fn a_decimal_amount_does_not_start_a_new_chunk() {
+        let paragraph = "The total fee is $1,248.00 and the balance is due. Another sentence here.";
+        let chunks = split_sentences(paragraph, 30);
+        assert!(chunks.len() > 1);
+        assert_eq!(chunks.concat(), paragraph);
+        assert!(chunks[0].contains("$1,248.00"), "{:?}", chunks);
     }
 
     #[test]
