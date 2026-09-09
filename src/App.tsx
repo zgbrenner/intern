@@ -9,6 +9,7 @@ import { SetupScreen } from './components/SetupScreen';
 import { Sidebar } from './components/Sidebar';
 import { ViewEmpty } from './components/ViewEmpty';
 import { GUIDE_URL } from './lib/bridge';
+import { humanizeReason } from './lib/reasons';
 import type { DesktopBridge, SelectionBoundary, SelectionResult } from './lib/bridge';
 import { createInMemoryBridge } from './lib/inMemoryBridge';
 import type { SetupEventSource } from './lib/tauriBridge';
@@ -24,7 +25,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const reviewTrigger = useRef<{ element: HTMLButtonElement; itemId: string } | null>(null);
   const focusRestoreVersion = useRef(0);
   const bridge = suppliedBridge ?? bridgeRef.current;
-  const { items, paused, setPaused, refresh, error: queueError, reconnect } = useQueue(bridge);
+  const { items, paused, setPaused, refresh, error: queueError, pipelineError, reconnect } = useQueue(bridge);
   const [view, setView] = useState<QueueView>('queue');
   const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string>();
@@ -273,6 +274,14 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
       {queueError && <div className="note note--failed" role="alert" aria-label="Queue connection error">
         <p>{queueError.kind === 'subscription' ? 'Live queue updates are unavailable.' : 'The queue could not be refreshed.'} {describeActionError(queueError.cause)} {items.length > 0 ? 'Showing the last loaded items.' : 'Queue contents may not be available yet.'}</p>
         <button type="button" disabled={actionPending} onClick={reconnect}>Retry queue connection</button>
+      </div>}
+      {/*
+        The queue stops itself when a failure would repeat for every document -
+        a model that cannot be reached, a key that was refused. Without this it
+        simply went quiet, and the reason it reported was thrown away.
+      */}
+      {pipelineError && <div className="note note--failed" role="alert" aria-label="Queue stopped">
+        <p>The queue stopped taking new work. {humanizeReason(pipelineError)}</p>
       </div>}
       {/*
         An empty queue is the first thing a new user sees, and it used to be

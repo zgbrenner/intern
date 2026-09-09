@@ -162,6 +162,20 @@ describe('TauriBridge', () => {
     expect(fake.unlisten.get('queue://progress')).toHaveBeenCalledTimes(1);
   });
 
+  // The queue pauses itself when a failure would repeat for every document -
+  // a refused key, a model that cannot be reached - and says so on the change
+  // event. Dropping that here left the app with a queue that had stopped and
+  // nothing on screen to explain it.
+  it('carries the reason the queue stopped through the changed event', async () => {
+    const fake = fakeTransport();
+    const seen = vi.fn();
+    await new TauriBridge(fake.transport).subscribeQueue(seen);
+
+    fake.listeners.get('queue://changed')?.({ event: 'queue://changed', id: 1, payload: { error: 'HOSTED_MODEL_UNAUTHORIZED' } });
+
+    expect(seen).toHaveBeenCalledWith({ type: 'changed', error: 'HOSTED_MODEL_UNAUTHORIZED' });
+  });
+
   it('rolls back the changed listener when progress subscription fails', async () => {
     const stopChanged = vi.fn();
     const transport: TauriTransport = {

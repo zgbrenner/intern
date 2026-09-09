@@ -81,11 +81,14 @@ interface HistoryEntryDto {
   description?: string | null;
 }
 
-interface ChangedPayload { paused?: boolean }
+// `error` is the code of a failure the queue could not work around - a model
+// that cannot be reached, a key that was refused - after which it stops taking
+// work rather than failing the whole backlog one document at a time.
+interface ChangedPayload { paused?: boolean; error?: string }
 interface ProgressPayload { itemId: string | number; stage: string; current: number; total?: number }
 
 export type QueueBridgeEvent =
-  | { type: 'changed'; paused?: boolean }
+  | { type: 'changed'; paused?: boolean; error?: string }
   | { type: 'progress'; itemId: string; stage: string; progress?: number };
 
 export interface QueueEventSource {
@@ -247,7 +250,11 @@ export class TauriBridge implements DesktopBridge, QueueEventSource, SetupEventS
 
   async subscribeQueue(listener: (event: QueueBridgeEvent) => void): Promise<() => void> {
     const changed = await this.transport.listen<ChangedPayload>('queue://changed', ({ payload }) => {
-      listener({ type: 'changed', ...(typeof payload.paused === 'boolean' ? { paused: payload.paused } : {}) });
+      listener({
+        type: 'changed',
+        ...(typeof payload.paused === 'boolean' ? { paused: payload.paused } : {}),
+        ...(typeof payload.error === 'string' && payload.error ? { error: payload.error } : {}),
+      });
     });
     let progress: () => void;
     try {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import type { SelectionBoundary } from '../../lib/bridge';
 import { createInMemoryBridge } from '../../lib/inMemoryBridge';
+import type { QueueBridgeEvent } from '../../lib/tauriBridge';
 import type { QueueItem } from '../../types';
 
 function deferred<T>() {
@@ -107,6 +108,28 @@ const ready: QueueItem = {
     await act(async () => { pending.resolve(); await pending.promise; });
     await screen.findByRole('button', { name: 'Select new.pdf' });
     expect(screen.getByRole('complementary', { name: 'Review item' })).toHaveTextContent('second.pdf');
+  });
+
+  // The queue pauses itself rather than failing a whole backlog one document
+  // at a time, and it names the reason on the change event. Until that reason
+  // was carried through the bridge the queue simply stopped with nothing on
+  // screen to say why.
+  it('says why the queue stopped, and stops saying it once the queue runs again', async () => {
+    let listener!: (event: QueueBridgeEvent) => void;
+    const bridge = {
+      ...createInMemoryBridge({ items: [ready] }),
+      subscribeQueue: async (next: typeof listener) => { listener = next; return () => {}; },
+    };
+    render(<App bridge={bridge} />);
+    await screen.findByRole('button', { name: 'Select agreement.pdf' });
+
+    act(() => listener({ type: 'changed', error: 'HOSTED_MODEL_UNAUTHORIZED' }));
+
+    expect(await screen.findByRole('alert', { name: 'Queue stopped' })).toHaveTextContent('The hosted service rejected the API key.');
+
+    act(() => listener({ type: 'changed', paused: false }));
+
+    await waitFor(() => expect(screen.queryByRole('alert', { name: 'Queue stopped' })).not.toBeInTheDocument());
   });
 
   it('gates same-tick rename submissions before React has rerendered', async () => {
