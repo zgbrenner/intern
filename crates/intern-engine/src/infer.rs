@@ -23,7 +23,7 @@
 
 use crate::distill::DocumentDigest;
 use crate::domain::{DateRole, PartyRelation};
-use crate::evidence::{date_match_positions, normalize, normalize_loosely};
+use crate::evidence::{date_match_positions, extract_stated_dates, normalize, normalize_loosely};
 
 /// Roles in the order one wins when a line carries several cues: the more
 /// specific reading first, so "notice of termination dated" reads as a notice
@@ -297,6 +297,21 @@ fn labels_another_date(window: &str) -> bool {
 
 fn window_before(normalized: &str, position: usize) -> String {
     let mut start = position.saturating_sub(CUE_WINDOW);
+    // A label governs the date that follows it and stops there. An invoice
+    // prints "Invoice Date: April 30, 2025    Due Date: May 30, 2025" on one
+    // line, and reading a fixed distance back from the second date reached
+    // the first date's label. A finished sentence is a boundary for the same
+    // reason: whatever it said was about its own date.
+    for other in extract_stated_dates(normalized) {
+        for found in date_match_positions(&other, normalized) {
+            if found < position && found > start {
+                start = found;
+            }
+        }
+    }
+    if let Some(stop) = normalized[start..position].rfind(". ") {
+        start += stop + ". ".len();
+    }
     while !normalized.is_char_boundary(start) {
         start -= 1;
     }
@@ -932,6 +947,26 @@ Due Date: May 30, 2025",
             infer_date_role(&digest, "2025-05-30", Some("Invoice")),
             None,
             "a due date is not the invoice's date"
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2025-04-30", Some("Invoice")),
+            Some(DateRole::Invoice)
+        );
+    }
+
+    /// An invoice prints both of its dates on one line. Reading a fixed
+    /// distance back from the second one reaches the first one's label, and
+    /// the due date came back labelled as the invoice date.
+    #[test]
+    fn a_label_governs_only_the_date_that_follows_it() {
+        let digest = digest_of(
+            "INVOICE INV-2048
+Invoice Date: April 30, 2025    Due Date: May 30, 2025",
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2025-05-30", Some("Invoice")),
+            None,
+            "the invoice date's label stops at the invoice date"
         );
         assert_eq!(
             infer_date_role(&digest, "2025-04-30", Some("Invoice")),
