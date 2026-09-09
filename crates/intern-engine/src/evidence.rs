@@ -48,7 +48,47 @@ pub fn digest_contains(digest: &DocumentDigest, excerpt: &str) -> bool {
         && digest
             .segments
             .iter()
-            .any(|segment| normalize(segment).contains(&excerpt))
+            .any(|segment| contains_whole(&normalize(segment), &excerpt))
+}
+
+/// True when `needle` occurs in `haystack` without a letter or a digit
+/// running straight into either end of it.
+///
+/// Plain substring matching made "John Smithson" evidence for "John Smith" -
+/// a different person - and "in order to ... form" evidence for an "Order
+/// Form". The boundary is only required where the needle itself ends in a
+/// word character, so a quote that starts or ends on punctuation still
+/// matches the way it reads.
+fn contains_whole(haystack: &str, needle: &str) -> bool {
+    let word_start = needle.chars().next().is_some_and(char::is_alphanumeric);
+    let word_end = needle
+        .chars()
+        .next_back()
+        .is_some_and(char::is_alphanumeric);
+    let mut from = 0;
+    while let Some(found) = haystack.get(from..).and_then(|rest| rest.find(needle)) {
+        let position = from + found;
+        let end = position + needle.len();
+        let before_is_word = word_start
+            && haystack[..position]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_alphanumeric);
+        let after_is_word = word_end
+            && haystack[end..]
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric);
+        if !before_is_word && !after_is_word {
+            return true;
+        }
+        from = position
+            + haystack[position..]
+                .chars()
+                .next()
+                .map_or(1, char::len_utf8);
+    }
+    false
 }
 
 /// `normalize`, minus the punctuation that typography and typing scatter
@@ -74,7 +114,7 @@ pub fn digest_contains_loosely(digest: &DocumentDigest, excerpt: &str) -> bool {
         && digest
             .segments
             .iter()
-            .any(|segment| normalize_loosely(segment).contains(&excerpt))
+            .any(|segment| contains_whole(&normalize_loosely(segment), &excerpt))
 }
 
 /// True when the quoted evidence both contains the claimed field value and is
@@ -306,6 +346,23 @@ mod tests {
             "between Acme and Vistage",
             "Northwind"
         ));
+    }
+
+    /// Plain substring matching made a document that only ever writes "John
+    /// Smithson" evidence for a filename that says "John Smith", which is a
+    /// different person and the one thing evidence checking exists to stop.
+    #[test]
+    fn a_name_that_is_only_a_prefix_of_the_documents_name_is_rejected() {
+        let digest = digest_of("This Notice is given to John Smithson of Acme Corporation.");
+        assert!(!digest_contains(&digest, "John Smith"));
+        assert!(!digest_contains_loosely(&digest, "John Smith"));
+        assert!(digest_contains(&digest, "John Smithson"));
+
+        // And a name the document really writes is still found beside
+        // punctuation, which is not a word character.
+        let digest = digest_of("by and between Acme Corporation (\"Acme\") and Vistage.");
+        assert!(digest_contains(&digest, "Acme"));
+        assert!(digest_contains_loosely(&digest, "Acme Corporation"));
     }
 
     #[test]

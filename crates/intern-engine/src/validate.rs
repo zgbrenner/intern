@@ -1037,9 +1037,11 @@ Countersigned June 2, 2023.
     /// invalid and the whole document went to review over a decimal point.
     #[test]
     fn a_decimal_amount_does_not_end_the_description() {
-        let document = format!("{DOCUMENT}
+        let document = format!(
+            "{DOCUMENT}
 The total fee is $248,000.00 payable on delivery.
-");
+"
+        );
         let mut candidate = proposal();
         candidate.description =
             "Statement of work for Acme Corporation covering the 2026 CRM implementation at a fee of $248,000.00."
