@@ -168,6 +168,10 @@ impl Drop for LeaseKeeper {
 pub const PARSER_TIMEOUT_SECONDS: u64 = 30 * 60;
 pub const MODEL_TIMEOUT_SECONDS: u64 = 15 * 60;
 
+/// How long a request that has already missed its deadline is given to
+/// notice its cancel before the queue stops waiting for it.
+const MODEL_CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The extraction boundary, as the queue sees it.
 pub use intern_engine::DocumentExtractor as WorkerBoundary;
 /// Extraction failures, as the queue sees them.
@@ -1388,8 +1392,17 @@ impl Pipeline {
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let canceled = model.cancel();
-                let _ = receiver.recv();
-                let _ = join.join();
+                // A request that has already missed its deadline is given a
+                // little longer to notice the cancel, and then left to finish
+                // on its own. Waiting on it without a deadline meant one model
+                // that honoured neither its deadline nor its cancel stopped
+                // the queue for as long as the process lived.
+                if receiver
+                    .recv_timeout(self.model_timeout.min(MODEL_CANCEL_GRACE))
+                    .is_ok()
+                {
+                    let _ = join.join();
+                }
                 match canceled {
                     Ok(()) => Err(ModelFailure::fatal("MODEL_TIMEOUT")),
                     Err(_) => Err(ModelFailure::fatal("MODEL_CANCEL_FAILED")),

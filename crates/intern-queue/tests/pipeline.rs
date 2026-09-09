@@ -1734,6 +1734,52 @@ fn failed_model_timeout_cancel_pauses_drain_until_request_is_terminal() {
     assert_eq!(model.calls.load(Ordering::SeqCst), 1);
 }
 
+/// A cancel the model refuses is still an answer; the request itself may
+/// never come back. The queue then waited on that request with no deadline
+/// at all, so one model that ignored both its deadline and its cancel stopped
+/// the queue for good.
+#[test]
+fn a_cancel_the_model_refuses_does_not_hold_the_queue_forever() {
+    let temp = tempdir().unwrap();
+    let path = source(temp.path(), "ignores-cancel.pdf");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(BlockingModel::new(false));
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&path, "ignores-hash");
+    let pipeline = Arc::new(
+        Pipeline::open(
+            temp.path().join("queue.sqlite3"),
+            worker,
+            model.clone(),
+            files,
+            Arc::new(RecordingEvents::default()),
+            SettingsStore::new(temp.path().join("settings.json")),
+        )
+        .unwrap()
+        .with_model_timeout(Duration::from_millis(20)),
+    );
+    pipeline.enqueue_files(&[path]).unwrap();
+    let running = Arc::clone(&pipeline);
+    let (done, finished) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let _ = done.send(running.run_until_idle());
+    });
+
+    model.wait_for_cancel();
+    // The cancel comes back refused, and the request behind it never returns.
+    model.release_cancel();
+
+    finished
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the queue gave up on a request that would not come back")
+        .unwrap();
+    assert!(pipeline.is_paused());
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(pipeline.list().unwrap()[0].status, QueueStatus::Queued);
+}
+
 #[test]
 fn shutdown_cancels_blocking_worker_before_waiting_for_pipeline_exit() {
     let temp = tempdir().unwrap();
