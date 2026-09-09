@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import { createInMemoryBridge } from '../../lib/inMemoryBridge';
@@ -48,6 +48,24 @@ describe('the spellings Intern has learned', () => {
     await waitFor(() => expect(houseRuleForget).toHaveBeenCalledWith('2'));
     await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(1));
     expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Vistage');
+  });
+
+  // Forgetting is instant and the row disappears, so a second click landing
+  // before React rerenders used to reach a rule that was already gone and
+  // report RULE_NOT_FOUND - an error about nothing, over a change that worked.
+  it('forgets a spelling once when the button is clicked twice quickly', async () => {
+    const base = createInMemoryBridge({ learnedRules: learned });
+    const houseRuleForget = vi.fn(base.houseRuleForget);
+    render(<App bridge={{ ...base, houseRuleForget }} />);
+    const dialog = await openSettings();
+    const list = await within(dialog).findByRole('list', { name: 'Learned spellings' });
+    const forget = within(within(list).getAllByRole('listitem')[0]).getByRole('button', { name: /Forget:/ });
+
+    act(() => { fireEvent.click(forget); fireEvent.click(forget); });
+
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(1));
+    expect(houseRuleForget).toHaveBeenCalledOnce();
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('reports a spelling that could not be changed and keeps the list', async () => {
