@@ -55,6 +55,21 @@ fn setup_gate_cancels_the_active_token_and_allows_a_fresh_resume_only_after_fini
 }
 
 #[test]
+fn cancel_after_setup_succeeded_is_a_no_op() {
+    let gate = SetupOperationGate::default();
+    let cancellation = gate.begin().unwrap();
+    // The operation has produced its result: the model is installed, started,
+    // and verified. A cancel arriving in the moment before the gate is
+    // released would otherwise stop the server that was just started and
+    // leave the interface saying the model is ready with nothing running.
+    gate.settle();
+    assert!(!gate.cancel());
+    assert!(!cancellation.is_canceled());
+    gate.finish();
+    assert!(!gate.cancel());
+}
+
+#[test]
 fn an_existing_model_file_is_validated_and_published_with_progress() {
     let temp = tempdir().unwrap();
     let model = temp.path().join("selected-model.gguf");

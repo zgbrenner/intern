@@ -551,6 +551,11 @@ impl SetupManager {
             .name("intern-model-setup".into())
             .spawn(move || {
                 let result = manager.install_and_start(source, &cancellation);
+                // The outcome is settled the moment the work returns, so a
+                // cancel racing the last few instructions of a successful
+                // setup cannot stop the model that was just started and
+                // verified.
+                manager.operation.settle();
                 let final_state = match result {
                     Ok(total) => (SetupStatus::Ready, total, None),
                     Err(error) if error.code == "MODEL_DOWNLOAD_CANCELED" => {
