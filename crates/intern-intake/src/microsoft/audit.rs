@@ -10,20 +10,74 @@ use reqwest::Url;
 use serde_json::{Value, json};
 use std::{collections::HashMap, sync::Mutex};
 
+const SEARCH_POLL_SECONDS: i64 = 30;
+const SEARCH_LIFETIME_SECONDS: i64 = 600;
+const MAX_SEARCHES: usize = 32;
+/// An accepted upload event is a fact about one revision of one item, not a
+/// reading that goes stale: the key it is filed under already names the
+/// tenant, the item, its ETag and its path, so an item that changes gets a
+/// different key and needs fresh evidence anyway. Keeping the fact for a day
+/// is what lets a document survive its own authorization checks — every
+/// pipeline stage asks again, and extraction, analysis and filing together
+/// take far longer than a poll interval.
+const ACCEPTED_RETENTION_SECONDS: i64 = 24 * 3600;
+const MAX_ACCEPTED: usize = 256;
+
+/// An audit search Microsoft has not finished yet.
 struct Search {
     id: String,
     next_poll: i64,
     expires_at: i64,
-    accepted: Option<Account>,
 }
+
+/// An upload event Microsoft has already supplied and this process accepted.
+struct Accepted {
+    actor: Account,
+    at: i64,
+}
+
+/// The two things worth remembering are on different clocks, so they are kept
+/// apart: pending searches are few, short-lived and capped because Microsoft
+/// caps them, while accepted evidence is the durable half and must never be
+/// evicted by a crowd of files that are still waiting.
+#[derive(Default)]
+struct Evidence {
+    searches: HashMap<String, Search>,
+    accepted: HashMap<String, Accepted>,
+}
+
+impl Evidence {
+    fn forget_stale(&mut self, now: i64) {
+        self.searches.retain(|_, search| search.expires_at > now);
+        self.accepted
+            .retain(|_, accepted| now - accepted.at < ACCEPTED_RETENTION_SECONDS);
+    }
+
+    fn remember(&mut self, key: String, actor: Account, now: i64) {
+        while self.accepted.len() >= MAX_ACCEPTED {
+            let Some(oldest) = self
+                .accepted
+                .iter()
+                .min_by_key(|(_, accepted)| accepted.at)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            self.accepted.remove(&oldest);
+        }
+        self.accepted.insert(key, Accepted { actor, at: now });
+    }
+}
+
 #[derive(Default)]
 pub struct AuditVerifier {
-    searches: Mutex<HashMap<String, Search>>,
+    evidence: Mutex<Evidence>,
 }
 impl AuditVerifier {
     pub fn clear(&self) {
-        if let Ok(mut searches) = self.searches.lock() {
-            searches.clear();
+        if let Ok(mut evidence) = self.evidence.lock() {
+            evidence.searches.clear();
+            evidence.accepted.clear();
         }
     }
     pub fn verify(
@@ -45,113 +99,110 @@ impl AuditVerifier {
             "{}|{}|{}|{}",
             candidate.uploader.tenant_id, candidate.list_item_id, candidate.etag, candidate.web_url
         );
-        let mut searches = self
-            .searches
+        let mut evidence = self
+            .evidence
             .lock()
             .map_err(|_| "Upload verification is unavailable.")?;
-        searches.retain(|_, search| search.expires_at > now);
-        if let Some(search) = searches.get_mut(&key) {
-            if let Some(account) = &search.accepted {
-                return Ok(account.clone());
-            }
+        evidence.forget_stale(now);
+        if let Some(accepted) = evidence.accepted.get(&key) {
+            return Ok(accepted.actor.clone());
+        }
+        let id = {
+            let Some(search) = evidence.searches.get_mut(&key) else {
+                if evidence.searches.len() >= MAX_SEARCHES {
+                    return Err("Other upload checks are still pending. This file remains held until a slot is available.".into());
+                }
+                let start = DateTime::<Utc>::from_timestamp(created.saturating_sub(5), 0)
+                    .ok_or("Upload time is invalid.")?
+                    .to_rfc3339_opts(SecondsFormat::Secs, true);
+                let end = DateTime::<Utc>::from_timestamp(now, 0)
+                    .ok_or("Verification time is invalid.")?
+                    .to_rfc3339_opts(SecondsFormat::Secs, true);
+                let body = json!({"displayName":"Intern upload identity verification","filterStartDateTime":start,"filterEndDateTime":end,"recordTypeFilters":["sharePointFileOperation","oneDrive"],"objectIdFilters":[candidate.web_url]});
+                let (_, response) = client.start_audit_query(&body)?;
+                let id = text(&response, "/id").map_err(str::to_owned)?;
+                if !is_guid(id) {
+                    return Err("Microsoft returned an invalid audit query identity.".into());
+                }
+                evidence.searches.insert(
+                    key,
+                    Search {
+                        id: id.into(),
+                        next_poll: now + SEARCH_POLL_SECONDS,
+                        expires_at: now + SEARCH_LIFETIME_SECONDS,
+                    },
+                );
+                return Err("Waiting for Microsoft's upload event. The file remains held while audit information becomes available.".into());
+            };
             if now < search.next_poll {
                 return Err("Waiting for Microsoft's upload-event verification. Nothing has been processed.".into());
             }
-            search.next_poll = now + 30;
-            let url = Url::parse(&format!(
-                "https://graph.microsoft.com/v1.0/security/auditLog/queries/{}",
-                search.id
-            ))
-            .map_err(|_| "Audit query is invalid.")?;
-            let (_, status) = client.metadata(url)?;
-            match status["status"].as_str() {
-                Some("succeeded") => {}
-                Some("running" | "notStarted") => {
-                    return Err(
-                        "Microsoft is still checking the upload event. The file remains held."
-                            .into(),
-                    );
-                }
-                _ => {
-                    search.expires_at = now;
-                    return Err(
-                        "Microsoft could not finish upload verification. The file remains held."
-                            .into(),
-                    );
-                }
-            }
-            let records_path = format!("/v1.0/security/auditLog/queries/{}/records", search.id);
-            let mut next = Some(
-                Url::parse(&format!("https://graph.microsoft.com{records_path}"))
-                    .map_err(|_| "Audit query is invalid.")?,
-            );
-            let mut records = Vec::new();
-            for _ in 0..4 {
-                let Some(url) = next.take() else {
-                    break;
-                };
-                if url.scheme() != "https"
-                    || url.host_str() != Some("graph.microsoft.com")
-                    || url.path() != records_path
-                    || !url.username().is_empty()
-                    || url.password().is_some()
-                    || url.fragment().is_some()
-                {
-                    return Err(
-                        "Microsoft returned an unexpected audit page. The file remains held."
-                            .into(),
-                    );
-                }
-                let (_, page) = client.metadata(url)?;
-                let values = page["value"]
-                    .as_array()
-                    .ok_or("Microsoft audit records were incomplete.")?;
-                records.extend(values.iter().cloned());
-                if records.len() > 1024 {
-                    return Err(
-                        "Upload history is too large to verify safely. The file remains held."
-                            .into(),
-                    );
-                }
-                if let Some(link) = page["@odata.nextLink"].as_str() {
-                    next = Some(Url::parse(link).map_err(|_| "Microsoft audit page is invalid.")?);
-                }
-            }
-            if next.is_some() {
+            search.next_poll = now + SEARCH_POLL_SECONDS;
+            search.id.clone()
+        };
+        let url = Url::parse(&format!(
+            "https://graph.microsoft.com/v1.0/security/auditLog/queries/{id}"
+        ))
+        .map_err(|_| "Audit query is invalid.")?;
+        let (_, status) = client.metadata(url)?;
+        match status["status"].as_str() {
+            Some("succeeded") => {}
+            Some("running" | "notStarted") => {
                 return Err(
-                    "Microsoft upload history is incomplete. The file remains held.".into(),
+                    "Microsoft is still checking the upload event. The file remains held.".into(),
                 );
             }
-            let actor = upload_actor(&records, candidate).map_err(str::to_owned)?;
-            search.accepted = Some(actor.clone());
-            search.expires_at = now + 60;
-            return Ok(actor);
+            _ => {
+                evidence.searches.remove(&key);
+                return Err(
+                    "Microsoft could not finish upload verification. The file remains held.".into(),
+                );
+            }
         }
-        if searches.len() >= 32 {
-            return Err("Other upload checks are still pending. This file remains held until a slot is available.".into());
-        }
-        let start = DateTime::<Utc>::from_timestamp(created.saturating_sub(5), 0)
-            .ok_or("Upload time is invalid.")?
-            .to_rfc3339_opts(SecondsFormat::Secs, true);
-        let end = DateTime::<Utc>::from_timestamp(now, 0)
-            .ok_or("Verification time is invalid.")?
-            .to_rfc3339_opts(SecondsFormat::Secs, true);
-        let body = json!({"displayName":"Intern upload identity verification","filterStartDateTime":start,"filterEndDateTime":end,"recordTypeFilters":["sharePointFileOperation","oneDrive"],"objectIdFilters":[candidate.web_url]});
-        let (_, response) = client.start_audit_query(&body)?;
-        let id = text(&response, "/id").map_err(str::to_owned)?;
-        if !is_guid(id) {
-            return Err("Microsoft returned an invalid audit query identity.".into());
-        }
-        searches.insert(
-            key,
-            Search {
-                id: id.into(),
-                next_poll: now + 30,
-                expires_at: now + 600,
-                accepted: None,
-            },
+        let records_path = format!("/v1.0/security/auditLog/queries/{id}/records");
+        let mut next = Some(
+            Url::parse(&format!("https://graph.microsoft.com{records_path}"))
+                .map_err(|_| "Audit query is invalid.")?,
         );
-        Err("Waiting for Microsoft's upload event. The file remains held while audit information becomes available.".into())
+        let mut records = Vec::new();
+        for _ in 0..4 {
+            let Some(url) = next.take() else {
+                break;
+            };
+            if url.scheme() != "https"
+                || url.host_str() != Some("graph.microsoft.com")
+                || url.path() != records_path
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.fragment().is_some()
+            {
+                return Err(
+                    "Microsoft returned an unexpected audit page. The file remains held.".into(),
+                );
+            }
+            let (_, page) = client.metadata(url)?;
+            let values = page["value"]
+                .as_array()
+                .ok_or("Microsoft audit records were incomplete.")?;
+            records.extend(values.iter().cloned());
+            if records.len() > 1024 {
+                return Err(
+                    "Upload history is too large to verify safely. The file remains held.".into(),
+                );
+            }
+            if let Some(link) = page["@odata.nextLink"].as_str() {
+                next = Some(Url::parse(link).map_err(|_| "Microsoft audit page is invalid.")?);
+            }
+        }
+        if next.is_some() {
+            return Err("Microsoft upload history is incomplete. The file remains held.".into());
+        }
+        let actor = upload_actor(&records, candidate).map_err(str::to_owned)?;
+        // The search has done its job; freeing the slot lets the next file
+        // waiting on evidence take it.
+        evidence.searches.remove(&key);
+        evidence.remember(key, actor.clone(), now);
+        Ok(actor)
     }
 }
 
@@ -242,7 +293,19 @@ pub fn upload_actor(records: &[Value], candidate: &Candidate) -> Result<Account,
 
 #[cfg(test)]
 mod tests {
+    use super::super::{
+        auth::{AuthConfig, TokenStore},
+        transport::{Reply, Transport},
+    };
     use super::*;
+    use crate::coordination::Clock;
+    use std::{
+        collections::VecDeque,
+        sync::{
+            Arc,
+            atomic::{AtomicI64, Ordering},
+        },
+    };
     fn candidate() -> Candidate {
         Candidate {
             item_id: "item".into(),
@@ -357,5 +420,127 @@ mod tests {
         v["userId"] = json!("zack@example.test");
         v["userPrincipalName"] = json!("john@example.test");
         assert!(upload_actor(&[v], &candidate()).is_err());
+    }
+
+    /// Scripted replies in the order the client will ask for them. An
+    /// unscripted request is an error, which is what makes "no further
+    /// Microsoft call was made" an assertion rather than a hope.
+    struct Replies(Mutex<VecDeque<Reply>>);
+    impl Transport for Replies {
+        fn request(
+            &self,
+            _url: Url,
+            _form: Option<&[(&str, &str)]>,
+            _bearer: Option<&str>,
+        ) -> Result<Reply, String> {
+            self.0
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or("Unexpected request".into())
+        }
+        fn audit_query(&self, _body: &Value, _bearer: &str) -> Result<Reply, String> {
+            self.0
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or("Unexpected audit request".into())
+        }
+    }
+    struct Time(AtomicI64);
+    impl Clock for Time {
+        fn now(&self) -> i64 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+    #[derive(Default)]
+    struct Tokens(Mutex<HashMap<String, String>>);
+    impl TokenStore for Tokens {
+        fn get(&self, key: &str) -> Result<Option<String>, String> {
+            Ok(self.0.lock().unwrap().get(key).cloned())
+        }
+        fn set(&self, key: &str, value: &str) -> Result<(), String> {
+            self.0.lock().unwrap().insert(key.into(), value.into());
+            Ok(())
+        }
+        fn delete(&self, key: &str) -> Result<(), String> {
+            self.0.lock().unwrap().remove(key);
+            Ok(())
+        }
+    }
+    fn reply(body: Value) -> Reply {
+        Reply {
+            status: 200,
+            body,
+            retry_after: 60,
+        }
+    }
+    fn base_time() -> i64 {
+        DateTime::parse_from_rfc3339(&candidate().created_at)
+            .unwrap()
+            .timestamp()
+            + 120
+    }
+    /// A signed-in client whose remaining replies are the audit conversation.
+    fn connected(audit: Vec<Reply>) -> MicrosoftClient {
+        let uploader = candidate().uploader;
+        let auth = AuthConfig {
+            tenant_id: uploader.tenant_id.clone(),
+            client_id: "cccccccc-cccc-cccc-cccc-cccccccccccc".into(),
+        };
+        let mut queue = VecDeque::from(vec![
+            reply(
+                json!({"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://microsoft.com/devicelogin","expires_in":900,"interval":5}),
+            ),
+            reply(
+                json!({"token_type":"Bearer","access_token":"access","refresh_token":"refresh","expires_in":86400}),
+            ),
+            reply(
+                json!({"id":uploader.id,"displayName":uploader.display_name,"mail":uploader.email,"userPrincipalName":uploader.user_principal_name}),
+            ),
+        ]);
+        queue.extend(audit);
+        let clock = Arc::new(Time(AtomicI64::new(base_time())));
+        let client = MicrosoftClient::with_transport(
+            auth.clone(),
+            Arc::new(Tokens::default()),
+            Arc::new(Replies(Mutex::new(queue))),
+            clock.clone(),
+        );
+        client.begin(auth).unwrap();
+        clock.0.fetch_add(5, Ordering::SeqCst);
+        client.poll().unwrap();
+        client
+    }
+    fn audit_conversation() -> Vec<Reply> {
+        vec![
+            reply(json!({"id":"11111111-1111-1111-1111-111111111111"})),
+            reply(json!({"status":"succeeded"})),
+            reply(json!({"value":[event()]})),
+        ]
+    }
+
+    /// Extraction, analysis and filing take far longer than one poll interval,
+    /// and every pipeline stage authorizes again. Evidence Microsoft has
+    /// already supplied must survive that, or a document that takes more than a
+    /// minute is thrown back into review by its own second check.
+    #[test]
+    fn accepted_upload_evidence_outlives_the_processing_window() {
+        let client = connected(audit_conversation());
+        let verifier = AuditVerifier::default();
+        let started = base_time();
+        assert!(
+            verifier.verify(&client, &candidate(), started).is_err(),
+            "the first check only starts the audit search"
+        );
+        let actor = verifier
+            .verify(&client, &candidate(), started + 30)
+            .expect("the completed search establishes the uploader");
+        assert_eq!(
+            verifier
+                .verify(&client, &candidate(), started + 3600)
+                .expect("accepted evidence must still stand an hour later"),
+            actor
+        );
     }
 }

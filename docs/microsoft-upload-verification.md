@@ -115,9 +115,13 @@ event availability of **60 to 90 minutes**, without a guaranteed delivery time.
 Intern leaves a document held until evidence arrives. Searches are bounded to
 32 pending entries, polled no faster than 30 seconds, recreated after ten
 minutes if unresolved, and accepted only with complete pagination (at most
-four pages/1,024 records). Accepted event evidence is cached in memory for
-60 seconds and bound to tenant/item/ETag/path; metadata and local-byte checks
-still run at each authorization boundary. HTTP requests are bounded to ten
+four pages/1,024 records). Accepted event evidence is bound to
+tenant/item/ETag/path and kept in memory for a day, so a document that takes
+longer than a poll interval to extract, analyse and file is not thrown back
+into review by its own later authorization checks; a changed revision has a
+different binding and needs its own evidence, and disconnecting or re-pairing
+discards all of it. Metadata and local-byte checks still run at each
+authorization boundary. HTTP requests are bounded to ten
 seconds and 256 KiB; retries respect throttling. Oversized results remain held.
 The seven-day admission window is this pilot's policy, not a claim about
 Graph audit retention limits.
