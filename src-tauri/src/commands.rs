@@ -1111,6 +1111,26 @@ impl AppState {
     }
 }
 
+/// What a second launch of Intern does.
+///
+/// Intern is one process per machine: a second one would start a second local
+/// model, a second intake watcher, and a second tray against the same queue
+/// database, and a sign-in autostart launch followed by a click on the
+/// shortcut is an ordinary way to end up with both. The single-instance
+/// plugin ends the second process and hands its command line here instead.
+pub fn second_instance_launched(app: &AppHandle, arguments: Vec<String>, _directory: String) {
+    if second_launch_shows_window(&arguments) {
+        crate::tray::show_main_window(app);
+    }
+}
+
+/// Whether a second launch means "show me the window". Someone who clicked
+/// the icon, the shortcut, or a document wants it; a sign-in autostart launch
+/// asked for the tray and must not take the window from whatever is using it.
+fn second_launch_shows_window(arguments: &[String]) -> bool {
+    !arguments.iter().any(|argument| argument == "--minimized")
+}
+
 /// The explicit quit path, used by the tray's "Quit Intern" item: shut the
 /// pipeline (and with it the local model process) down deliberately, then
 /// leave without starting window teardown - the same shape as the close-time
@@ -2357,6 +2377,26 @@ mod intake_tests {
         ));
         // Clock skew across machines: a future stamp still counts as active.
         assert!(presence_active(now + 60, now));
+    }
+}
+
+#[cfg(test)]
+mod second_instance_tests {
+    use super::second_launch_shows_window;
+
+    #[test]
+    fn a_second_launch_opens_the_window_unless_it_asked_for_the_tray() {
+        assert!(second_launch_shows_window(&["intern.exe".to_owned()]));
+        assert!(second_launch_shows_window(&[
+            "intern.exe".to_owned(),
+            "C:/drop/scan.pdf".to_owned()
+        ]));
+        // A sign-in autostart launch asked for the tray, so it must not take
+        // the window from whatever is already using it.
+        assert!(!second_launch_shows_window(&[
+            "intern.exe".to_owned(),
+            "--minimized".to_owned()
+        ]));
     }
 }
 
