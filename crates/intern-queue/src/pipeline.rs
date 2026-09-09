@@ -284,7 +284,18 @@ impl FileActions for CoreFileActions {
     }
 
     fn apply(&self, item: &QueueItem, destination: &Path) -> PipelineResult<()> {
-        self.store.begin_applying(item.id, QueueStatus::Ready)?;
+        self.store
+            .begin_applying(item.id, QueueStatus::Ready)
+            .map_err(|error| match error.code() {
+                // The queue is working on another document, so the rename is
+                // early rather than wrong. Saying so distinctly is what lets
+                // the caller wait instead of blaming the document.
+                ErrorCode::StateConflict => PipelineError::new(
+                    APPLY_DEFERRED,
+                    "another document is being processed; the rename waits for the queue",
+                ),
+                _ => error.into(),
+            })?;
         let lease = LeaseKeeper::start(Arc::clone(&self.store), item.id, LEASE_RENEWAL_INTERVAL)?;
         let result = self
             .applier
@@ -483,6 +494,11 @@ pub struct ProposalRecord {
     /// Such a document waits for a person rather than being filed twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub near_duplicate_of: Option<String>,
+    /// Whether a person has approved this name. An approval the queue was too
+    /// busy to act on at once waits here, so the scheduler files the document
+    /// when it is free even with automatic renaming switched off.
+    #[serde(default)]
+    pub approved: bool,
 }
 
 /// The review reason for a document whose text is nearly the text of one
@@ -564,6 +580,17 @@ pub struct Pipeline {
     model_timeout: std::time::Duration,
     lease_renewal_interval: std::time::Duration,
     run_lock: Mutex<()>,
+}
+
+/// Which waiting renames one scheduler pass applies.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ReadyScope {
+    /// Everything owed: every ready document when automatic renaming is on,
+    /// and every approval still waiting. What opens a drain.
+    Everything,
+    /// Only the approvals the queue was too busy to act on when they were
+    /// made. What runs between documents.
+    ApprovalsOnly,
 }
 
 #[derive(Clone, Copy)]
@@ -832,11 +859,15 @@ impl Pipeline {
             .run_lock
             .lock()
             .map_err(|_| PipelineError::new("STATE_CONFLICT", "pipeline lock is unavailable"))?;
-        self.apply_pending_automatic_ready()?;
+        self.apply_pending_ready(ReadyScope::Everything)?;
         while !self.paused.load(Ordering::SeqCst) {
             if !self.run_next_inner()? {
                 break;
             }
+            // Between documents, not only before the first: an approval made
+            // while the queue was working could not be applied then, and this
+            // is the next moment the store will let it through.
+            self.apply_pending_ready(ReadyScope::ApprovalsOnly)?;
         }
         Ok(())
     }
@@ -847,7 +878,7 @@ impl Pipeline {
             .lock()
             .map_err(|_| PipelineError::new("STATE_CONFLICT", "pipeline lock is unavailable"))?;
         if !self.paused.load(Ordering::SeqCst) {
-            self.apply_pending_automatic_ready()?;
+            self.apply_pending_ready(ReadyScope::Everything)?;
             let _ = self.run_next_inner()?;
         }
         Ok(())
@@ -1060,6 +1091,7 @@ impl Pipeline {
             revision: 1,
             house_rules,
             near_duplicate_of,
+            approved: false,
         };
         let next = match record.status {
             ProposalStatus::Ready => QueueStatus::Ready,
@@ -1103,11 +1135,15 @@ impl Pipeline {
         Ok(true)
     }
 
-    fn apply_pending_automatic_ready(&self) -> PipelineResult<()> {
+    /// Applies the renames the scheduler owes: every ready document when
+    /// automatic renaming is on, and every document a person approved while
+    /// the queue was busy elsewhere, whether it is on or not.
+    fn apply_pending_ready(&self, scope: ReadyScope) -> PipelineResult<()> {
         if self.paused.load(Ordering::SeqCst) {
             return Ok(());
         }
         let ready = self
+            .store
             .list()?
             .into_iter()
             .filter(|item| item.status == QueueStatus::Ready)
@@ -1116,25 +1152,22 @@ impl Pipeline {
             return Ok(());
         }
         let settings = self.settings.load()?;
-        if !settings.automatic_rename {
-            return Ok(());
-        }
+        let automatic = settings.automatic_rename && scope == ReadyScope::Everything;
         for item in ready {
             if self.paused.load(Ordering::SeqCst) {
                 break;
             }
-            let Some(proposal) = item.proposal else {
-                self.repository
-                    .mark_needs_review(item.id, "PROPOSAL_MISSING")?;
+            let Some(proposal) = self.repository.load_proposal(item.id)? else {
+                if automatic {
+                    self.repository
+                        .mark_needs_review(item.id, "PROPOSAL_MISSING")?;
+                }
                 continue;
             };
-            let queue_item = self
-                .store
-                .list()?
-                .into_iter()
-                .find(|candidate| candidate.id == item.id)
-                .ok_or_else(|| PipelineError::new("ITEM_NOT_FOUND", "queue item does not exist"))?;
-            let _ = self.apply_if_unchanged(&queue_item, &proposal.filename, &settings);
+            if !automatic && !proposal.approved {
+                continue;
+            }
+            let _ = self.apply_if_unchanged(&item, &proposal.filename, &settings);
         }
         Ok(())
     }
@@ -1425,6 +1458,14 @@ impl Pipeline {
             return Err(failure);
         }
         if let Err(error) = self.files.apply(item, &target.join(filename)) {
+            if error.code == APPLY_DEFERRED {
+                // Nothing is wrong with this document: the queue was busy with
+                // another one. The name a person approved is durable in the
+                // proposal, so the item stays ready and the scheduler applies
+                // it between documents rather than sending it to review.
+                self.events.queue_changed();
+                return Ok(());
+            }
             // Core file operations journal ambiguous failures in Applying. Try to settle
             // them now; the scheduler also retries reconciliation periodically.
             let _ = self.files.reconcile(item);
@@ -2135,6 +2176,9 @@ impl PipelineRepository {
         if !record.reasons.iter().any(|entry| entry == reason) {
             record.reasons.push(reason.to_owned());
         }
+        // A document waiting for a person is no longer a document waiting to
+        // be filed, whatever was approved before.
+        record.approved = false;
         record.revision += 1;
         let mut connection = self.lock()?;
         let transaction = connection.transaction().map_err(database_error)?;
@@ -2222,6 +2266,7 @@ impl PipelineRepository {
         record.description = description.trim().to_owned();
         record.status = ProposalStatus::Ready;
         record.reasons.clear();
+        record.approved = true;
         record.revision += 1;
         let json = serde_json::to_string(&record)
             .map_err(|_| PipelineError::new("INVALID_DATA", "proposal could not be stored"))?;
@@ -2424,6 +2469,11 @@ fn model_error_code(error: &ModelFailure) -> ErrorCode {
 
 /// The review reason and error code for a rename that carries no date.
 pub const DATE_REQUIRED: &str = "DATE_REQUIRED";
+
+/// What an apply reports when the queue is busy with another document. Not a
+/// failure of the rename: the item stays ready and the scheduler applies it
+/// as soon as it is free.
+const APPLY_DEFERRED: &str = "APPLY_DEFERRED";
 
 /// The date a filename begins with - `YYYY-MM-DD`, a real calendar date,
 /// standing on its own before whatever follows - or `None`.

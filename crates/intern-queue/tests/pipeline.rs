@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use intern_core::{ErrorCode, OperationReceipt, QueueItem, QueueStatus};
+use intern_core::{ErrorCode, OperationReceipt, QueueItem, QueueStatus, QueueStore};
 use intern_engine::{
     AnalysisTelemetry, DateRole, DigestBudget, DocumentAnalysis, DocumentSource, Evidence,
     ExtractProgress, ModelProposal, PageOrigin, ParserWarning, PartyRelation, ProposalStatus,
@@ -1238,6 +1238,97 @@ fn an_undone_rename_is_not_reapplied_automatically() {
     );
     assert!(path.exists(), "the document stays where the undo put it");
     assert!(!destination.exists());
+}
+
+/// A person who clicks Approve while the queue is working on another document
+/// must end up with the document filed under the name they typed, not with an
+/// error they never asked about and a document pushed into review.
+#[test]
+fn approving_while_another_document_is_analyzing_files_it_when_the_queue_is_free() {
+    let temp = tempdir().unwrap();
+    let inbox = temp.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let reviewed = source(&inbox, "reviewed.pdf");
+    let other = source(&inbox, "other.pdf");
+    let database = temp.path().join("busy-queue.sqlite3");
+    let worker = Arc::new(FakeWorker::new(vec![Ok(parsed(
+        "Employment Agreement signed April 12, 2024 by John Smith and Acme Corporation.",
+    ))]));
+    let model = Arc::new(FakeModel::new(vec![Ok(proposal(0.94, false))]));
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings.save(&AppSettings::default()).unwrap();
+    let pipeline = Pipeline::with_local_files(
+        database.clone(),
+        worker,
+        model,
+        Arc::new(RecordingEvents::default()),
+        settings,
+    )
+    .unwrap();
+
+    pipeline
+        .enqueue_files(std::slice::from_ref(&reviewed))
+        .unwrap();
+    pipeline.run_until_idle().unwrap();
+    let waiting = pipeline.list().unwrap().pop().unwrap();
+    assert_eq!(waiting.status, QueueStatus::Ready);
+
+    // A second document, claimed the way a running queue claims one: the
+    // store refuses any apply while it is being processed.
+    pipeline
+        .enqueue_files(std::slice::from_ref(&other))
+        .unwrap();
+    let busy = QueueStore::open(&database).unwrap();
+    let claimed = busy.claim_next().unwrap().unwrap();
+    assert_eq!(claimed.status, QueueStatus::Extracting);
+
+    let approved = "2024-04-12 Employment Agreement between John Smith and Acme Corp.pdf";
+    pipeline
+        .approve(waiting.id, approved, "A sentence about the agreement.")
+        .unwrap();
+    let deferred = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == waiting.id)
+        .unwrap();
+    assert_eq!(
+        deferred.status,
+        QueueStatus::Ready,
+        "a busy queue is not a reason to review the document again"
+    );
+    assert_eq!(deferred.proposal.as_ref().unwrap().filename, approved);
+
+    // The other document leaves the queue, and the approval that was waiting
+    // is applied under the name the reviewer typed.
+    busy.transition(
+        claimed.id,
+        QueueStatus::Extracting,
+        QueueStatus::Canceled,
+        None,
+    )
+    .unwrap();
+    drop(busy);
+    pipeline.run_until_idle().unwrap();
+
+    let filed = pipeline
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == waiting.id)
+        .unwrap();
+    assert_eq!(filed.status, QueueStatus::Completed);
+    assert_eq!(
+        filed
+            .receipt
+            .unwrap()
+            .destination
+            .file_name()
+            .unwrap()
+            .to_string_lossy(),
+        approved
+    );
+    assert!(inbox.join(approved).exists());
 }
 
 /// A year of contracts should not become one folder of a thousand files. The

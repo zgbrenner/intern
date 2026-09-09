@@ -292,6 +292,12 @@ document back and leaves it waiting for a person, not ready to file: ready is
 the state the scheduler files from, and with automatic renaming on the same
 name would be applied again within the minute, undoing the undo.
 
+Only one document is worked on at a time, so an approval made while the queue
+is busy cannot be applied on the spot. It is remembered on the proposal and
+applied by the scheduler between documents, under the name the reviewer typed
+- a busy queue is not something wrong with the document, and never sends it to
+review.
+
 ### House style
 
 The document's words are not always the words a person files under.
