@@ -968,12 +968,15 @@ impl Pipeline {
                         && self.worker.restart().is_err();
                     self.store
                         .record_processing_failure(item.id, ErrorCode::IoError)?;
-                    if restart_failed
-                        && let Some(reclaimed) = self.store.claim_next()?
-                        && reclaimed.id == item.id
-                    {
-                        self.store
-                            .record_processing_failure(item.id, ErrorCode::IoError)?;
+                    // A worker that will not come back cannot read this
+                    // document on a second attempt either, so the failure is
+                    // counted twice and the document fails now rather than
+                    // stalling the queue again. Counted against this item by
+                    // id: reclaiming through the queue would claim whichever
+                    // document is next in line, which is not always this one,
+                    // and leave that one extracting under nobody's lease.
+                    if restart_failed {
+                        self.repository.record_recovered_failure(item.id)?;
                     }
                     self.events.queue_changed();
                     return Ok(true);
@@ -2215,6 +2218,10 @@ impl PipelineRepository {
         }
     }
 
+    /// Counts one processing failure against an item that is back in the
+    /// queue and owned by nobody - interrupted by a crash, or given up on
+    /// because the worker that was reading it cannot be restarted - and
+    /// fails it once it has failed twice.
     fn record_recovered_failure(&self, id: i64) -> PipelineResult<()> {
         let changed = self
             .lock()?

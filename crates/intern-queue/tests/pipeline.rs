@@ -175,6 +175,50 @@ impl WorkerBoundary for FakeWorker {
     }
 }
 
+/// A worker that holds its first request open until a test releases it, and
+/// then reports a crash it cannot be restarted from - every time.
+#[derive(Default)]
+struct CrashingWorker {
+    started: AtomicBool,
+    gate: (Mutex<bool>, Condvar),
+}
+
+impl CrashingWorker {
+    fn release(&self) {
+        *self.gate.0.lock().unwrap() = true;
+        self.gate.1.notify_all();
+    }
+}
+
+impl WorkerBoundary for CrashingWorker {
+    fn extract(
+        &self,
+        _request_id: &str,
+        _path: &Path,
+        _progress: &mut dyn FnMut(ExtractProgress),
+    ) -> Result<DocumentSource, WorkerFailure> {
+        self.started.store(true, Ordering::SeqCst);
+        let (lock, wake) = &self.gate;
+        let mut released = lock.lock().unwrap();
+        while !*released {
+            released = wake.wait(released).unwrap();
+        }
+        Err(WorkerFailure::crashed())
+    }
+
+    fn cancel(&self, _request_id: &str) -> Result<(), WorkerFailure> {
+        Ok(())
+    }
+
+    fn restart(&self) -> Result<(), WorkerFailure> {
+        Err(WorkerFailure::new("WORKER_RESTART_FAILED", false, false))
+    }
+
+    fn shutdown(&self) -> Result<(), WorkerFailure> {
+        Ok(())
+    }
+}
+
 struct FakeModel {
     responses: Mutex<VecDeque<Result<ModelProposal, ModelFailure>>>,
     calls: AtomicUsize,
@@ -657,6 +701,73 @@ fn failed_item_does_not_block_the_next_and_worker_restarts_only_once() {
     assert_eq!(items[0].status, QueueStatus::Failed);
     assert_eq!(items[0].error_code, Some(ErrorCode::IoError));
     assert_eq!(items[1].status, QueueStatus::Ready);
+}
+
+/// A crash the worker cannot be restarted from used to reclaim whatever the
+/// queue offered next, which is not always the document that crashed. Another
+/// waiting document was claimed instead and left extracting, under a lease
+/// nothing would renew and recovery would not take back while the app kept
+/// running: the document was simply gone.
+#[test]
+fn worker_crash_with_failed_restart_does_not_strand_another_queued_item() {
+    let temp = tempdir().unwrap();
+    let waiting = source(temp.path(), "waiting.pdf");
+    let crashing = source(temp.path(), "crashing.pdf");
+    let worker = Arc::new(CrashingWorker::default());
+    let files = Arc::new(FakeFiles::default());
+    files.trust(&waiting, "waiting-hash");
+    files.trust(&crashing, "crashing-hash");
+    let settings = SettingsStore::new(temp.path().join("settings.json"));
+    settings.save(&AppSettings::default()).unwrap();
+    let pipeline = Arc::new(
+        Pipeline::open(
+            temp.path().join("queue.sqlite3"),
+            Arc::clone(&worker) as Arc<dyn WorkerBoundary>,
+            Arc::new(FakeModel::new(vec![])),
+            files,
+            Arc::new(RecordingEvents::default()),
+            settings,
+        )
+        .unwrap(),
+    );
+    let enqueued = pipeline
+        .enqueue_files(&[waiting.clone(), crashing.clone()])
+        .unwrap();
+    let waiting_id = enqueued[0].id;
+    let crashing_id = enqueued[1].id;
+    // The first document is out of the queue while the second one runs, and a
+    // person puts it back - Retry - while that one is crashing.
+    pipeline.cancel(waiting_id).unwrap();
+
+    let running = Arc::clone(&pipeline);
+    let join = thread::spawn(move || running.run_until_idle());
+    while !worker.started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    pipeline.retry(waiting_id).unwrap();
+    worker.release();
+    join.join().unwrap().unwrap();
+
+    let items = pipeline.list().unwrap();
+    assert!(
+        items
+            .iter()
+            .all(|item| !matches!(item.status, QueueStatus::Extracting)),
+        "no document is left claimed by a worker that is gone: {items:?}"
+    );
+    let status = |id: i64| {
+        items
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.status)
+            .unwrap()
+    };
+    assert_eq!(
+        status(crashing_id),
+        QueueStatus::Failed,
+        "the document that crashed the worker is the one that fails"
+    );
+    assert_eq!(status(waiting_id), QueueStatus::Failed);
 }
 
 #[test]
