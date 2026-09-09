@@ -236,10 +236,17 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
   }, [bridge]);
   // Forgetting or using a spelling takes effect at once, like removing a
   // stored key: it is a fact about the queue, not a draft of the settings.
-  const changeRule = async (operation: Promise<void>) => {
+  // A ref rather than state, because the row disappears the moment the change
+  // lands and a second click arriving before React rerenders would otherwise
+  // reach a rule that is already gone and report RULE_NOT_FOUND.
+  const ruleInFlight = useRef(false);
+  const changeRule = async (run: () => Promise<void>) => {
+    if (ruleInFlight.current) return;
+    ruleInFlight.current = true;
     setRulesError('');
-    try { await operation; setRules(await bridge.houseRulesList()); }
+    try { await run(); setRules(await bridge.houseRulesList()); }
     catch (error) { setRulesError(ruleFailure(error)); }
+    finally { ruleInFlight.current = false; }
   };
   const browse = async (apply: (path: string) => void) => {
     const folder = await selection?.pickFolder();
@@ -407,8 +414,8 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
             <span className="rule-change"><q>{rule.from}</q> written as <strong>{rule.to}</strong></span>
             <span className="rule-state">{rule.active ? 'In use' : 'Seen once · in use after one more edit'}</span>
             <span className="rule-actions">
-              {!rule.active && <button type="button" aria-label={`Use now: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(bridge.houseRuleUse(rule.id))}>Use now</button>}
-              <button type="button" aria-label={`Forget: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(bridge.houseRuleForget(rule.id))}>Forget</button>
+              {!rule.active && <button type="button" aria-label={`Use now: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(() => bridge.houseRuleUse(rule.id))}>Use now</button>}
+              <button type="button" aria-label={`Forget: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(() => bridge.houseRuleForget(rule.id))}>Forget</button>
             </span>
           </li>)}
         </ul>}
