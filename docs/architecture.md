@@ -352,6 +352,20 @@ Threads are half the logical processors on purpose. llama.cpp scales with
 physical cores rather than SMT threads, and taking every core makes the rest of
 Windows stutter — the product's premise is that it runs while you work.
 
+The server is started once and kept warm between documents, so how it stops
+matters as much as how it starts: it holds well over a gigabyte, and a second
+copy started by the next launch would hold another. Stopping it is not left to
+`Drop`. Every child Intern spawns — the model server and `intern-worker` both —
+joins a Windows job object marked kill-on-close, whose last handle is Intern's
+own and is closed by the kernel however Intern ends. A crash, a panic, and the
+`std::process::exit` that the window close and the updater's install step both
+leave through therefore all reap the children, and the updater never asks NSIS
+to overwrite a binary that is still running. Deliberate exits do better than
+that: Tauri's exit events stop the pipeline while it is still whole, and the
+updater's before-exit hook — Tauri's `cleanup_before_exit`, reached through a
+guard parked in the app's resource table — does the same before the installer
+is launched. The job object is the backstop, not the plan.
+
 ### A hosted model
 
 The inference is local by default and the local server is the product. The

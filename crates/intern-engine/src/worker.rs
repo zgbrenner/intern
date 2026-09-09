@@ -551,6 +551,7 @@ fn launch(executable: &Path, temp_root: Option<&Path>) -> Result<WorkerProcess, 
         command.creation_flags(0x0800_0000);
     }
     let mut child = command.spawn().map_err(|_| ExtractFailure::crashed())?;
+    crate::process::tie_to_this_process(&child);
     let input = match child.stdin.take() {
         Some(input) => input,
         None => {

@@ -1,7 +1,10 @@
 //! Supervision of the local llama.cpp server process.
 //!
-//! The server binds a random loopback port with a random bearer key, is kept
-//! warm between documents, and is stopped when Intern exits.
+//! The server binds a random loopback port with a random bearer key and is
+//! kept warm between documents. Stopping it is not left to `Drop`: on Windows
+//! the process joins the job object in this crate's `process` module, so it
+//! dies with Intern however Intern ends, including the `std::process::exit`
+//! the window close and the updater both leave through.
 
 use std::{
     fmt,
@@ -359,6 +362,7 @@ impl ProcessLauncher for StdProcessLauncher {
             command.creation_flags(CREATE_NO_WINDOW);
         }
         let child = command.spawn().map_err(|_| start_failed())?;
+        crate::process::tie_to_this_process(&child);
         Ok(Box::new(StdChildProcess(child)))
     }
 }
@@ -471,5 +475,105 @@ mod tests {
     fn the_thread_default_leaves_the_machine_usable() {
         let threads = default_threads();
         assert!((2..=12).contains(&threads));
+    }
+
+    /// The point of the job object: a child of a process that dies without
+    /// running a single destructor must die too. The parent here leaves
+    /// through `std::process::exit`, which is exactly how the window close and
+    /// the updater's install step leave.
+    #[cfg(windows)]
+    #[test]
+    fn a_launched_child_dies_with_its_parent() {
+        let workspace = tempfile::tempdir().expect("a temporary directory");
+        let announcement = workspace.path().join("child.pid");
+        let parent = Command::new(std::env::current_exe().expect("the test binary"))
+            .args([
+                "server::tests::the_parent_that_leaves_without_running_destructors",
+                "--exact",
+                "--ignored",
+            ])
+            .env(CHILD_ANNOUNCEMENT, &announcement)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("the helper parent should run");
+        assert_eq!(
+            parent.code(),
+            Some(ABRUPT_EXIT_CODE),
+            "the helper parent should have left through process::exit"
+        );
+
+        let child = announced_pid(&announcement).expect("the child should have announced itself");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while is_running(child) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(100));
+        }
+        let survived = is_running(child);
+        if survived {
+            let _ = Command::new("taskkill.exe")
+                .args(["/PID", &child.to_string(), "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+        assert!(
+            !survived,
+            "process {child} outlived the parent that launched it"
+        );
+    }
+
+    /// The other half of the test above. Ignored so an ordinary run never
+    /// executes it, and inert without the announcement path even then.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "helper process for a_launched_child_dies_with_its_parent"]
+    fn the_parent_that_leaves_without_running_destructors() {
+        let Ok(announcement) = std::env::var(CHILD_ANNOUNCEMENT) else {
+            return;
+        };
+        let script = format!(
+            "Set-Content -LiteralPath '{announcement}' -Value $PID; Start-Sleep -Seconds 120"
+        );
+        let _child = StdProcessLauncher
+            .launch(
+                Path::new("powershell.exe"),
+                &[
+                    "-NoProfile".to_owned(),
+                    "-NonInteractive".to_owned(),
+                    "-Command".to_owned(),
+                    script,
+                ],
+            )
+            .expect("the launcher should start a child");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while announced_pid(Path::new(&announcement)).is_none() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        // No unwinding, no destructors, no stop() - the way Intern's own exit
+        // paths leave.
+        std::process::exit(ABRUPT_EXIT_CODE);
+    }
+
+    #[cfg(windows)]
+    const CHILD_ANNOUNCEMENT: &str = "INTERN_TEST_CHILD_ANNOUNCEMENT";
+    #[cfg(windows)]
+    const ABRUPT_EXIT_CODE: i32 = 37;
+
+    #[cfg(windows)]
+    fn announced_pid(announcement: &Path) -> Option<u32> {
+        std::fs::read_to_string(announcement)
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    #[cfg(windows)]
+    fn is_running(pid: u32) -> bool {
+        let listing = Command::new("tasklist.exe")
+            .args(["/NH", "/FI", &format!("PID eq {pid}")])
+            .output()
+            .expect("tasklist should run");
+        String::from_utf8_lossy(&listing.stdout).contains(&pid.to_string())
     }
 }

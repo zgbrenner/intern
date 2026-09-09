@@ -1026,10 +1026,18 @@ impl AppState {
 /// leave without starting window teardown - the same shape as the close-time
 /// exit, which deliberately avoids wedging in WebView destruction.
 pub(crate) fn shutdown_and_exit(app: &AppHandle) -> ! {
+    shutdown_runtime(app);
+    std::process::exit(0);
+}
+
+/// Stop the pipeline, and with it the local model process and the parser
+/// worker, without leaving. Tauri's exit events and the before-exit guard both
+/// call this; it is safe to call more than once, because stopping a runtime
+/// that is already stopped does nothing.
+pub(crate) fn shutdown_runtime(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
         let _ = state.pipeline.shutdown();
     }
-    std::process::exit(0);
 }
 
 fn intake_state_conflict() -> CommandError {
