@@ -240,6 +240,59 @@ fn an_undo_retracts_the_copies_of_a_record_the_sync_client_left_too() {
 /// Windows hands the same folder out under two spellings - `C:\Users\...` from
 /// a settings dialog and `\\?\C:\Users\...` from `canonicalize` - and a record
 /// written under one has to be found and retracted under the other.
+/// The same folder again, under the 8.3 short name Windows still hands out on
+/// a volume where short-name generation is on. A destination reached one way
+/// and a document reached the other must be one document, or an undo leaves
+/// the record behind and the SharePoint column describes a file that is no
+/// longer filed.
+#[cfg(windows)]
+#[test]
+fn a_record_is_found_through_the_short_name_spelling_of_the_destination() {
+    let parent = TempDir::new().unwrap();
+    let long = parent.path().join("destination-with-a-very-long-name");
+    fs::create_dir_all(&long).unwrap();
+    let Some(short) = short_path(&long) else {
+        // Short-name generation is off for this volume, so there is no second
+        // spelling to disagree about and nothing to prove here.
+        return;
+    };
+    assert_ne!(
+        short, long,
+        "the short spelling must differ from the long one"
+    );
+
+    let ledger = DescriptionLedger::new(&short, identity("m", "Front desk"), Vec::new());
+    let record = ledger.record(&filed(long.join(FILED_NAME))).unwrap();
+    assert!(record.exists());
+
+    let under_long = long.join(FILED_NAME);
+    assert_eq!(ledger.record_path(&under_long).as_ref(), Some(&record));
+    assert!(ledger.read(&under_long).is_some());
+    assert!(ledger.retract(&under_long).unwrap());
+    assert!(!record.exists());
+}
+
+/// The 8.3 spelling of an existing directory, or `None` where the volume does
+/// not make them.
+#[cfg(windows)]
+fn short_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    unsafe extern "system" {
+        fn GetShortPathNameW(long: *const u16, short: *mut u16, len: u32) -> u32;
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut buffer = vec![0_u16; 1024];
+    // SAFETY: both pointers are to buffers this call owns for its duration,
+    // and the length is the capacity of the output buffer in code units.
+    let written = unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), 1024) };
+    if written == 0 || written as usize >= buffer.len() {
+        return None;
+    }
+    let short = std::ffi::OsString::from_wide(&buffer[..written as usize]);
+    let short = std::path::PathBuf::from(short);
+    (short != path).then_some(short)
+}
+
 #[cfg(windows)]
 #[test]
 fn a_record_is_found_through_the_verbatim_spelling_of_the_destination() {
