@@ -117,3 +117,56 @@ fn a_settings_file_written_with_a_byte_order_mark_still_loads() {
     assert_eq!(loaded.destination, "/somewhere/out");
     assert!(loaded.intake_enabled);
 }
+
+#[test]
+fn one_value_that_is_not_understood_does_not_discard_the_rest_of_the_file() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("settings.json");
+    fs::write(
+        &path,
+        br#"{ "destination": "/somewhere/out", "destinationLayout": "none", "intakeEnabled": true }"#,
+    )
+    .unwrap();
+
+    let loaded = SettingsStore::new(&path).load_with_report().unwrap();
+
+    assert_eq!(loaded.settings.destination, "/somewhere/out");
+    assert!(loaded.settings.intake_enabled);
+    assert_eq!(loaded.settings.destination_layout, DestinationLayout::Flat);
+    // And the field that was dropped is named, so a person can be told which
+    // line of their file to look at.
+    assert_eq!(loaded.unreadable, ["destinationLayout"]);
+}
+
+#[test]
+fn a_file_that_is_not_a_json_object_is_still_refused() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("settings.json");
+    fs::write(&path, b"{ this is not json").unwrap();
+
+    // Nothing can be salvaged a field at a time from a document that does not
+    // parse, and the refusal is what stops the interface saving defaults over
+    // whatever the file was meant to say.
+    let error = SettingsStore::new(&path).load().unwrap_err();
+
+    assert_eq!(error.code, "SETTINGS_INVALID");
+}
+
+#[test]
+fn a_field_the_reader_requires_and_the_file_does_not_have_is_reported() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("settings.json");
+    fs::write(
+        &path,
+        br#"{ "startMinimized": true, "automaticRename": true }"#,
+    )
+    .unwrap();
+
+    let loaded = SettingsStore::new(&path).load_with_report().unwrap();
+
+    // Filing into the source folder is a real configuration, so a destination
+    // that fell out of the file must not be mistaken for one somebody chose.
+    assert_eq!(loaded.settings.destination, "");
+    assert!(loaded.settings.automatic_rename);
+    assert_eq!(loaded.unreadable, ["destination"]);
+}

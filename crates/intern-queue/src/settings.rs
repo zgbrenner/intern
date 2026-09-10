@@ -5,6 +5,7 @@ use std::{
 
 use intern_engine::HostedProvider;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::pipeline::{PipelineError, PipelineResult};
 
@@ -82,6 +83,11 @@ pub struct AppSettings {
     /// Subfolders under the destination, derived from each document's facts.
     #[serde(default)]
     pub destination_layout: DestinationLayout,
+    /// Open to the tray rather than to the window. Like every other
+    /// preference here it is simply off when the file does not mention it;
+    /// the destination is the one field Intern will not invent, so a file
+    /// that has lost it is reported rather than defaulted quietly.
+    #[serde(default)]
     pub start_minimized: bool,
     #[serde(default)]
     pub automatic_rename: bool,
@@ -123,6 +129,21 @@ pub struct AppSettings {
     pub hosted_model: String,
 }
 
+/// A settings file that was read, and the fields in it that could not be
+/// understood.
+///
+/// One misspelled value used to discard the whole document: a
+/// `destinationLayout` of `none` took the destination folder and the watched
+/// intake folder down with it, and Intern opened looking healthy with
+/// neither. So whatever parses is kept, whatever does not takes its default,
+/// and the fields that did not are named - defaulting a setting quietly
+/// would be the same silence in a smaller place.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LoadedSettings {
+    pub settings: AppSettings,
+    pub unreadable: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct SettingsStore {
     path: PathBuf,
@@ -134,8 +155,13 @@ impl SettingsStore {
     }
 
     pub fn load(&self) -> PipelineResult<AppSettings> {
+        self.load_with_report().map(|loaded| loaded.settings)
+    }
+
+    /// The settings, and the fields of the file that had to be defaulted.
+    pub fn load_with_report(&self) -> PipelineResult<LoadedSettings> {
         if !self.path.exists() {
-            return Ok(AppSettings::default());
+            return Ok(LoadedSettings::default());
         }
         let bytes = fs::read(&self.path).map_err(|_| {
             PipelineError::new("SETTINGS_UNAVAILABLE", "settings could not be read")
@@ -145,8 +171,17 @@ impl SettingsStore {
         // the mark. A marked file is not a corrupt one, and the document
         // parser reads text files by their mark for the same reason.
         let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
-        serde_json::from_slice(bytes)
-            .map_err(|_| PipelineError::new("SETTINGS_INVALID", "settings are not valid"))
+        let document = serde_json::from_slice::<Value>(bytes).map_err(|_| settings_invalid())?;
+        let Value::Object(fields) = document else {
+            return Err(settings_invalid());
+        };
+        match serde_json::from_value::<AppSettings>(Value::Object(fields.clone())) {
+            Ok(settings) => Ok(LoadedSettings {
+                settings,
+                unreadable: Vec::new(),
+            }),
+            Err(_) => keep_what_parses(fields),
+        }
     }
 
     pub fn save(&self, settings: &AppSettings) -> PipelineResult<()> {
@@ -171,4 +206,52 @@ impl SettingsStore {
 
 fn io_error(_: std::io::Error) -> PipelineError {
     PipelineError::new("SETTINGS_UNAVAILABLE", "settings could not be saved")
+}
+
+fn settings_invalid() -> PipelineError {
+    PipelineError::new("SETTINGS_INVALID", "settings are not valid")
+}
+
+/// Reads a settings document a field at a time, keeping every field that is
+/// understood and defaulting the rest.
+///
+/// A field is tried on its own, over the defaults, so a value nothing can
+/// make sense of costs its own line and nothing else. Fields Intern does not
+/// know are left alone, as they always were: a settings file written by a
+/// newer version is still readable by an older one.
+fn keep_what_parses(fields: Map<String, Value>) -> PipelineResult<LoadedSettings> {
+    let Ok(Value::Object(defaults)) = serde_json::to_value(AppSettings::default()) else {
+        return Err(settings_invalid());
+    };
+    let mut kept = defaults.clone();
+    let mut unreadable = Vec::new();
+    // A field the file simply leaves out is ordinary - a settings file written
+    // by an older version lacks every field added since - unless the reader
+    // requires it, in which case its absence is part of why the document did
+    // not parse and is the person's to hear about too.
+    for name in defaults.keys() {
+        if fields.contains_key(name) {
+            continue;
+        }
+        let mut without = defaults.clone();
+        without.remove(name);
+        if serde_json::from_value::<AppSettings>(Value::Object(without)).is_err() {
+            unreadable.push(name.clone());
+        }
+    }
+    for (name, value) in fields {
+        let mut probe = defaults.clone();
+        probe.insert(name.clone(), value.clone());
+        if serde_json::from_value::<AppSettings>(Value::Object(probe)).is_ok() {
+            kept.insert(name, value);
+        } else {
+            unreadable.push(name);
+        }
+    }
+    let settings = serde_json::from_value::<AppSettings>(Value::Object(kept))
+        .map_err(|_| settings_invalid())?;
+    Ok(LoadedSettings {
+        settings,
+        unreadable,
+    })
 }

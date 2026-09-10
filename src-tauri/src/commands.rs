@@ -30,8 +30,8 @@ use intern_engine::setup::{
 };
 use intern_intake::{IntakeConfig, IntakeWatcher, MachineIdentity};
 use intern_queue::{
-    AnalyzerBoundary, AppSettings, FilingSink, FilingSinks, ModelFailure, Pipeline, PipelineError,
-    PipelineEventSink, PipelineItem, PipelineProgress, SettingsStore,
+    AnalyzerBoundary, AppSettings, FilingSink, FilingSinks, LoadedSettings, ModelFailure, Pipeline,
+    PipelineError, PipelineEventSink, PipelineItem, PipelineProgress, SettingsStore,
     paths::{
         SUPPORTED_EXTENSIONS, canonical_file, canonical_folder, canonical_model_file,
         collect_supported_files, display_path, parse_item_id,
@@ -953,6 +953,12 @@ impl AppState {
             code: "STATE_CONFLICT".into(),
             message: "setup scheduler state is unavailable".into(),
         })? = Some(scheduler.sender.clone());
+        // Defaults are how the window opens on a settings file nothing can
+        // read - Settings is where a person repairs it, and the defaults keep
+        // automatic renaming off while they do. What must not happen is
+        // Intern behaving as though the file said "no destination, no intake":
+        // the file is left exactly as it is until somebody deliberately saves,
+        // and `intake_status_dto` reports the trouble to the interface.
         let startup_settings = settings.load().unwrap_or_default();
         let identity = MachineIdentity::load_or_create(&data, &startup_settings.machine_label)
             .map_err(|_| CommandError {
@@ -1058,7 +1064,11 @@ impl AppState {
     }
 
     fn intake_status_dto(&self) -> Result<IntakeStatusDto, CommandError> {
-        let settings = self.settings.load().unwrap_or_default();
+        let loaded = self.settings.load_with_report();
+        let settings = loaded
+            .as_ref()
+            .map(|loaded| loaded.settings.clone())
+            .unwrap_or_default();
         let identity = self
             .identity
             .lock()
@@ -1075,6 +1085,7 @@ impl AppState {
             .lock()
             .map_err(|_| intake_state_conflict())?
             .clone()
+            .or_else(|| unreadable_settings(&loaded))
             .or_else(|| {
                 self.app
                     .state::<Arc<crate::microsoft_intake::MicrosoftIntake>>()
@@ -1174,6 +1185,33 @@ fn intake_state_conflict() -> CommandError {
     CommandError {
         code: "STATE_CONFLICT".into(),
         message: "intake state is unavailable".into(),
+    }
+}
+
+/// What to tell a person about a settings file that could not be read whole.
+///
+/// Intern opens on defaults so that Settings can be reached and the file
+/// repaired, but defaults are not what anybody configured: with them there is
+/// no destination and no watched folder, and saying nothing would leave a
+/// product that looks healthy and files nothing. So the trouble travels on
+/// the intake status, where a startup problem with the watched folder already
+/// surfaces, and the file itself is left alone until somebody saves.
+fn unreadable_settings(loaded: &Result<LoadedSettings, PipelineError>) -> Option<String> {
+    match loaded {
+        Ok(loaded) if loaded.unreadable.is_empty() => None,
+        Ok(loaded) => Some(format!(
+            "SETTINGS_PARTIAL: {} in your settings file could not be read and {} using the default instead. Everything else was kept.",
+            loaded.unreadable.join(", "),
+            if loaded.unreadable.len() == 1 {
+                "is"
+            } else {
+                "are"
+            }
+        )),
+        Err(error) => Some(format!(
+            "{}: your settings file could not be read, so Intern started with defaults - no destination folder, no watched folder, and automatic renaming off. The file has not been written over: repair it, or save from this window to replace it.",
+            error.code
+        )),
     }
 }
 
@@ -2770,5 +2808,37 @@ mod duplicate_reason_tests {
         let stale = queue_item_dto(duplicate_item(None)).unwrap();
         assert_eq!(stale.reason, None);
         assert_eq!(stale.error_code.as_deref(), Some("DUPLICATE"));
+    }
+}
+
+#[cfg(test)]
+mod settings_report_tests {
+    use super::*;
+
+    #[test]
+    fn a_settings_file_that_could_not_be_read_is_announced_rather_than_assumed() {
+        assert_eq!(unreadable_settings(&Ok(LoadedSettings::default())), None);
+
+        let partial = unreadable_settings(&Ok(LoadedSettings {
+            settings: AppSettings::default(),
+            unreadable: vec!["destinationLayout".into()],
+        }))
+        .expect("a defaulted field is reported");
+        assert!(
+            partial.starts_with("SETTINGS_PARTIAL: destinationLayout"),
+            "{partial}"
+        );
+        assert!(partial.contains("Everything else was kept"), "{partial}");
+
+        let refused = unreadable_settings(&Err(PipelineError::new(
+            "SETTINGS_INVALID",
+            "settings are not valid",
+        )))
+        .expect("a file nothing could read is reported");
+        assert!(refused.starts_with("SETTINGS_INVALID:"), "{refused}");
+        // Defaults are what Intern is running on, and the person is told the
+        // file is still theirs to repair.
+        assert!(refused.contains("automatic renaming off"), "{refused}");
+        assert!(refused.contains("has not been written over"), "{refused}");
     }
 }

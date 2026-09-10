@@ -20,4 +20,4 @@ pub use pipeline::{
     ProposalRecord, SimilarFiling, UnfiledDocument, WorkerBoundary, WorkerFailure,
     layout_subfolder, leading_date, proposal_as_applied, target_folder,
 };
-pub use settings::{AppSettings, DestinationLayout, ModelSource, SettingsStore};
+pub use settings::{AppSettings, DestinationLayout, LoadedSettings, ModelSource, SettingsStore};
