@@ -64,7 +64,11 @@ document, and filing one would put a second copy of something already filed
 into the destination. The spelled-out form is unambiguous; the machine-suffix
 form is not, because `Invoice-ACME.pdf` is an ordinary filename, so that
 suffix is believed only when it names a machine this folder has actually seen
-in its presence records. Both names a machine goes by count: the sync client
+in its presence records. A second conflict on the same document is decorated
+further — the sync client numbers the repeat, `report-DESKTOP-A1B2C3 (2).pdf`,
+or stamps the day it happened — and those decorations come off before the
+machine name is looked for, so a numbered conflict copy is skipped like the
+first one. Both names a machine goes by count: the sync client
 uses the hostname, not the label someone may have typed into Settings, so
 presence records carry both and either one marks a conflict copy. Skipping a
 document someone meant to file is the

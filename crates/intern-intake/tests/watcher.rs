@@ -682,6 +682,45 @@ fn a_machine_suffix_is_only_a_conflict_copy_when_the_folder_knows_that_machine()
     assert!(!is_conflict_copy(Path::new("Invoice.pdf"), &machines));
 }
 
+/// A sync client that finds its conflict name already taken decorates it
+/// further: OneDrive numbers the repeat the way Explorer does, and some
+/// clients stamp the day the conflict happened. The document underneath is
+/// still the losing side of a conflict, and filing it would put a second copy
+/// of an already filed document into the destination.
+#[test]
+fn a_numbered_or_dated_conflict_copy_is_still_a_conflict_copy() {
+    let machines = vec!["DESKTOP-A1B2C3".to_string()];
+
+    assert!(is_conflict_copy(
+        Path::new("report-DESKTOP-A1B2C3 (2).pdf"),
+        &machines
+    ));
+    assert!(is_conflict_copy(
+        Path::new("report-DESKTOP-A1B2C3 2026-08-31.pdf"),
+        &machines
+    ));
+    assert!(is_conflict_copy(
+        Path::new("report-DESKTOP-A1B2C3 2026-08-31 (3).pdf"),
+        &machines
+    ));
+    assert!(is_conflict_copy(
+        Path::new("report (Jane's conflicted copy 2026-08-31) (2).pdf"),
+        &[]
+    ));
+
+    // The decoration is never the evidence: a name has to end in a machine
+    // this folder has actually seen, counter or no counter.
+    assert!(!is_conflict_copy(
+        Path::new("Invoice-ACME (2).pdf"),
+        &machines
+    ));
+    assert!(!is_conflict_copy(Path::new("report (2).pdf"), &machines));
+    assert!(!is_conflict_copy(
+        Path::new("report 2026-08-31.pdf"),
+        &machines
+    ));
+}
+
 #[test]
 fn a_document_that_failed_while_still_in_the_cloud_is_held_not_tombstoned() {
     let rig = Rig::start(false, &[]);
