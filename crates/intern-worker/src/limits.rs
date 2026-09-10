@@ -6,6 +6,14 @@ pub const MAX_SOURCE_BYTES: u64 = 1_073_741_824;
 pub const MAX_PAGE_COUNT: usize = 500;
 pub const MAX_DECOMPRESSED_OFFICE_BYTES: u64 = 1_073_741_824;
 pub const MAX_TEMP_BYTES: u64 = 2_147_483_648;
+/// Characters one page may carry into a response.
+///
+/// Distillation reads a budget of a few tens of thousands of characters, and
+/// the largest page any reader produces is a whole Word document rendered as
+/// Markdown, so nothing real comes near this. A degenerate file that does is
+/// truncated rather than allowed to put hundreds of megabytes through the
+/// pipe and into the queue's memory.
+pub const MAX_PAGE_CHARS: usize = 2_000_000;
 pub const MAX_PAGE_MEGAPIXELS: u64 = 25;
 pub const MAX_PAGE_PIXELS: u64 = MAX_PAGE_MEGAPIXELS * 1_000_000;
 pub const MAX_EXTRACTION_DURATION: Duration = Duration::from_secs(30 * 60);

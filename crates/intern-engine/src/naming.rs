@@ -231,7 +231,7 @@ pub(crate) fn sanitize_segment(value: &str) -> Option<String> {
             continue;
         }
         if character.is_control()
-            || is_bidi_control(character)
+            || is_invisible_format(character)
             || matches!(
                 character,
                 '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
@@ -257,8 +257,37 @@ pub(crate) fn sanitize_segment(value: &str) -> Option<String> {
     Some(output)
 }
 
-fn is_bidi_control(character: char) -> bool {
-    matches!(character as u32, 0x061c | 0x200e..=0x200f | 0x202a..=0x202e | 0x2066..=0x2069)
+/// Formatting characters that a filename must not carry: the bidirectional
+/// controls, and the rest of the invisible ones - a soft hyphen, a
+/// zero-width space, a word joiner, a byte-order mark.
+///
+/// They survive every visible check and produce a name nobody can type,
+/// search for, or tell apart from the name beside it, which is the whole
+/// point of a filename.
+fn is_invisible_format(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x00ad
+            | 0x0600..=0x0605
+            | 0x061c
+            | 0x06dd
+            | 0x070f
+            | 0x08e2
+            | 0x180e
+            | 0x200b..=0x200f
+            | 0x202a..=0x202e
+            | 0x2060..=0x2064
+            | 0x2066..=0x206f
+            | 0xfeff
+            | 0xfff9..=0xfffb
+            | 0x110bd
+            | 0x110cd
+            | 0x13430..=0x1343f
+            | 0x1bca0..=0x1bca3
+            | 0x1d173..=0x1d17a
+            | 0xe0001
+            | 0xe0020..=0xe007f
+    )
 }
 
 fn is_reserved_device_name(value: &str) -> bool {
@@ -406,6 +435,23 @@ mod tests {
                 "pdf"
             ),
             "2026-01-05 Invoice from Acme Corporation.pdf"
+        );
+    }
+
+    /// Bidirectional controls were already removed, but the rest of the
+    /// invisible formatting characters were not, so a party name carrying a
+    /// zero-width space or a soft hyphen produced a filename nobody could
+    /// type, search for, or tell apart from the one beside it.
+    #[test]
+    fn an_invisible_character_never_reaches_a_filename() {
+        assert_eq!(
+            sanitize_segment("Acme\u{00ad} Cor\u{200b}poration\u{feff}").as_deref(),
+            Some("Acme Corporation")
+        );
+        assert_eq!(
+            sanitize_segment("\u{2060}\u{200d}").as_deref(),
+            None,
+            "a name that is nothing but invisible characters is no name at all"
         );
     }
 

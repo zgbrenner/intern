@@ -323,7 +323,12 @@ function chooseBrowserFiles(directory: boolean): Promise<File[]> {
     input.type = 'file';
     input.multiple = true;
     if (directory) input.setAttribute('webkitdirectory', '');
-    input.addEventListener('change', () => { const files = Array.from(input.files ?? []); input.remove(); resolve(files); }, { once: true });
+    const settle = (files: File[]) => { input.remove(); resolve(files); };
+    input.addEventListener('change', () => settle(Array.from(input.files ?? [])), { once: true });
+    // A dismissed dialog fires `cancel` and nothing else. Without this the
+    // promise never settled and the queue's one-action-at-a-time guard stayed
+    // closed for the rest of the session.
+    input.addEventListener('cancel', () => settle([]), { once: true });
     input.click();
   });
 }

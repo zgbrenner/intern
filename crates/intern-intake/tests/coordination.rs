@@ -145,13 +145,22 @@ fn takeover_requires_both_an_expired_lease_and_a_stale_heartbeat() {
         serde_json::to_vec_pretty(&skewed).unwrap(),
     )
     .unwrap();
-    clock.set(start + CLAIM_LEASE_SECONDS + 1);
+    let seen_here = start + CLAIM_LEASE_SECONDS + 1;
+    clock.set(seen_here);
     assert!(matches!(
         rival.acquire(&document),
         AcquireOutcome::HeldByOther(_)
     ));
 
-    clock.set(skewed.heartbeat_at + CLAIM_LEASE_SECONDS + 1);
+    // Silence is counted from when the rival first saw this heartbeat, not
+    // from the timestamp the owner wrote into it, so the owner's timestamps
+    // being old is not on its own enough.
+    clock.set(seen_here + CLAIM_LEASE_SECONDS - 1);
+    assert!(matches!(
+        rival.acquire(&document),
+        AcquireOutcome::HeldByOther(_)
+    ));
+    clock.set(seen_here + CLAIM_LEASE_SECONDS + 1);
     assert!(matches!(rival.acquire(&document), AcquireOutcome::Acquired));
     let claim = read_claim(temp.path(), &key);
     assert_eq!(claim.machine_id, "bbb");
@@ -172,6 +181,16 @@ fn two_machines_racing_a_stale_takeover_admit_exactly_one_new_owner() {
         ClaimStore::with_clock(temp.path(), identity("machine-a", "a"), clock.clone()).unwrap(),
         ClaimStore::with_clock(temp.path(), identity("machine-b", "b"), clock.clone()).unwrap(),
     ];
+    // Each contender has to watch the dead machine's heartbeat stand still for
+    // a full lease period on its own clock before it may take the claim over.
+    for store in &contenders {
+        assert!(matches!(
+            store.acquire(&document),
+            AcquireOutcome::HeldByOther(_)
+        ));
+    }
+    clock.set(start + 3 * CLAIM_LEASE_SECONDS + 1);
+
     let barrier = Barrier::new(2);
     let outcomes: Vec<AcquireOutcome> = thread::scope(|scope| {
         let handles: Vec<_> = contenders
@@ -500,4 +519,37 @@ fn facts_helper_matches_the_documented_key_recipe() {
         facts.key(),
         document_key("a.pdf", facts.size, facts.modified_secs)
     );
+}
+
+/// A heartbeat is stamped from the owner's own clock. A machine whose clock
+/// runs behind the rest of the folder writes timestamps that look ancient the
+/// instant they land, and a takeover decided from those timestamps steals work
+/// from a machine that is very much alive and renewing.
+#[test]
+fn a_live_owner_with_a_slow_clock_is_not_taken_over() {
+    let temp = TempDir::new().unwrap();
+    let start = 1_000_000;
+    let behind = MockClock::at(start - 2 * CLAIM_LEASE_SECONDS);
+    let here = MockClock::at(start);
+    let owner =
+        ClaimStore::with_clock(temp.path(), identity("aaa", "owner"), behind.clone()).unwrap();
+    let rival =
+        ClaimStore::with_clock(temp.path(), identity("bbb", "rival"), here.clone()).unwrap();
+    let document = doc("contested.pdf");
+    let key = document.key();
+    assert!(matches!(owner.acquire(&document), AcquireOutcome::Acquired));
+
+    // Half an hour behind, but working: every renewal moves the heartbeat,
+    // which is the only thing that proves the owner is still there.
+    let step = CLAIM_LEASE_SECONDS - CLAIM_RENEW_THRESHOLD_SECONDS + 50;
+    for _ in 0..3 {
+        behind.advance(step);
+        here.advance(step);
+        owner.renew(&key).unwrap();
+        assert!(
+            matches!(rival.acquire(&document), AcquireOutcome::HeldByOther(_)),
+            "a machine that keeps renewing its lease is not silent"
+        );
+    }
+    assert_eq!(read_claim(temp.path(), &key).machine_id, "aaa");
 }

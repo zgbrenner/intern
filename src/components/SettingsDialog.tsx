@@ -193,6 +193,10 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
   const busy = checking || installing;
   const dialog = useRef<HTMLElement>(null);
   const destination = useRef<HTMLInputElement>(null);
+  // Escape has to reach the latest onClose without the focus effect below
+  // depending on its identity.
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
   useEffect(() => setNext(settings), [settings]);
   const classify = useCallback((path: string) => bridge.classifyFolder(path), [bridge]);
   const destinationCloud = useCloudBadge(classify, next.destination);
@@ -232,10 +236,17 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
   }, [bridge]);
   // Forgetting or using a spelling takes effect at once, like removing a
   // stored key: it is a fact about the queue, not a draft of the settings.
-  const changeRule = async (operation: Promise<void>) => {
+  // A ref rather than state, because the row disappears the moment the change
+  // lands and a second click arriving before React rerenders would otherwise
+  // reach a rule that is already gone and report RULE_NOT_FOUND.
+  const ruleInFlight = useRef(false);
+  const changeRule = async (run: () => Promise<void>) => {
+    if (ruleInFlight.current) return;
+    ruleInFlight.current = true;
     setRulesError('');
-    try { await operation; setRules(await bridge.houseRulesList()); }
+    try { await run(); setRules(await bridge.houseRulesList()); }
     catch (error) { setRulesError(ruleFailure(error)); }
+    finally { ruleInFlight.current = false; }
   };
   const browse = async (apply: (path: string) => void) => {
     const folder = await selection?.pickFolder();
@@ -336,10 +347,14 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
     catch (error) { setUpdateError(updateFailure(error)); }
     finally { setInstalling(false); }
   };
+  // Focus the destination field once, when the dialog opens. This used to run
+  // whenever `onClose` changed identity, and App recreates that closure on
+  // every render - so every queue progress event pulled the caret out of
+  // whatever field the person was typing in and back to the top of the dialog.
   useEffect(() => {
     destination.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+      if (event.key === 'Escape') { event.preventDefault(); close.current(); return; }
       if (event.key !== 'Tab') return;
       const focusable = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])') ?? []);
       if (!focusable.length) return;
@@ -350,7 +365,7 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, []);
   const activeMachines = intake?.machines.filter((machine) => machine.active).length ?? 0;
   /*
     Grouped rather than stacked. This dialog had grown to a destination, four
@@ -399,8 +414,8 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
             <span className="rule-change"><q>{rule.from}</q> written as <strong>{rule.to}</strong></span>
             <span className="rule-state">{rule.active ? 'In use' : 'Seen once · in use after one more edit'}</span>
             <span className="rule-actions">
-              {!rule.active && <button type="button" aria-label={`Use now: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(bridge.houseRuleUse(rule.id))}>Use now</button>}
-              <button type="button" aria-label={`Forget: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(bridge.houseRuleForget(rule.id))}>Forget</button>
+              {!rule.active && <button type="button" aria-label={`Use now: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(() => bridge.houseRuleUse(rule.id))}>Use now</button>}
+              <button type="button" aria-label={`Forget: ${rule.from} written as ${rule.to}`} onClick={() => void changeRule(() => bridge.houseRuleForget(rule.id))}>Forget</button>
             </span>
           </li>)}
         </ul>}

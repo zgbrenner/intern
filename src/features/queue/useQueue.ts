@@ -10,6 +10,10 @@ interface QueueIssue { kind: 'snapshot' | 'subscription'; cause: unknown }
 export function useQueue(bridge: DesktopBridge) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [paused, setPaused] = useState(false);
+  // Why the queue stopped taking work, when it stopped itself. Held until the
+  // queue reports that it is running again, because nothing else on screen
+  // says a backlog has quietly come to a halt.
+  const [pipelineError, setPipelineError] = useState<string>();
   const [readError, setReadError] = useState<QueueIssue | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<QueueIssue | null>(null);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
@@ -46,6 +50,8 @@ export function useQueue(bridge: DesktopBridge) {
         return;
       }
       if (event.paused !== undefined) setPaused(event.paused);
+      if (event.error) setPipelineError(event.error);
+      else if (event.paused === false) setPipelineError(undefined);
       refreshInBackground();
     };
     if (subscribe) {
@@ -72,5 +78,5 @@ export function useQueue(bridge: DesktopBridge) {
   }, [bridge, connectionAttempt]);
 
   const execute = useCallback(async (action: () => Promise<void>) => { await action(); await refresh(); }, [refresh]);
-  return { items, paused, setPaused, refresh, execute, error: readError ?? subscriptionError, reconnect };
+  return { items, paused, setPaused, refresh, execute, error: readError ?? subscriptionError, pipelineError, reconnect };
 }

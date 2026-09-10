@@ -23,7 +23,7 @@
 
 use crate::distill::DocumentDigest;
 use crate::domain::{DateRole, PartyRelation};
-use crate::evidence::{date_match_positions, normalize, normalize_loosely};
+use crate::evidence::{date_match_positions, extract_stated_dates, normalize, normalize_loosely};
 
 /// Roles in the order one wins when a line carries several cues: the more
 /// specific reading first, so "notice of termination dated" reads as a notice
@@ -94,6 +94,7 @@ const ISSUANCE_CUES: &[&str] = &[
     "delivered on",
     "receipt date",
     "prepared on",
+    "presented on",
     "published on",
     "publication date",
     "meeting date",
@@ -132,6 +133,20 @@ const EXECUTION_CUES: &[&str] = &[
 ];
 /// A label that says "this is the date" without saying what kind.
 const GENERIC_DATE_CUES: &[&str] = &["date:", "dated", "date of this"];
+/// Words that qualify "Date" as some other event's date. "Due Date: May 30,
+/// 2025" labels when the money is owed, not when the invoice was written,
+/// and a document type's default role must not be read onto it.
+const OTHER_DATE_LABELS: &[&str] = &[
+    "due",
+    "expiration",
+    "expiry",
+    "expires",
+    "renewal",
+    "end",
+    "return",
+    "deadline",
+    "payable",
+];
 
 /// How far before a date the wording that names its role can sit. Long
 /// enough for "This First Amendment to Consulting Agreement (this
@@ -203,7 +218,7 @@ pub fn infer_date_role(
 /// starts in lower case, with a number, or with a month - so a header
 /// block's "To:" and "From:" lines stay apart, and "Date of this Notice:
 /// December 29, 2026" does not lend its cue to the sentence under it.
-fn wrapped_lines(segment: &str) -> Vec<String> {
+pub(crate) fn wrapped_lines(segment: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for line in segment.lines() {
         let line = line.trim();
@@ -259,6 +274,9 @@ fn continues_sentence(line: &str) -> bool {
 /// "Dated", "Date of this ...", or a bare "DATE" the way a stamped form
 /// writes it.
 fn is_generic_label(window: &str) -> bool {
+    if labels_another_date(window) {
+        return false;
+    }
     GENERIC_DATE_CUES.iter().any(|cue| window.contains(cue))
         || window
             .trim_end()
@@ -267,8 +285,34 @@ fn is_generic_label(window: &str) -> bool {
             .is_some_and(|word| word == "date")
 }
 
+/// Whether the label nearest the date qualifies it as another event's date -
+/// "Due Date", "Expiration Date", "Return Date". The qualifier sits directly
+/// on the word, so only the word immediately before it is read.
+fn labels_another_date(window: &str) -> bool {
+    let Some(at) = window.rfind("date") else {
+        return false;
+    };
+    let before = window[..at].trim_end();
+    OTHER_DATE_LABELS.iter().any(|word| before.ends_with(word))
+}
+
 fn window_before(normalized: &str, position: usize) -> String {
     let mut start = position.saturating_sub(CUE_WINDOW);
+    // A label governs the date that follows it and stops there. An invoice
+    // prints "Invoice Date: April 30, 2025    Due Date: May 30, 2025" on one
+    // line, and reading a fixed distance back from the second date reached
+    // the first date's label. A finished sentence is a boundary for the same
+    // reason: whatever it said was about its own date.
+    for other in extract_stated_dates(normalized) {
+        for found in date_match_positions(&other, normalized) {
+            if found < position && found > start {
+                start = found;
+            }
+        }
+    }
+    if let Some(stop) = normalized[start..position].rfind(". ") {
+        start += stop + ". ".len();
+    }
     while !normalized.is_char_boundary(start) {
         start -= 1;
     }
@@ -326,12 +370,33 @@ impl TypeKind {
         };
         let lowered = document_type.to_lowercase();
         let has = |words: &[&str]| words.iter().any(|word| lowered.contains(word));
+        // The agreement family is tested first because its names contain
+        // the other families' words: a statement *of work* is an agreement,
+        // not a statement, and the entry for it was unreachable while
+        // "statement" was tested first.
         if has(&["amendment", "addendum", "modification"]) {
             Self::Amendment
         } else if has(&["notice", "notification"]) {
             Self::Notice
         } else if has(&["invoice", "bill", "statement of account", "credit note"]) {
             Self::Invoice
+        } else if has(&[
+            "agreement",
+            "contract",
+            "lease",
+            "statement of work",
+            "terms",
+            "policy",
+            "license",
+            "licence",
+            "deed",
+            "warranty",
+            "guarantee",
+            "waiver",
+            "release",
+            "consent",
+        ]) {
+            Self::Agreement
         } else if has(&[
             "order",
             "slip",
@@ -355,23 +420,6 @@ impl TypeKind {
             "statement",
         ]) {
             Self::Issued
-        } else if has(&[
-            "agreement",
-            "contract",
-            "lease",
-            "statement of work",
-            "terms",
-            "policy",
-            "license",
-            "licence",
-            "deed",
-            "warranty",
-            "guarantee",
-            "waiver",
-            "release",
-            "consent",
-        ]) {
-            Self::Agreement
         } else {
             Self::Unknown
         }
@@ -633,14 +681,14 @@ fn title_type(heading: &str) -> Option<String> {
 /// punctuation from a heading.
 fn clean_title(heading: &str) -> String {
     let mut text = heading.trim().trim_start_matches('#').trim().to_owned();
-    let lowered = text.to_lowercase();
     for marker in [" - page ", " – page ", " — page ", " page "] {
-        if let Some(index) = lowered.rfind(marker)
-            && lowered[index + marker.len()..]
+        let found = rfind_ignoring_ascii_case(&text, marker).filter(|index| {
+            text[index + marker.len()..]
                 .trim()
                 .chars()
                 .all(|character| character.is_ascii_digit() || character.is_whitespace())
-        {
+        });
+        if let Some(index) = found {
             text.truncate(index);
         }
     }
@@ -653,6 +701,21 @@ fn clean_title(heading: &str) -> String {
         .trim_end_matches([':', '-', '–', '—', ',', ';', '.'])
         .trim()
         .to_owned()
+}
+
+/// The last occurrence of `marker`, ignoring the case of its ASCII letters,
+/// as a byte offset into `haystack` itself.
+///
+/// Searching a lowercased copy gives an offset into that copy, and case
+/// folding does not preserve byte lengths - "STRAẞE Ü - Page 2" folds one
+/// byte shorter, so the offset lands inside a character and truncating there
+/// panics. A marker begins and ends on a byte matched exactly, so the offset
+/// this returns is always a character boundary.
+fn rfind_ignoring_ascii_case(haystack: &str, marker: &str) -> Option<usize> {
+    haystack
+        .as_bytes()
+        .windows(marker.len())
+        .rposition(|window| window.eq_ignore_ascii_case(marker.as_bytes()))
 }
 
 /// Title case for an all-capitals heading; a mixed-case heading is left as
@@ -887,6 +950,97 @@ mod tests {
             &contradictory,
         );
         assert_eq!(kept.len(), 2);
+    }
+
+    /// "Due Date:" is a label, but it is not a label for *this* document's
+    /// date, and reading it as one made the invoice's due date into an
+    /// invoice date. The document says what kind of date it is not, so the
+    /// wording says nothing and the model's own answer stands.
+    #[test]
+    fn a_due_date_label_never_becomes_an_invoice_date() {
+        let digest = digest_of(
+            "INVOICE INV-2048
+Invoice Date: April 30, 2025
+Due Date: May 30, 2025",
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2025-05-30", Some("Invoice")),
+            None,
+            "a due date is not the invoice's date"
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2025-04-30", Some("Invoice")),
+            Some(DateRole::Invoice)
+        );
+    }
+
+    /// An invoice prints both of its dates on one line. Reading a fixed
+    /// distance back from the second one reaches the first one's label, and
+    /// the due date came back labelled as the invoice date.
+    #[test]
+    fn a_label_governs_only_the_date_that_follows_it() {
+        let digest = digest_of(
+            "INVOICE INV-2048
+Invoice Date: April 30, 2025    Due Date: May 30, 2025",
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2025-05-30", Some("Invoice")),
+            None,
+            "the invoice date's label stops at the invoice date"
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2025-04-30", Some("Invoice")),
+            Some(DateRole::Invoice)
+        );
+    }
+
+    /// Replay of the recorded corpus: the board deck is dated "Presented on
+    /// May 21, 2026", which is a deck being issued on a date, and the model
+    /// called it a notice date.
+    #[test]
+    fn a_deck_presented_on_a_date_was_issued_on_it() {
+        let digest = digest_of("QUARTERLY BUSINESS REVIEW\n\nPresented on May 21, 2026");
+        assert_eq!(
+            infer_date_role(&digest, "2026-05-21", Some("Quarterly Business Review")),
+            Some(DateRole::Issuance)
+        );
+    }
+
+    /// A statement of work is an agreement, not a statement, and the list
+    /// says so - but "statement" was tested first, so the entry was never
+    /// reached and a bare "Date:" read as an issuance date.
+    #[test]
+    fn a_bare_date_on_a_statement_of_work_is_its_effective_date() {
+        let digest = digest_of(
+            "STATEMENT OF WORK NO. 4
+Date: April 1, 2026",
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2026-04-01", Some("Statement of Work")),
+            Some(DateRole::Effective)
+        );
+        // An account statement is still something issued on a date.
+        let digest = digest_of(
+            "ACCOUNT STATEMENT
+Date: April 1, 2026",
+        );
+        assert_eq!(
+            infer_date_role(&digest, "2026-04-01", Some("Account Statement")),
+            Some(DateRole::Issuance)
+        );
+    }
+
+    /// Case folding does not preserve byte lengths - ẞ folds to ß and İ
+    /// folds to two characters - so a page marker found in a lowercased copy
+    /// of the heading is at the wrong offset in the heading itself, and
+    /// truncating there lands inside a character and panics.
+    #[test]
+    fn a_title_with_length_changing_case_folding_does_not_panic() {
+        assert_eq!(clean_title("STRAẞE Ü - Page 2"), "STRAẞE Ü");
+        assert_eq!(
+            clean_title("İSTANBUL WORKS AGREEMENT - Page 2"),
+            "İSTANBUL WORKS AGREEMENT"
+        );
     }
 
     /// Replay of the recorded corpus: the amendment's PDF wraps "is dated"

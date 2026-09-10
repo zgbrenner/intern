@@ -15,7 +15,15 @@ const TEXT_MARKER: &str = "Northstar Calibration";
 
 #[derive(Default)]
 pub struct SetupOperationGate {
-    active: Mutex<Option<CancellationToken>>,
+    active: Mutex<Option<Operation>>,
+}
+
+struct Operation {
+    cancellation: CancellationToken,
+    /// The work has produced its result and cancelling can no longer change
+    /// it. The gate is still held, so no second operation may start until the
+    /// outcome has been published.
+    settled: bool,
 }
 
 impl SetupOperationGate {
@@ -25,19 +33,36 @@ impl SetupOperationGate {
             return Err(setup_busy());
         }
         let cancellation = CancellationToken::new();
-        *active = Some(cancellation.clone());
+        *active = Some(Operation {
+            cancellation: cancellation.clone(),
+            settled: false,
+        });
         Ok(cancellation)
     }
 
+    /// Cancels the operation in flight, and says whether there was one to
+    /// cancel. An operation that has already settled is not one: the model it
+    /// installed is started and verified, and stopping it now would leave the
+    /// interface saying it is ready with nothing running behind it.
     pub fn cancel(&self) -> bool {
         let Ok(active) = self.active.lock() else {
             return false;
         };
-        if let Some(cancellation) = active.as_ref() {
-            cancellation.cancel();
-            true
-        } else {
-            false
+        match active.as_ref() {
+            Some(operation) if !operation.settled => {
+                operation.cancellation.cancel();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Records that the work is over, before its outcome is published.
+    pub fn settle(&self) {
+        if let Ok(mut active) = self.active.lock()
+            && let Some(operation) = active.as_mut()
+        {
+            operation.settled = true;
         }
     }
 

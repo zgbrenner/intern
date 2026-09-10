@@ -10,6 +10,7 @@
 //! a document.
 
 use std::{
+    collections::{HashMap, HashSet},
     fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -151,8 +152,21 @@ pub struct MachinePresence {
     pub version: u32,
     pub machine_id: String,
     pub machine_name: String,
+    /// The machine's hostname, which is the name a sync client puts into a
+    /// conflict copy. Absent from records written before this field existed,
+    /// and an empty name never matches anything.
+    #[serde(default)]
+    pub host_name: String,
     pub user_name: String,
     pub last_seen_at: i64,
+}
+
+impl MachinePresence {
+    /// Every name this machine might be called in a sync client's conflict
+    /// copy: the display name, which may be a label, and the hostname.
+    pub fn names(&self) -> [&str; 2] {
+        [&self.machine_name, &self.host_name]
+    }
 }
 
 /// `ClaimInfo` dominates the size, but boxing it would push the cost onto
@@ -220,6 +234,10 @@ pub struct ClaimStore {
     identity: MachineIdentity,
     clock: Arc<dyn Clock>,
     presence_touched_at: Mutex<Option<i64>>,
+    /// Per claim key, the last heartbeat value seen from another machine and
+    /// the local time it was first seen with that value. See
+    /// `observed_silence`.
+    heartbeats: Mutex<HashMap<String, (i64, i64)>>,
 }
 
 impl ClaimStore {
@@ -246,6 +264,7 @@ impl ClaimStore {
             identity,
             clock,
             presence_touched_at: Mutex::new(None),
+            heartbeats: Mutex::new(HashMap::new()),
         })
     }
 
@@ -292,7 +311,13 @@ impl ClaimStore {
                     }
                     let now = self.clock.now();
                     let lease_stale = now >= claim.lease_expires_at;
-                    let heartbeat_stale = now >= claim.heartbeat_at + CLAIM_LEASE_SECONDS;
+                    // Recorded before anything is decided: skipping the
+                    // observation on the scans that answer early would leave
+                    // the silence measured from a heartbeat this machine is no
+                    // longer looking at.
+                    let silence = self.observed_silence(&key, claim.heartbeat_at, now);
+                    let heartbeat_stale = now >= claim.heartbeat_at + CLAIM_LEASE_SECONDS
+                        && silence >= CLAIM_LEASE_SECONDS;
                     if !(lease_stale && heartbeat_stale) {
                         return AcquireOutcome::HeldByOther(claim);
                     }
@@ -397,11 +422,41 @@ impl ClaimStore {
         }
     }
 
+    /// Reads a claim, and remembers another machine's heartbeat while it is
+    /// there: watching foreign claims on every scan is what accumulates the
+    /// evidence a later takeover needs. See `observed_silence`.
     pub fn read(&self, key: &str) -> Option<ClaimInfo> {
         match load::<ClaimInfo>(&self.claim_path(key)) {
-            Stored::Parsed(claim) => Some(claim),
+            Stored::Parsed(claim) => {
+                if claim.machine_id != self.identity.id && claim.state == ClaimState::Claimed {
+                    self.observed_silence(key, claim.heartbeat_at, self.clock.now());
+                }
+                Some(claim)
+            }
             _ => None,
         }
+    }
+
+    /// How long this machine has watched one claim's heartbeat stand still.
+    ///
+    /// A heartbeat is stamped from its owner's clock, so a machine running
+    /// half an hour behind the rest of the folder writes timestamps that look
+    /// ancient the instant they land, and a takeover decided from them steals
+    /// work from a machine that is alive and renewing. What proves silence is
+    /// that the value has not *changed* here for a whole lease period. A claim
+    /// first seen a moment ago is therefore never silent, however old its
+    /// timestamps claim to be, which also means a machine that has just
+    /// started watching waits out a full lease before it takes anything over.
+    fn observed_silence(&self, key: &str, heartbeat_at: i64, now: i64) -> i64 {
+        let mut seen = self
+            .heartbeats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = seen.entry(key.to_string()).or_insert((heartbeat_at, now));
+        if entry.0 != heartbeat_at {
+            *entry = (heartbeat_at, now);
+        }
+        now.saturating_sub(entry.1)
     }
 
     /// Records which machine first observed (i.e. uploaded) a document.
@@ -449,6 +504,7 @@ impl ClaimStore {
             version: FORMAT_VERSION,
             machine_id: self.identity.id.clone(),
             machine_name: self.identity.name.clone(),
+            host_name: self.identity.host_name.clone(),
             user_name: self.identity.user.clone(),
             last_seen_at: now,
         };
@@ -495,7 +551,11 @@ impl ClaimStore {
     /// leaked dot-prefixed temp files.
     pub fn prune(&self) {
         let now = self.clock.now();
-        self.prune_claims(now);
+        let live = self.prune_claims(now);
+        self.heartbeats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|key, _| live.contains(key));
         self.prune_named_dir::<OriginInfo>(
             &self.root.join("origins"),
             now,
@@ -516,9 +576,12 @@ impl ClaimStore {
         );
     }
 
-    fn prune_claims(&self, now: i64) {
+    /// Returns the keys of the claims that survived, so the heartbeat
+    /// observations cannot outlive the claims they describe.
+    fn prune_claims(&self, now: i64) -> HashSet<String> {
+        let mut live = HashSet::new();
         let Ok(entries) = fs::read_dir(self.root.join("claims")) else {
-            return;
+            return live;
         };
         for entry in entries.flatten() {
             let path = entry.path();
@@ -534,12 +597,15 @@ impl ClaimStore {
                     };
                     if now - reference >= DONE_RETENTION_SECONDS {
                         let _ = fs::remove_file(&path);
+                    } else {
+                        live.insert(claim.key);
                     }
                 }
                 Stored::Unreadable => remove_if_older(&path, now, MALFORMED_RETENTION_SECONDS),
                 Stored::Missing => {}
             }
         }
+        live
     }
 
     fn prune_named_dir<T: DeserializeOwned + Versioned>(

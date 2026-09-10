@@ -2309,7 +2309,7 @@ dependencies = [
 
 [[package]]
 name = "intern-app"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 dependencies = [
  "chrono",
  "intern-core",
@@ -2324,12 +2324,13 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
  "tauri-plugin-updater",
 ]
 
 [[package]]
 name = "intern-core"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 dependencies = [
  "rusqlite",
  "serde",
@@ -2340,7 +2341,7 @@ dependencies = [
 
 [[package]]
 name = "intern-engine"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 dependencies = [
  "base64 0.22.1",
  "fs4",
@@ -2353,11 +2354,12 @@ dependencies = [
  "tokio",
  "unicode-casefold",
  "unicode-normalization",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "intern-intake"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2371,7 +2373,7 @@ dependencies = [
 
 [[package]]
 name = "intern-queue"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 dependencies = [
  "intern-core",
  "intern-engine",
@@ -2384,7 +2386,7 @@ dependencies = [
 
 [[package]]
 name = "intern-release-verifier"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 dependencies = [
  "base64 0.22.1",
  "minisign-verify",
@@ -2395,7 +2397,7 @@ dependencies = [
 
 [[package]]
 name = "intern-worker"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 dependencies = [
  "anydoc",
  "base64 0.22.1",
@@ -5033,6 +5035,22 @@ dependencies = [
  "thiserror 2.0.17",
  "url",
  "windows",
+ "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-single-instance"
+version = "2.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cd0cb5c412a5071b69bab6a6df1583cbb89460d4a83b6a24769b08d15b6b1e1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "windows-sys 0.60.2",
  "zbus",
 ]
 

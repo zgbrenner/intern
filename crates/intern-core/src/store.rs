@@ -93,6 +93,13 @@ impl QueueStore {
                updated_at INTEGER NOT NULL,
                UNIQUE(source_path_key, source_hash)
              );
+             -- Every file added to the queue asks whether its content was filed
+             -- before, and the UNIQUE index above is no use for that question
+             -- because it leads with the path. Without this one the answer is a
+             -- scan of the whole queue, once per file, on the intake path.
+             CREATE INDEX IF NOT EXISTS queue_items_source_hash
+               ON queue_items(source_hash);
+
              CREATE TABLE IF NOT EXISTS proposals (
                queue_item_id INTEGER PRIMARY KEY REFERENCES queue_items(id) ON DELETE CASCADE,
                proposal_json TEXT NOT NULL,
@@ -348,28 +355,31 @@ impl QueueStore {
         else {
             return Ok(None);
         };
-        // The newest receipt is where the content actually is now. Anything
-        // other than a completed apply (no receipt at all, or an undo followed
-        // by keep-original) means the file kept its original name.
+        // The newest *finished* receipt is where the content actually is now.
+        // Asking for the newest receipt of any kind and then requiring it to be
+        // a completed apply reported no filed name at all whenever something
+        // later had been journalled and abandoned - an undo that rolled back
+        // sits on top of the apply that filed the document without having moved
+        // anything. An operation that rolled back moved nothing, so it cannot
+        // answer the question, and the completed apply underneath it still can.
+        // A completed undo does answer it: the file is back at its own name.
         let filed_as = connection
             .query_row(
-                "SELECT destination_path FROM operation_receipts
-                 WHERE queue_item_id = ?1
-                   AND id = (
-                     SELECT MAX(latest.id) FROM operation_receipts latest
-                     WHERE latest.queue_item_id = ?1
-                   )
-                   AND direction = 'apply' AND stage = 'complete'",
+                "SELECT direction, destination_path FROM operation_receipts
+                 WHERE queue_item_id = ?1 AND stage = 'complete'
+                 ORDER BY id DESC LIMIT 1",
                 params![queue_item_id],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()
             .map_err(InternError::from)?
-            .and_then(|destination| {
+            .filter(|(direction, _)| direction == OperationDirection::Apply.as_db())
+            .and_then(|(_, destination)| {
                 Path::new(&destination)
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
             });
+
         Ok(Some(DuplicateInfo {
             queue_item_id,
             source_path: PathBuf::from(source_path),
@@ -830,6 +840,55 @@ impl QueueStore {
             return Err(InternError::new(
                 ErrorCode::StateConflict,
                 "published source-delete uncertainty could not be deferred",
+            ));
+        }
+        let item = query_one(&transaction, "WHERE id = ?1", params![id])?;
+        transaction.commit().map_err(InternError::from)?;
+        Ok(item)
+    }
+
+    /// Hands an `applying` item that reconciliation could not settle to a
+    /// person.
+    ///
+    /// One `applying` row stops the whole queue: `claim_next` and
+    /// `begin_applying` both refuse while any item is applying. An operation
+    /// whose surviving paths cannot be proven used to stay applying forever, so
+    /// a single half-applied rename froze every other document with no way out
+    /// but editing the database by hand. Review is where a state only a person
+    /// can judge belongs, and the receipt is kept so what is on disk can still
+    /// be explained.
+    ///
+    /// The receipt itself is left in whatever stage it reached. It is not
+    /// finished and pretending otherwise would lose the only record of what
+    /// happened, so a parked item can be kept, removed, or canceled but cannot
+    /// be re-applied until a person resolves the files.
+    pub(crate) fn park_applying_for_review(
+        &self,
+        id: i64,
+        receipt_id: i64,
+        error: ErrorCode,
+    ) -> InternResult<QueueItem> {
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(InternError::from)?;
+        let changed = transaction
+            .execute(
+                "UPDATE queue_items
+             SET status = 'needs_review', reconciliation_receipt_id = ?1,
+                 active_receipt_id = NULL, previous_status = NULL,
+                 owner_session = NULL, lease_expires_at = NULL,
+                 error_code = ?2, updated_at = ?3
+             WHERE id = ?4 AND status = 'applying' AND owner_session = ?5
+               AND active_receipt_id = ?1",
+                params![receipt_id, error.as_str(), now(), id, self.session_id],
+            )
+            .map_err(InternError::from)?;
+        if changed != 1 {
+            transaction.rollback().map_err(InternError::from)?;
+            return Err(InternError::new(
+                ErrorCode::StateConflict,
+                "unsettled operation could not be parked for review",
             ));
         }
         let item = query_one(&transaction, "WHERE id = ?1", params![id])?;

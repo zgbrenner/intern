@@ -32,6 +32,12 @@ serde_json = "=1.0.145"
 tauri = { version = "2.11.2", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-dialog = "2.4.0"
+# One Intern per machine. A second process starts a second local model, a
+# second intake watcher, and a second tray against the same queue database.
+# Pinned exactly, like the updater: 2.4.4 is the current release built against
+# the tauri 2.x this app pins, and a floating range on a Tauri plugin is how
+# the crate and its npm package drift apart and fail a release build.
+tauri-plugin-single-instance = "=2.4.4"
 # The Help & support link hands one URL to the system browser. Scoped in
 # capabilities/default.json to the published guide alone, so the webview
 # cannot ask the shell to open anything else.

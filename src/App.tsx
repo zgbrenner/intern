@@ -9,9 +9,10 @@ import { SetupScreen } from './components/SetupScreen';
 import { Sidebar } from './components/Sidebar';
 import { ViewEmpty } from './components/ViewEmpty';
 import { GUIDE_URL } from './lib/bridge';
+import { humanizeReason } from './lib/reasons';
 import type { DesktopBridge, SelectionBoundary, SelectionResult } from './lib/bridge';
 import { createInMemoryBridge } from './lib/inMemoryBridge';
-import type { SetupEventSource } from './lib/tauriBridge';
+import type { SetupEventSource, TauriSelectionBoundary } from './lib/tauriBridge';
 import { useMediaQuery } from './lib/useMediaQuery';
 import { useQueue } from './features/queue/useQueue';
 import type { AppSettings, QueueItem, QueueView, SetupState } from './types';
@@ -24,12 +25,16 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const reviewTrigger = useRef<{ element: HTMLButtonElement; itemId: string } | null>(null);
   const focusRestoreVersion = useRef(0);
   const bridge = suppliedBridge ?? bridgeRef.current;
-  const { items, paused, setPaused, refresh, error: queueError, reconnect } = useQueue(bridge);
+  const { items, paused, setPaused, refresh, error: queueError, pipelineError, reconnect } = useQueue(bridge);
   const [view, setView] = useState<QueueView>('queue');
   const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Until the real settings arrive these are placeholders, not the person's
+  // configuration, and saving them would overwrite a destination, a watched
+  // folder, and a machine name with defaults.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({ destination: '', destinationLayout: 'flat', startMinimized: false, automaticRename: false, intakeFolder: '', intakeEnabled: false, processOthersUploads: false, machineLabel: '', runInBackground: false, startAtLogin: false, recordDescriptions: false, modelSource: 'local', hostedProvider: 'anthropic', hostedBaseUrl: '', hostedModel: '' });
   const [setup, setSetup] = useState<SetupState | undefined>(suppliedBridge ? undefined : { state: 'ready', downloadedBytes: 0, totalBytes: 0 });
   const [setupAction, setSetupAction] = useState<'start' | 'cancel' | 'choose'>();
@@ -41,7 +46,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const narrowInspector = useMediaQuery('(max-width: 1100px)');
 
   useEffect(() => {
-    void bridge.getSettings().then(setSettings);
+    void bridge.getSettings().then((loaded) => { setSettings(loaded); setSettingsLoaded(true); }).catch(() => setSettingsLoaded(false));
     void bridge.getSetup().then(setSetup).catch((error) => setSetupError(describeSetupError(error)));
   }, [bridge]);
   useEffect(() => {
@@ -132,14 +137,18 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     setActionError('');
     setActionMessage('');
     try {
-      await run();
-      await refresh();
+      try { await run(); }
+      catch (error) {
+        try { await refresh(); } catch { /* Preserve the original command error. */ }
+        setActionError(describeActionError(error));
+        return false;
+      }
+      // The command has already happened. A reread that fails afterwards is
+      // reported by the queue's own connection banner, and calling the command
+      // failed would send someone looking for a file under its old name.
+      try { await refresh(); } catch { /* Reported as a queue connection error. */ }
       setActionMessage(success);
       return true;
-    } catch (error) {
-      try { await refresh(); } catch { /* Preserve the original command error. */ }
-      setActionError(describeActionError(error));
-      return false;
     } finally {
       actionInFlight.current = false;
       setActionPending(false);
@@ -194,6 +203,11 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     try { await bridge.openGuide(); }
     catch { setActionError(`The guide could not be opened. You can reach it at ${GUIDE_URL}.`); }
   };
+  const saveSettings = async (next: AppSettings) => {
+    if (!settingsLoaded) throw new Error('Intern could not read your settings, so saving now would replace them with defaults. Restart Intern and try again.');
+    await bridge.saveSettings(next);
+    setSettings(next);
+  };
   const openSettings = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; settingsTrigger.current = trigger; setSettingsOpen(true); };
   const closeSettings = () => { setSettingsOpen(false); settingsTrigger.current?.focus(); };
   const openHistory = (trigger: HTMLButtonElement) => { focusRestoreVersion.current += 1; historyTrigger.current = trigger; setHistoryOpen(true); };
@@ -230,6 +244,24 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     reviewTrigger.current = null;
     setSelectedId(targetId);
   };
+  // Tauri's own drag-drop is on, so on the desktop a dropped file never
+  // reaches the drop zone's HTML5 handler: the paths arrive as a window event
+  // instead. That path used to call the bridge straight from BrowserApp, with
+  // no error to show and no busy guard, so a refused drop simply vanished.
+  // It goes through the same import as the pickers now.
+  const importDrop = useRef(importSelection);
+  useEffect(() => { importDrop.current = importSelection; });
+  useEffect(() => {
+    const source = selection as (SelectionBoundary & Partial<TauriSelectionBoundary>) | undefined;
+    if (!source?.subscribeDrops) return;
+    let active = true;
+    let stop: (() => void) | undefined;
+    void source.subscribeDrops((result) => { if (active) void importDrop.current(async () => result); }).then((unsubscribe) => {
+      if (active) stop = unsubscribe;
+      else unsubscribe();
+    }).catch(() => { /* No drop stream in this runtime; the pickers still work. */ });
+    return () => { active = false; stop?.(); };
+  }, [selection]);
   const runSetupAction = async (action: 'start' | 'cancel' | 'choose', run: () => Promise<boolean | void>) => {
     if (setupAction) return;
     setSetupAction(action);
@@ -261,18 +293,31 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
       onChooseExisting={chooseExistingModel}
       onUseHostedModel={() => setSettingsOpen(true)}
     />
-    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={() => setSettingsOpen(false)} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); setSettingsOpen(false); setSetup(await bridge.getSetup()); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
+    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={() => setSettingsOpen(false)} onSave={async (next) => { await saveSettings(next); setSettingsOpen(false); setSetup(await bridge.getSetup()); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
   </>;
   return <main className="app-shell" aria-label="Intern">
     <p className="sr-only" role="status" aria-label="Queue status" aria-live="polite" aria-atomic="true">{queueStatus}</p>
     <p className="sr-only" role="status" aria-label="Action status" aria-live="polite" aria-atomic="true">{actionMessage}</p>
-    {actionError && <p className="operation-feedback" role="status" aria-label="Action error" aria-live="polite" aria-atomic="true">{actionError}</p>}
-    <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} hosted={settings.modelSource === 'hosted'} onAddFiles={() => { if (selection) void importSelection(async () => ({ files: await selection.pickFiles() })); }} onAddFolder={() => { if (selection) void importSelection(async () => ({ folder: await selection.pickFolder() })); }} onTogglePause={() => void (async () => { if (await runQueueAction(paused ? bridge.resumeQueue : bridge.pauseQueue, `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
+    {/*
+      An alert, not a polite status: this paragraph is created with its
+      sentence already in it, and a live region that arrives complete is not
+      reliably spoken. Every other error banner in the app is an alert too.
+    */}
+    {actionError && <p className="operation-feedback" role="alert" aria-label="Action error">{actionError}</p>}
+    <AppHeader inert={drawerOpen} busy={actionPending} paused={paused} hosted={settings.modelSource === 'hosted'} onAddFiles={() => { if (selection) void importSelection(async () => ({ files: await selection.pickFiles() })); }} onAddFolder={() => { if (selection) void importSelection(async () => ({ folder: await selection.pickFolder() })); }} onTogglePause={() => void (async () => { if (await runQueueAction(() => paused ? bridge.resumeQueue() : bridge.pauseQueue(), `Queue ${paused ? 'resumed' : 'paused'}.`)) setPaused(!paused); })()} />
     <Sidebar inert={drawerOpen} active={view} items={items} onChange={(next) => { focusRestoreVersion.current += 1; reviewTrigger.current = null; setView(next); setSelectedId(undefined); }} onSettings={openSettings} onHelp={() => void openGuide()} />
     <div className="workspace"><section className="queue-panel" aria-label="Queue items" inert={drawerOpen || undefined}>
       {queueError && <div className="note note--failed" role="alert" aria-label="Queue connection error">
         <p>{queueError.kind === 'subscription' ? 'Live queue updates are unavailable.' : 'The queue could not be refreshed.'} {describeActionError(queueError.cause)} {items.length > 0 ? 'Showing the last loaded items.' : 'Queue contents may not be available yet.'}</p>
         <button type="button" disabled={actionPending} onClick={reconnect}>Retry queue connection</button>
+      </div>}
+      {/*
+        The queue stops itself when a failure would repeat for every document -
+        a model that cannot be reached, a key that was refused. Without this it
+        simply went quiet, and the reason it reported was thrown away.
+      */}
+      {pipelineError && <div className="note note--failed" role="alert" aria-label="Queue stopped">
+        <p>The queue stopped taking new work. {humanizeReason(pipelineError)}</p>
       </div>}
       {/*
         An empty queue is the first thing a new user sees, and it used to be
@@ -312,7 +357,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
       {selected && <ReviewInspector busy={actionPending} drawer={drawerOpen} item={selected} onClose={closeReview} onApprove={(filename, description) => void refreshAndClear(() => bridge.approve(selected.id, filename, description), 'Rename applied.')} onKeep={() => void refreshAndClear(() => bridge.keepOriginal(selected.id), 'Original filename kept.')} onCancel={() => void refreshAndClear(() => bridge.cancel(selected.id), 'Processing canceled.')} onRetry={() => void refreshAndClear(() => bridge.retry(selected.id), 'Item queued for retry.')} onRemove={() => void refreshAndClear(() => bridge.remove(selected.id), 'Item removed.')} onUndo={() => void refreshAndClear(() => bridge.undo(selected.id), 'Operation undone.')} />}
     </div>
     {historyOpen && <HistoryDialog bridge={bridge} selection={selection} onClose={closeHistory} />}
-    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={closeSettings} onSave={async (next) => { await bridge.saveSettings(next); setSettings(next); closeSettings(); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
+    {settingsOpen && <SettingsDialog settings={settings} bridge={bridge} selection={selection} onClose={closeSettings} onSave={async (next) => { await saveSettings(next); closeSettings(); }} onCheckForUpdate={() => bridge.checkForUpdate()} onInstallUpdate={() => bridge.installUpdate()} />}
   </main>;
 }
 

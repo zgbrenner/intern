@@ -36,6 +36,7 @@ pub mod infer;
 pub mod legacy;
 pub mod manifest;
 pub mod naming;
+mod process;
 pub mod prompt;
 pub mod server;
 pub mod setup;

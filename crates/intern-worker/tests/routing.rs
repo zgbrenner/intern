@@ -133,6 +133,11 @@ fn selective_ocr_threshold_boundaries_are_exact() {
     assert!(page_needs_ocr(&page(&"a".repeat(19), 0.65)));
     assert!(!page_needs_ocr(&page(&"a".repeat(20), 0.65)));
 
+    // The stamp rule: short text on a page that is all image.
+    assert!(page_needs_ocr(&page(&"a".repeat(199), 0.9)));
+    assert!(!page_needs_ocr(&page(&"a".repeat(200), 0.9)));
+    assert!(!page_needs_ocr(&page(&"a".repeat(199), 0.899)));
+
     let exactly_three_percent = format!("{}{}", "a".repeat(97), "�".repeat(3));
     let over_three_percent = format!("{}{}", "a".repeat(96), "�".repeat(4));
     assert!(!page_needs_ocr(&page(&exactly_three_percent, 0.0)));
@@ -323,4 +328,75 @@ fn vision_image_long_edge_is_reduced_to_1344_pixels() {
     let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).unwrap();
 
     assert_eq!(decoded.dimensions(), (1_344, 672));
+}
+
+/// A litigation scan carries a stamp in its text layer and nothing else. The
+/// stamp is long enough to clear the twenty-character veto, so the page used
+/// to be filed as native text and the entire document came back as the words
+/// "CONFIDENTIAL - SUBJECT TO PROTECTIVE ORDER".
+#[test]
+fn a_scanned_page_with_a_confidentiality_stamp_is_still_ocred() {
+    let (document, renders) = route(
+        vec![page("CONFIDENTIAL - SUBJECT TO PROTECTIVE ORDER", 0.99)],
+        vec![OcrResult::new(
+            "Settlement Agreement and Mutual Release between Acme Corporation and Ridgeline LLC",
+            92.0,
+        )],
+    );
+
+    assert_eq!(renders, 1);
+    assert_eq!(document.pages[0].source, PageSource::Ocr);
+    assert!(
+        document.pages[0].text.contains("Settlement Agreement"),
+        "{}",
+        document.pages[0].text
+    );
+}
+
+/// An engineering drawing on an A1 sheet is over the render cap at 300 DPI,
+/// and it has a perfectly good text layer. Enforcing the cap before deciding
+/// whether the page is ever rendered failed the whole document over a page
+/// nobody was going to rasterise.
+#[test]
+fn a_large_format_text_page_is_extracted_without_rendering() {
+    let mut drawing = page(
+        "SHEET 3 OF 8 - FOUNDATION PLAN - REVISION C - ISSUED FOR CONSTRUCTION - \
+         SCALE 1:50 - DRAWN BY R. OKONKWO - CHECKED BY T. HALVORSEN",
+        0.2,
+    );
+    drawing.width_pixels = 7_020;
+    drawing.height_pixels = 9_930;
+
+    let (document, renders) = route(vec![drawing], vec![]);
+
+    assert_eq!(renders, 0);
+    assert_eq!(document.pages[0].source, PageSource::Native);
+    assert!(document.pages[0].text.contains("FOUNDATION PLAN"));
+}
+
+/// The same sheet with nothing in its text layer still cannot be read
+/// without rendering it, and that is a resource limit rather than a silent
+/// empty page.
+#[test]
+fn a_large_format_scanned_page_is_still_a_resource_limit() {
+    let mut scan = page("", 1.0);
+    scan.width_pixels = 7_020;
+    scan.height_pixels = 9_930;
+    let renders = Arc::new(AtomicUsize::new(0));
+    let pdf = FakePdf {
+        pages: vec![scan],
+        renders: Arc::clone(&renders),
+    };
+
+    let error = extract_pdf(
+        Path::new("drawing.pdf"),
+        &pdf,
+        &FakeOcr { results: vec![] },
+        &ResourceLimits::default(),
+        &CancellationToken::new(),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "RESOURCE_LIMIT_EXCEEDED");
+    assert_eq!(renders.load(Ordering::SeqCst), 0);
 }

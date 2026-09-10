@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Cursor, Read};
+use std::io::{BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -183,6 +183,45 @@ impl OcrResult {
 /// re-reading in another orientation before any of that.
 pub const CONFIDENT_READING: f32 = 75.0;
 
+/// Of two readings of the same page, the one to keep. A tie keeps the
+/// incumbent, so the orientation OSD chose wins by default and behaviour on a
+/// blank page stays predictable.
+///
+/// Orientation detection is trained on prose with ascenders and descenders.
+/// On a dense all-caps form it can report a rotation that is 180 degrees
+/// wrong, and OCR then returns a full page of gibberish rather than obviously
+/// empty output - same word count, plausible shape, useless text. Volume
+/// cannot tell those apart; word confidence can. Measured on one corpus page,
+/// the four orientations scored 23, 14, 14, and 76.
+///
+/// Confidence alone cannot arbitrate either, because it is a mean over
+/// whatever was read: three tokens picked out of a rotated page at 80 outrank
+/// three hundred words of the real document at 74.9, and the page then comes
+/// back as three tokens. A reading has to be about as dense as the one it
+/// displaces before its confidence counts.
+pub fn better_reading(incumbent: OcrResult, challenger: OcrResult) -> OcrResult {
+    let words = |reading: &OcrResult| reading.text.split_whitespace().count();
+    let comparably_dense = words(&challenger) * 2 >= words(&incumbent);
+    if challenger.mean_confidence > incumbent.mean_confidence && comparably_dense {
+        challenger
+    } else {
+        incumbent
+    }
+}
+
+/// Whether reading this page again in another orientation could tell us
+/// anything.
+///
+/// A confident reading is done. So is a reading that found no words at all:
+/// that page is blank, and a blank page is blank in four orientations. It
+/// scores zero confidence, though, which read as "not confident, keep
+/// looking" and bought three more recognition passes and three more
+/// full-page PNG encodes - on the back of every sheet of a three-hundred-page
+/// double-sided scan.
+pub fn orientation_search_is_worthwhile(reading: &OcrResult) -> bool {
+    reading.mean_confidence < CONFIDENT_READING && !reading.text.trim().is_empty()
+}
+
 pub fn apply_detected_rotation(
     image: DynamicImage,
     rotation_degrees: u16,
@@ -298,8 +337,23 @@ pub fn page_needs_ocr(page: &PdfPageInspection) -> bool {
     } else {
         replacements as f32 / considered as f32
     };
-    (meaningful < 20 && page.image_coverage >= 0.65) || replacement_ratio > 0.03
+    // A page that is essentially all image is a scan, and a scan's text layer
+    // is whatever the scanner or the review platform stamped on it: a Bates
+    // number, a confidentiality legend, an exhibit label. Those clear the
+    // twenty-character veto while carrying none of the document, so a
+    // stamped scan has to reach OCR on the strength of its coverage.
+    let stamped_scan = meaningful < STAMP_CHARACTERS && page.image_coverage >= FULL_PAGE_IMAGE;
+    (meaningful < 20 && page.image_coverage >= 0.65) || stamped_scan || replacement_ratio > 0.03
 }
+
+/// Native text this short on a page that is all image is a stamp, not the
+/// document.
+const STAMP_CHARACTERS: usize = 200;
+
+/// Image coverage at or above which a page is a picture of a page rather
+/// than a page with a picture on it. A scanner covers the sheet; a chart or a
+/// letterhead on a page of prose does not come close.
+const FULL_PAGE_IMAGE: f32 = 0.9;
 
 fn page_needs_vision(page: &PdfPageInspection) -> bool {
     let meaningful = page
@@ -331,9 +385,18 @@ pub fn extract_pdf(
 
     for inspection in inspections {
         timed_check(cancel, started, limits)?;
-        limits.validate_page_pixels(inspection.width_pixels, inspection.height_pixels)?;
+        // The render cap belongs to rendering. A large-format sheet - an A1
+        // drawing, a plan set - is over it at 300 DPI while carrying a
+        // perfectly good text layer, and failing the whole document over a
+        // page nobody was going to rasterise loses the document. A page that
+        // is too large to render also cannot be escalated to vision, but it
+        // keeps its text: the page image is the optional part.
+        let renderable = limits
+            .validate_page_pixels(inspection.width_pixels, inspection.height_pixels)
+            .is_ok();
         if !page_needs_ocr(&inspection) {
-            let vision_escalated = page_needs_vision(&inspection) && vision_candidate.is_none();
+            let vision_escalated =
+                renderable && page_needs_vision(&inspection) && vision_candidate.is_none();
             if vision_escalated {
                 let rendered = pdf.render(path, inspection.page_index, cancel)?;
                 let (render_width, render_height) = rendered.image.dimensions();
@@ -358,6 +421,9 @@ pub fn extract_pdf(
         {
             warnings.push(ExtractionWarning::NativeTextCorrupt);
         }
+        // This page has no text worth keeping, so it has to be rendered to be
+        // read at all, and being too large to render is a resource limit.
+        limits.validate_page_pixels(inspection.width_pixels, inspection.height_pixels)?;
         let rendered = pdf.render(path, inspection.page_index, cancel)?;
         let (render_width, render_height) = rendered.image.dimensions();
         limits.validate_page_pixels(render_width, render_height)?;
@@ -432,9 +498,11 @@ pub fn extract_anydoc(
     cancel.check()?;
     let metadata = std::fs::metadata(path).map_err(ExtractionError::io)?;
     limits.validate_source_size(metadata.len())?;
+    let bytes = std::fs::read(path).map_err(ExtractionError::io)?;
+    let format = expected_anydoc_format(path, &bytes)?;
     enforce_office_decompressed_limit(path, limits, cancel)?;
     cancel.check()?;
-    let markdown = anydoc::to_markdown(path)
+    let markdown = anydoc::to_markdown_bytes(&bytes, format)
         .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
     cancel.check()?;
     Ok(ExtractedDocument {
@@ -449,6 +517,36 @@ pub fn extract_anydoc(
         truncated: false,
         optional_image: None,
     })
+}
+
+/// The parser an extension names, refusing content that disagrees with it.
+///
+/// Left to itself anydoc picks its parser from the file's content and treats
+/// the extension as a fallback, so a workbook renamed `.docx` is rendered by
+/// its Excel path with none of the row and column caps spreadsheets are
+/// routed through here, and a PDF renamed `.pptx` reaches a PDF reader with
+/// no page cap, no OCR, and no page image. Routing in this crate is by
+/// extension, so content that is not what the extension names is a routing
+/// failure that belongs in review, not a document to parse anyway.
+fn expected_anydoc_format(path: &Path, bytes: &[u8]) -> Result<anydoc::Format, ExtractionError> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let named = anydoc::Format::from_extension(&extension).ok_or_else(|| {
+        ExtractionError::unsupported(format!("no Office reader handles a .{extension} file"))
+    })?;
+    // Content that identifies as nothing at all - an encrypted package, a
+    // container this version cannot recognise - is still handed to the parser
+    // the extension names, which reports what is actually wrong with it far
+    // better than a routing refusal would.
+    if anydoc::Format::from_bytes(bytes).is_some_and(|detected| detected != named) {
+        return Err(ExtractionError::unsupported(format!(
+            "file content is not what its .{extension} extension names"
+        )));
+    }
+    Ok(named)
 }
 
 pub(crate) fn enforce_office_decompressed_limit(
@@ -514,8 +612,7 @@ pub fn extract_text(
         bytes.extend_from_slice(&buffer[..read]);
     }
     limits.validate_source_size(bytes.len() as u64)?;
-    let text = String::from_utf8(bytes)
-        .map_err(|error| ExtractionError::parse_failed(error.to_string()))?;
+    let (text, lossy) = decode_text(&bytes);
     cancel.check()?;
     Ok(ExtractedDocument {
         pages: vec![ExtractedPage {
@@ -525,10 +622,176 @@ pub fn extract_text(
             ocr_confidence: None,
             vision_escalated: false,
         }],
-        warnings: vec![],
+        warnings: if lossy {
+            vec![ExtractionWarning::NativeTextCorrupt]
+        } else {
+            vec![]
+        },
         truncated: false,
         optional_image: None,
     })
+}
+
+/// Decodes a text file by its byte-order mark, and says whether anything was
+/// replaced on the way.
+///
+/// Notepad and PowerShell's redirection still write UTF-16, and a mark on a
+/// UTF-8 file is ordinary; neither is a document to refuse, and the mark
+/// itself is not a character of the document. Bytes that decode as nothing
+/// known are read lossily rather than lost: half a document with a warning
+/// beats a file the queue cannot open at all.
+fn decode_text(bytes: &[u8]) -> (String, bool) {
+    fn from_utf16(units: impl Iterator<Item = u16>) -> (String, bool) {
+        let units = units.collect::<Vec<_>>();
+        match String::from_utf16(&units) {
+            Ok(text) => (text, false),
+            Err(_) => (String::from_utf16_lossy(&units), true),
+        }
+    }
+    match bytes {
+        [0xFF, 0xFE, rest @ ..] => from_utf16(
+            rest.chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]])),
+        ),
+        [0xFE, 0xFF, rest @ ..] => from_utf16(
+            rest.chunks_exact(2)
+                .map(|pair| u16::from_be_bytes([pair[0], pair[1]])),
+        ),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => from_utf8(rest),
+        _ => from_utf8(bytes),
+    }
+}
+
+fn from_utf8(bytes: &[u8]) -> (String, bool) {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => (text.to_owned(), false),
+        Err(_) => (String::from_utf8_lossy(bytes).into_owned(), true),
+    }
+}
+
+/// Reads a standalone image file as a one-page document. There is no text
+/// layer to prefer, so the page is OCR'd and kept as the page image.
+///
+/// A TIFF can hold a page per frame - a fax or a batch scan usually does -
+/// and only the first frame is read here, because neither this decoder nor
+/// the CCITT-compressed files these arrive in support the rest. What the
+/// caller must not do is believe it received the whole document, so unread
+/// frames are reported as truncation.
+pub fn extract_image(
+    path: &Path,
+    ocr: &dyn OcrBackend,
+    limits: &ResourceLimits,
+    cancel: &CancellationToken,
+) -> Result<ExtractedDocument, ExtractionError> {
+    cancel.check()?;
+    let image = load_oriented_image(path, limits)?;
+    let rendered = RenderedPage::new(0, image);
+    let result = ocr.recognize(&rendered, cancel)?;
+    let mut warnings = Vec::new();
+    if result.mean_confidence < CONFIDENT_READING {
+        warnings.push(ExtractionWarning::LowOcrConfidence);
+    }
+    let truncated = has_unread_frames(path);
+    if truncated {
+        warnings.push(ExtractionWarning::TextTruncated);
+    }
+    let optional_image = Some(normalize_vision_image(
+        0,
+        apply_detected_rotation(rendered.image, result.rotation_degrees)?,
+    )?);
+    Ok(ExtractedDocument {
+        pages: vec![ExtractedPage {
+            page_number: 1,
+            text: result.text,
+            source: PageSource::Ocr,
+            ocr_confidence: Some(result.mean_confidence),
+            vision_escalated: true,
+        }],
+        warnings,
+        truncated,
+        optional_image,
+    })
+}
+
+/// Whether an image file holds frames after the one that was read.
+///
+/// A TIFF is a chain of image file directories; the first one's link to the
+/// next is all this needs, and it is read rather than decoded so a
+/// twelve-frame fax costs one seek. Anything that does not read as a TIFF
+/// holds one image by construction, and a file whose chain cannot be
+/// followed is reported as single-framed rather than as an error: the frame
+/// that was read is still the document's first page.
+fn has_unread_frames(path: &Path) -> bool {
+    fn next_directory(path: &Path) -> Option<u64> {
+        let mut file = File::open(path).ok()?;
+        let mut header = [0_u8; 8];
+        file.read_exact(&mut header).ok()?;
+        let big_endian = match &header[..2] {
+            b"II" => false,
+            b"MM" => true,
+            _ => return None,
+        };
+        let word = |bytes: [u8; 2]| {
+            if big_endian {
+                u16::from_be_bytes(bytes)
+            } else {
+                u16::from_le_bytes(bytes)
+            }
+        };
+        let long = |bytes: [u8; 4]| {
+            if big_endian {
+                u32::from_be_bytes(bytes)
+            } else {
+                u32::from_le_bytes(bytes)
+            }
+        };
+        let quad = |bytes: [u8; 8]| {
+            if big_endian {
+                u64::from_be_bytes(bytes)
+            } else {
+                u64::from_le_bytes(bytes)
+            }
+        };
+        // Classic TIFF marks itself 42 and counts in 32-bit words; BigTIFF
+        // marks itself 43 and counts in 64-bit ones, with wider entries.
+        let (first, entry_bytes, big) = match word([header[2], header[3]]) {
+            42 => (
+                u64::from(long([header[4], header[5], header[6], header[7]])),
+                12_u64,
+                false,
+            ),
+            43 => {
+                let mut offset = [0_u8; 8];
+                file.read_exact(&mut offset).ok()?;
+                (quad(offset), 20_u64, true)
+            }
+            _ => return None,
+        };
+        file.seek(SeekFrom::Start(first)).ok()?;
+        let entries = if big {
+            let mut count = [0_u8; 8];
+            file.read_exact(&mut count).ok()?;
+            quad(count)
+        } else {
+            let mut count = [0_u8; 2];
+            file.read_exact(&mut count).ok()?;
+            u64::from(word(count))
+        };
+        file.seek(SeekFrom::Current(
+            i64::try_from(entries.checked_mul(entry_bytes)?).ok()?,
+        ))
+        .ok()?;
+        if big {
+            let mut next = [0_u8; 8];
+            file.read_exact(&mut next).ok()?;
+            Some(quad(next))
+        } else {
+            let mut next = [0_u8; 4];
+            file.read_exact(&mut next).ok()?;
+            Some(u64::from(long(next)))
+        }
+    }
+    next_directory(path).is_some_and(|next| next != 0)
 }
 
 pub fn load_oriented_image(

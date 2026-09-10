@@ -31,17 +31,29 @@ knows anything about models.
 
 Native text first, always. PDFium supplies each page's text and how much of the
 page is covered by images. A page goes to OCR only when it has fewer than 20
-meaningful characters under heavy image coverage, or when more than 3% of its
+meaningful characters under heavy image coverage, when it has fewer than 200 on
+a page that is essentially all image — a scan whose text layer is a Bates
+number or a "CONFIDENTIAL" stamp and nothing else — or when more than 3% of its
 characters came back as replacement glyphs. Office containers go through AnyDoc
-to Markdown, which preserves headings and tables; plain text and Markdown are
-read directly. Excel workbooks are read sheet-per-page as Markdown tables,
-capped at 200 rows by 30 columns per sheet with an elision marker so a large
-workbook cannot flood distillation. PowerPoint decks go through the same
-Office reader as Word documents, slide by slide in order. `.eml` emails and
-Outlook `.msg` messages emit a fixed-order header
-block — the `Date:` line verbatim, so the sent date is checkable against the
-document like any other fact — followed by the plain-text body and a listing
-(never an extraction) of attachments.
+to Markdown, which preserves headings and tables, and only when the container's
+content is not something else: routing here is by extension, so a workbook
+renamed `.docx` — which AnyDoc would otherwise render through its uncapped
+Excel path — is a routing failure for review rather than a document, while
+content that identifies as nothing at all (an encrypted package) still reaches
+the parser its extension names, which says what is wrong with it.
+Plain text and Markdown are read directly, by byte-order mark: UTF-16 in
+either order and a marked UTF-8 file all decode, the mark itself never reaches
+the text, and bytes in some legacy encoding are read lossily with a corruption
+warning rather than failing the document. Excel workbooks are read
+sheet-per-page as Markdown tables, capped at 200 rows by 30 columns per sheet
+with an elision marker so a large workbook cannot flood distillation. A
+standalone image is OCR'd as one page; a TIFF holding a frame per page — a fax,
+a batch scan — yields its first frame and reports the rest as truncated rather
+than dropping them silently. PowerPoint decks go through the same Office reader
+as Word documents, slide by slide in order. `.eml` emails and Outlook `.msg`
+messages emit a fixed-order header block — the `Date:` line verbatim, so the
+sent date is checkable against the document like any other fact — followed by
+the plain-text body and a listing (never an extraction) of attachments.
 
 Two consequences of "OCR only when necessary" are enforced in code rather than
 documented as intent:
@@ -58,9 +70,13 @@ documented as intent:
   and OCR then returns a full page of gibberish with the same word count and
   shape as a real reading. Volume cannot tell those apart, so mean word
   confidence arbitrates: one corpus page scored 23, 14, 14, and 76 across the
-  four orientations. A page that reads well the first time — every upright
-  document — still costs exactly one pass, so the common case is unchanged and
-  only a page already headed for a low-confidence warning pays for the search.
+  four orientations. Confidence is a mean, though, so a reading only displaces
+  another when it read a comparable amount; three confident tokens are not a
+  better reading of a page than three hundred words just under the bar. A page
+  that reads well the first time — every upright document — still costs exactly
+  one pass, and so does a page that reads as blank, which is every other sheet
+  of a duplex scan; only a page already headed for a low-confidence warning
+  pays for the search.
 
 ## Distillation
 
@@ -248,7 +264,11 @@ YYYY-MM-DD <document type> <relation> <party>[ and <party>].<ext>
 `<relation>` is one of `between`, `for`, `with`, `from`, `to`, or — when the model
 declines to state one — a bare `-`, which keeps a validated party in the name
 without asserting a relationship the document never established. Only `between`
-takes two names; the others take the first. Real names from the scored corpus:
+takes two names; the others take the first, and a stated one-sided relation
+keeps only that one on the validated proposal too - `to John Smith and
+Northstar Lantern Works LLC` would assert a relationship the notice never
+stated. A declined relation asserts nothing about anybody, so it keeps every
+validated name for the reviewer to read. Real names from the scored corpus:
 
 ```text
 2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf
@@ -276,8 +296,9 @@ from free text, so every name in a filename has been found in the document.
 Names longer than 120 characters shed the second party, then the party clause,
 then truncate the type — detail is lost from the least identifying end first.
 Windows-hostile characters, reserved device names, trailing dots and spaces, and
-bidirectional control characters are removed; the original extension is always
-preserved; collisions get a ` (2)` suffix. The engine checks collisions
+invisible formatting characters — the bidirectional controls, a soft hyphen, a
+zero-width space, a byte-order mark — are removed; the original extension is
+always preserved; collisions get a ` (2)` suffix. The engine checks collisions
 against the only folder it knows, the document's own; the queue recomposes the
 name against the folder the document is actually going to, so a suffix means
 a real collision at the destination and never a phantom one at the source.
@@ -287,7 +308,20 @@ subfolder the queue derives from the validated facts: the year, the year and
 type, the type, or the first party (`2026/Statement of Work/`). A fact the
 layout needs but the document lacks sends it to `Undated` or `Unsorted`, never
 the root. Folders are created on first use and removed by the undo that
-empties them; the destination itself is never removed.
+empties them; the destination itself is never removed, and neither is
+anything above the folders the layout in force could have made - a
+destination changed to a folder that contains the old one leaves everything
+already filed inside the new root, and those folders are somebody's filing
+rather than Intern's scaffolding. An undo puts the
+document back and leaves it waiting for a person, not ready to file: ready is
+the state the scheduler files from, and with automatic renaming on the same
+name would be applied again within the minute, undoing the undo.
+
+Only one document is worked on at a time, so an approval made while the queue
+is busy cannot be applied on the spot. It is remembered on the proposal and
+applied by the scheduler between documents, under the name the reviewer typed
+- a busy queue is not something wrong with the document, and never sends it to
+review.
 
 ### House style
 
@@ -320,7 +354,10 @@ into the connector, and a diff would credit it all to one party.
 
 A rule takes effect on the second identical edit (`EDITS_TO_LEARN`), or at
 once when a person says "Use now" in Settings, and every document still
-waiting is recomposed under it so the queue shows the change immediately.
+waiting is recomposed under it so the queue shows the change immediately -
+every document but the one whose name was just approved, which is the
+reviewer's own text and would lose whatever the validated facts do not
+carry, the date they typed with it most of all.
 Respelling a spelling Intern applied maps back to the document's word - the
 person changed their mind about the word, not about Intern - and restoring
 the document's own spelling retracts the rule. The whole memory is the list
@@ -352,6 +389,20 @@ Threads are half the logical processors on purpose. llama.cpp scales with
 physical cores rather than SMT threads, and taking every core makes the rest of
 Windows stutter — the product's premise is that it runs while you work.
 
+The server is started once and kept warm between documents, so how it stops
+matters as much as how it starts: it holds well over a gigabyte, and a second
+copy started by the next launch would hold another. Stopping it is not left to
+`Drop`. Every child Intern spawns — the model server and `intern-worker` both —
+joins a Windows job object marked kill-on-close, whose last handle is Intern's
+own and is closed by the kernel however Intern ends. A crash, a panic, and the
+`std::process::exit` that the window close and the updater's install step both
+leave through therefore all reap the children, and the updater never asks NSIS
+to overwrite a binary that is still running. Deliberate exits do better than
+that: Tauri's exit events stop the pipeline while it is still whole, and the
+updater's before-exit hook — Tauri's `cleanup_before_exit`, reached through a
+guard parked in the app's resource table — does the same before the installer
+is launched. The job object is the backstop, not the plan.
+
 ### A hosted model
 
 The inference is local by default and the local server is the product. The
@@ -369,16 +420,25 @@ that never gets filed. What goes out is the distilled digest of the document,
 condensed but verbatim; what comes back is read through the same JSON
 recovery and the same evidence checks as a local reply. A refusal from the
 model is reported as one and sends the document to review, never re-routed
-elsewhere; a rejected key or an unreachable service pauses the queue rather
-than failing the backlog one item at a time; a busy service earns one retry.
+elsewhere; a rejected key, an unreachable service, a model name the service
+does not know, and an address that has moved all pause the queue rather than
+failing the backlog one item at a time; a busy service earns one retry.
 
 The key is stored in the operating system's credential store under Intern's
 name, never in the settings file, and never travels anywhere but the address
 that was configured — redirects are refused. Plain HTTP is accepted only to
 this machine, so a local server can be used without a certificate and a
-remote one cannot be used without one. **Test connection** sends the same
+remote one cannot be used without one; the same judgement takes the machine's
+proxy out of the path for an address on this machine, because a proxy would
+otherwise receive in cleartext the key and the document text that plain HTTP
+was allowed for on the grounds that neither leaves the machine. A service on
+the internet is still reached through the proxy. **Test connection** sends the same
 calibration document setup uses to check the local model, so a wrong key,
-model name, or address is found before a real document is sent.
+model name, or address is found before a real document is sent. It sends to
+the address on screen rather than the saved one, so a new address can be
+tried before it is saved — but a key that was already on the machine goes
+only to the address the settings name. Typing the key is what admits a new
+address, and nobody can type a key they do not have.
 
 ### The same document twice
 
@@ -399,7 +459,11 @@ decide: this month's statement and last month's share almost every word, and
 a fingerprint barely sees the date and the figures that differ. So the dates
 have to agree - the filed name's leading date against the date the analysis
 found or the model read - and without a date on one side only a
-near-identical text counts. A match sends the document to review with
+near-identical text counts. Every filing within the
+distance is considered, not only the nearest one: last year's renewal of an
+agreement can be nearer in text than this year's second scan of it is, and
+looking only at the nearest hid the filing the document really repeats behind
+a date that said "another document". A match sends the document to review with
 `NEAR_DUPLICATE`, named after the filing it repeats and the machine that made
 it; it is never filed on its own, and an undo forgets the fingerprint.
 
@@ -479,7 +543,11 @@ app's sinks write the description records that let a SharePoint column carry
 the sentence — see [`sharepoint-descriptions.md`](sharepoint-descriptions.md)
 — and the filed markers of the shared intake folder. A sink hears about a
 rename only after it has succeeded and cannot undo it; a record that fails to
-write is reported in Settings, and the rename stands.
+write is reported in Settings, and the rename stands. A rename the applier
+had to settle afterwards - an ambiguous failure finished by a reconciliation,
+here, on the next retry, or on the next recovery pass - is reported the same
+way, because what is reported is read from the queue's own record of the
+operation rather than from whichever call happened to finish it.
 
 The mirror image is the *duplicate oracle*: before analysing a document the
 queue checks its own history for the same content, then asks the oracle,

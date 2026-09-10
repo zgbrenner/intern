@@ -34,9 +34,11 @@ initial connector.
 A failure while the content is still in the cloud is not a verdict on the
 document, because nothing ever read it. Intern holds the claim open in that
 case rather than closing it, and Settings counts the documents waiting on
-their contents. When the bytes arrive the claim is released, the next scan
-re-acquires it, and the document goes through the pipeline with something to
-read. A second failure with the content local is a real failure and is
+their contents. Each scan asks the sync client for the content it is waiting
+on — a placeholder is only fetched when something opens it, so a held document
+would wait for ever if nobody asked — and when the bytes arrive the claim is
+released, the next scan re-acquires it, and the document goes through the
+pipeline with something to read. A second failure with the content local is a real failure and is
 recorded as one. A laptop that spends a trip offline therefore returns to a
 folder it can still work on, instead of one full of tombstones.
 
@@ -48,7 +50,11 @@ clients replay changes in ways that make event streams lie, and a periodic
 scan is invisible next to a model that takes seconds per document. A
 file is picked up once its size and modification time have held still for a
 full scan interval, so a document still being copied or synced in is never
-read half-written.
+read half-written. In the mode that processes everyone's uploads, a document
+also waits out a short courtesy delay counted from when it arrived on this
+machine — not from the timestamp it carries, which a sync client preserves
+from wherever it was written — so the machine that uploaded it gets first
+refusal on its own work.
 
 Conflict copies are left alone. When two machines edit the same document
 before sync catches up, the sync client keeps both and renames the losing side
@@ -58,7 +64,10 @@ document, and filing one would put a second copy of something already filed
 into the destination. The spelled-out form is unambiguous; the machine-suffix
 form is not, because `Invoice-ACME.pdf` is an ordinary filename, so that
 suffix is believed only when it names a machine this folder has actually seen
-in its presence records. Skipping a document someone meant to file is the
+in its presence records. Both names a machine goes by count: the sync client
+uses the hostname, not the label someone may have typed into Settings, so
+presence records carry both and either one marks a conflict copy. Skipping a
+document someone meant to file is the
 worse of the two mistakes, so the guess is never made on shape alone. Settings
 counts what was skipped; resolve the conflict in the folder and the survivor
 is picked up on the next scan.
@@ -119,10 +128,15 @@ process it again. Done claims are pruned after 30 days.
 
 A crashed or unplugged machine must not strand its documents, so claims can be
 taken over — but only when **both** the lease deadline has passed **and** the
-owner's heartbeat has been silent for the full lease period. One clock being
-wrong, or one sync being slow, is not enough to steal work from a live
-machine. This is the same two-factor liveness rule Intern's local queue uses
-between processes.
+owner's heartbeat has been silent for the full lease period. Silence is
+measured on the machine doing the taking: what counts is that the heartbeat
+has not *changed* there for a whole lease, not how old the timestamp inside it
+looks, because that timestamp comes from the owner's own clock and a machine
+running behind the rest of the folder would otherwise appear dead the moment
+it wrote one. A machine that has only just started watching therefore waits
+out a full lease before taking anything over. One clock being wrong, or one
+sync being slow, is not enough to steal work from a live machine. This is the
+same two-factor liveness rule Intern's local queue uses between processes.
 
 Sync engines are eventually consistent, so claims are honest about being
 best-effort: two machines that race a claim while offline can both think they

@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
-import type { SelectionBoundary } from '../../lib/bridge';
-import { createInMemoryBridge } from '../../lib/inMemoryBridge';
+import type { SelectionBoundary, SelectionResult } from '../../lib/bridge';
+import { createBrowserSelectionBoundary, createInMemoryBridge } from '../../lib/inMemoryBridge';
+import type { QueueBridgeEvent } from '../../lib/tauriBridge';
 import type { QueueItem } from '../../types';
 
 function deferred<T>() {
@@ -41,23 +42,23 @@ const ready: QueueItem = {
     const pickFiles = vi.fn().mockRejectedValueOnce('The file picker could not open.').mockResolvedValue([]);
     render(<App bridge={createInMemoryBridge({ items: [] })} selection={selection({ pickFiles })} />);
     fireEvent.click(await screen.findByRole('button', { name: /^Add files$/i }));
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('The file picker could not open.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('The file picker could not open.');
     await waitFor(() => expect(screen.getByRole('button', { name: /^Add files$/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /^Add files$/i }));
     await waitFor(() => expect(pickFiles).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByRole('status', { name: 'Action error' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('alert', { name: 'Action error' })).not.toBeInTheDocument());
   });
 
   it('reports folder picker errors', async () => {
     render(<App bridge={createInMemoryBridge({ items: [] })} selection={selection({ pickFolder: async () => { throw new Error('Folder access denied.'); } })} />);
     fireEvent.click(await screen.findByRole('button', { name: /^Add folder$/i }));
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('Folder access denied.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('Folder access denied.');
   });
 
   it('reports drop resolution errors without removing the existing queue', async () => {
     render(<App bridge={createInMemoryBridge({ items: [ready] })} selection={selection({ resolveDrop: async () => { throw new Error('Dropped file is unavailable.'); } })} />);
     fireEvent.drop(await screen.findByRole('region', { name: /drag files/i }));
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('Dropped file is unavailable.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('Dropped file is unavailable.');
     expect(screen.getByRole('button', { name: 'Select agreement.pdf' })).toBeVisible();
   });
 
@@ -65,7 +66,7 @@ const ready: QueueItem = {
     const addFiles = vi.fn(async () => { throw new Error('The shared folder is offline.'); });
     render(<App bridge={{ ...createInMemoryBridge({ items: [ready] }), addFiles }} selection={selection({ pickFiles: async () => [{ path: 'browser://new.pdf', displayName: 'new.pdf' }] })} />);
     fireEvent.click(await screen.findByRole('button', { name: /^Add files$/i }));
-    expect(await screen.findByRole('status', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
     expect(screen.getByRole('button', { name: 'Select agreement.pdf' })).toBeVisible();
     expect(addFiles).toHaveBeenCalledOnce();
   });
@@ -76,7 +77,7 @@ const ready: QueueItem = {
     fireEvent.click(await screen.findByRole('button', { name: /^Add files$/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Add files$/i })).toBeEnabled());
     expect(addFiles).not.toHaveBeenCalled();
-    expect(screen.queryByRole('status', { name: 'Action error' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'Action error' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Action status' })).toBeEmptyDOMElement();
   });
 
@@ -87,7 +88,7 @@ const ready: QueueItem = {
     const zone = await screen.findByRole('region', { name: /drag files/i });
     act(() => { fireEvent.drop(zone); fireEvent.drop(zone); });
     expect(resolveDrop).toHaveBeenCalledOnce();
-    expect(screen.getByRole('status', { name: 'Action error' })).toHaveTextContent('Add these files again when it finishes.');
+    expect(screen.getByRole('alert', { name: 'Action error' })).toHaveTextContent('Add these files again when it finishes.');
     await act(async () => { pending.resolve({}); await pending.promise; });
     await waitFor(() => expect(screen.getByRole('button', { name: /^Add files$/i })).toBeEnabled());
   });
@@ -107,6 +108,98 @@ const ready: QueueItem = {
     await act(async () => { pending.resolve(); await pending.promise; });
     await screen.findByRole('button', { name: 'Select new.pdf' });
     expect(screen.getByRole('complementary', { name: 'Review item' })).toHaveTextContent('second.pdf');
+  });
+
+  // The queue pauses itself rather than failing a whole backlog one document
+  // at a time, and it names the reason on the change event. Until that reason
+  // was carried through the bridge the queue simply stopped with nothing on
+  // screen to say why.
+  it('says why the queue stopped, and stops saying it once the queue runs again', async () => {
+    let listener!: (event: QueueBridgeEvent) => void;
+    const bridge = {
+      ...createInMemoryBridge({ items: [ready] }),
+      subscribeQueue: async (next: typeof listener) => { listener = next; return () => {}; },
+    };
+    render(<App bridge={bridge} />);
+    await screen.findByRole('button', { name: 'Select agreement.pdf' });
+
+    act(() => listener({ type: 'changed', error: 'HOSTED_MODEL_UNAUTHORIZED' }));
+
+    expect(await screen.findByRole('alert', { name: 'Queue stopped' })).toHaveTextContent('The hosted service rejected the API key.');
+
+    act(() => listener({ type: 'changed', paused: false }));
+
+    await waitFor(() => expect(screen.queryByRole('alert', { name: 'Queue stopped' })).not.toBeInTheDocument());
+  });
+
+  // Tauri's own drag-drop is enabled, so on the desktop a dropped file never
+  // reaches the HTML5 handler the tests above drive: the paths arrive as a
+  // window event. That path called the bridge directly, so a refusal was
+  // swallowed and a drop during another action started a second import.
+  it('reports a desktop drop the backend refuses', async () => {
+    let drop!: (result: SelectionResult) => void;
+    const addFiles = vi.fn(async () => { throw new Error('The shared folder is offline.'); });
+    const dropping = selection({ subscribeDrops: async (listener: typeof drop) => { drop = listener; return () => {}; } } as Partial<SelectionBoundary>);
+    render(<App bridge={{ ...createInMemoryBridge({ items: [ready] }), addFiles }} selection={dropping} />);
+    await screen.findByRole('button', { name: 'Select agreement.pdf' });
+
+    await act(async () => { drop({ files: [{ path: 'C:\Docs\dropped.pdf', displayName: 'dropped.pdf' }] }); });
+
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('The shared folder is offline.');
+    expect(addFiles).toHaveBeenCalledOnce();
+  });
+
+  // Browsers report a dismissed file dialog as a `cancel` event and nothing
+  // else. Waiting only for `change` meant the promise never settled, and the
+  // queue's one-action-at-a-time guard stayed closed for the rest of the
+  // session: every later Add files, Add folder, or drop was turned away.
+  it('releases the queue when the browser file picker is dismissed', async () => {
+    const inputs: HTMLInputElement[] = [];
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const element = createElement(tag);
+      if (tag === 'input') inputs.push(element as HTMLInputElement);
+      return element;
+    });
+    render(<App bridge={createInMemoryBridge({ items: [] })} selection={createBrowserSelectionBoundary()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Add files$/i }));
+    await waitFor(() => expect(inputs).toHaveLength(1));
+
+    await act(async () => { inputs[0].dispatchEvent(new Event('cancel')); });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Add files$/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /^Add files$/i }));
+    await waitFor(() => expect(inputs).toHaveLength(2));
+  });
+
+  // The rename has already happened by the time the queue is reread. Telling
+  // the person it failed sends them to look for a file that is no longer under
+  // its old name; the reread failing is what the queue connection banner is
+  // for, and it says so itself.
+  it('does not blame the command when only the reread afterwards fails', async () => {
+    const base = createInMemoryBridge({ items: [ready] });
+    const listItems = vi.fn(base.listItems);
+    render(<App bridge={{ ...base, listItems }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select agreement.pdf' }));
+    listItems.mockRejectedValueOnce(new Error('Queue database is busy.'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply rename' }));
+
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Action status' })).toHaveTextContent('Rename applied.'));
+    expect(screen.queryByRole('alert', { name: 'Action error' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert', { name: 'Queue connection error' })).toHaveTextContent('Queue database is busy.');
+  });
+
+  // A polite live region is only spoken when its contents change while it is
+  // already on the page. This one is created with its sentence already in it,
+  // so a screen reader reached the failure only if the person happened to
+  // wander into it. An alert is the role for something that appears.
+  it('announces an action error with the role that is spoken when it appears', async () => {
+    render(<App bridge={createInMemoryBridge({ items: [] })} selection={selection({ pickFolder: async () => { throw new Error('Folder access denied.'); } })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Add folder$/i }));
+
+    expect(await screen.findByRole('alert', { name: 'Action error' })).toHaveTextContent('Folder access denied.');
   });
 
   it('gates same-tick rename submissions before React has rerendered', async () => {

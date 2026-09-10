@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::client::{
-    AttemptError, ChatCompletion, ModelRequest, Proposer, decode, proposal_from_text,
+    AttemptError, ChatCompletion, ModelRequest, Proposer, decode, proposal_from_text, read_capped,
 };
 use crate::domain::{DocumentAnalysis, ModelProposal};
 use crate::engine::Engine;
@@ -83,7 +83,7 @@ impl HostedProvider {
 }
 
 /// Everything needed to reach one hosted model.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct HostedModelConfig {
     pub provider: HostedProvider,
     /// The API root, `https://api.anthropic.com/v1` or the like. Empty means
@@ -93,6 +93,22 @@ pub struct HostedModelConfig {
     /// default, where there is one.
     pub model: String,
     pub api_key: String,
+}
+
+/// The key is kept out of the printed form for the same reason it is kept out
+/// of the settings file: it is stored in the credential store, and anything
+/// that prints a config - a log line, a panic message, a debug assertion -
+/// would otherwise put it somewhere nobody meant it to be.
+impl std::fmt::Debug for HostedModelConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostedModelConfig")
+            .field("provider", &self.provider)
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("api_key", &"[redacted]")
+            .finish()
+    }
 }
 
 impl HostedModelConfig {
@@ -139,13 +155,7 @@ impl HostedModelConfig {
 pub fn endpoint_for(provider: HostedProvider, base_url: &str) -> EngineResult<Url> {
     let root = Url::parse(base_url.trim().trim_end_matches('/'))
         .map_err(|_| misconfigured("the hosted model's address is not a URL"))?;
-    let local = root.host_str().is_some_and(|host| {
-        host.eq_ignore_ascii_case("localhost")
-            || host
-                .trim_matches(['[', ']'])
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|address| address.is_loopback())
-    });
+    let local = is_this_machine(&root);
     match root.scheme() {
         "https" => {}
         "http" if local => {}
@@ -168,6 +178,29 @@ pub fn endpoint_for(provider: HostedProvider, base_url: &str) -> EngineResult<Ur
     endpoint.set_query(None);
     endpoint.set_fragment(None);
     Ok(endpoint)
+}
+
+/// Whether an address is this machine.
+fn is_this_machine(url: &Url) -> bool {
+    url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    })
+}
+
+/// Whether a request to this endpoint goes through the machine's proxy.
+///
+/// The same judgement that lets plain HTTP through decides this, and it has
+/// to: the loopback exception exists so a server on this machine can be used
+/// without a certificate, not so a proxy configured for the internet can be
+/// handed the API key and the whole distilled text of every document in
+/// plaintext on the way to `localhost`. A hosted service on the internet is
+/// reached through the proxy as before.
+fn uses_system_proxy(endpoint: &Url) -> bool {
+    !is_this_machine(endpoint)
 }
 
 /// The client for one hosted model.
@@ -194,16 +227,22 @@ impl HostedClient {
     pub fn new(config: HostedModelConfig) -> EngineResult<Self> {
         let config = config.resolved()?;
         let endpoint = endpoint_for(config.provider, &config.base_url)?;
-        // The system proxy is honoured here, unlike for the local server: a
-        // machine that reaches the internet through a proxy reaches this
-        // endpoint through it too. Redirects are still refused, so a key is
-        // only ever sent to the address that was configured.
-        let http = Client::builder()
+        // The system proxy is honoured for a service on the internet, unlike
+        // for the local server: a machine that reaches the internet through a
+        // proxy reaches that endpoint through it too. It is bypassed for an
+        // endpoint on this machine, because a proxy would otherwise be handed
+        // the key and the document text that plain HTTP was allowed for
+        // exactly on the grounds that neither leaves the machine. Redirects
+        // are refused either way, so a key is only ever sent to the address
+        // that was configured.
+        let mut builder = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| unreachable_error())?;
+            .redirect(reqwest::redirect::Policy::none());
+        if !uses_system_proxy(&endpoint) {
+            builder = builder.no_proxy();
+        }
+        let http = builder.build().map_err(|_| unreachable_error())?;
         Ok(Self {
             config,
             endpoint,
@@ -277,9 +316,7 @@ impl HostedClient {
         if !status.is_success() {
             return Err(AttemptError(failure_for_status(status)));
         }
-        let bytes = response
-            .bytes()
-            .map_err(|_| AttemptError(EngineErrorCode::HostedModelUnreachable))?;
+        let bytes = read_capped(response, EngineErrorCode::HostedModelUnreachable)?;
         match self.config.provider {
             HostedProvider::Anthropic => decode_anthropic(&bytes),
             HostedProvider::OpenAiCompatible => {
@@ -309,7 +346,15 @@ impl Proposer for HostedClient {
 /// What an HTTP failure means to the person who has to fix it.
 pub(crate) fn failure_for_status(status: StatusCode) -> EngineErrorCode {
     match status.as_u16() {
+        // Redirects are refused, so a 3xx reaches this point as an answer:
+        // the configured address has moved. Reporting it as an outage sends
+        // a person looking at their network for a wrong address.
+        300..=399 => EngineErrorCode::HostedModelMisconfigured,
         401 | 403 => EngineErrorCode::HostedModelUnauthorized,
+        // An unknown or retired model name, or an API root that is not one.
+        // Every document in the backlog would meet the same answer, so this
+        // pauses the queue once instead of failing them one at a time.
+        404 => EngineErrorCode::HostedModelMisconfigured,
         429 => EngineErrorCode::HostedModelRateLimited,
         400..=499 => EngineErrorCode::HostedModelRejected,
         _ => EngineErrorCode::HostedModelUnreachable,
@@ -377,7 +422,7 @@ const fn hosted_error(code: EngineErrorCode) -> EngineError {
         ),
         EngineErrorCode::HostedModelUnreachable => unreachable_error(),
         EngineErrorCode::HostedModelMisconfigured => {
-            misconfigured("the hosted model is not configured")
+            misconfigured("the hosted service does not know that address or model name")
         }
         _ => EngineError::new(
             EngineErrorCode::ModelResponseInvalid,
@@ -491,6 +536,32 @@ mod tests {
         }
     }
 
+    /// The proxy bypass has to follow the same classification that allowed
+    /// plain HTTP in the first place. A machine with `HTTP_PROXY` set and no
+    /// loopback entry in its `NO_PROXY` list sent the key and the whole
+    /// distilled document to the proxy in cleartext on the way to Ollama.
+    #[test]
+    fn loopback_endpoints_never_use_a_proxy() {
+        for local in [
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:1234/v1",
+            "http://[::1]:1234/v1",
+            "https://localhost:8443/v1",
+        ] {
+            let endpoint = endpoint_for(HostedProvider::OpenAiCompatible, local).unwrap();
+            assert!(!uses_system_proxy(&endpoint), "{local}");
+        }
+        for remote in [
+            "https://api.anthropic.com/v1",
+            "https://api.openai.com/v1",
+            // A name that merely starts with "localhost" is somebody else's.
+            "https://localhost.example.com/v1",
+        ] {
+            let endpoint = endpoint_for(HostedProvider::OpenAiCompatible, remote).unwrap();
+            assert!(uses_system_proxy(&endpoint), "{remote}");
+        }
+    }
+
     #[test]
     fn an_anthropic_request_is_a_messages_call_with_no_sampling_knobs() {
         let client = HostedClient::new(config(HostedProvider::Anthropic, "", "")).unwrap();
@@ -577,10 +648,22 @@ mod tests {
             failure_for_status(StatusCode::TOO_MANY_REQUESTS),
             EngineErrorCode::HostedModelRateLimited
         );
+        // An unknown or retired model name, or an API root that is not one.
+        // Every document in the backlog would meet it, so it is a
+        // configuration problem that pauses the queue once.
         assert_eq!(
             failure_for_status(StatusCode::NOT_FOUND),
-            EngineErrorCode::HostedModelRejected
+            EngineErrorCode::HostedModelMisconfigured
         );
+        // Redirects are refused, so a base URL that has moved arrives here as
+        // a 3xx. That is a wrong address, not a network outage.
+        for moved in [301, 302, 303, 307, 308] {
+            assert_eq!(
+                failure_for_status(StatusCode::from_u16(moved).unwrap()),
+                EngineErrorCode::HostedModelMisconfigured,
+                "{moved}"
+            );
+        }
         assert_eq!(
             failure_for_status(StatusCode::BAD_REQUEST),
             EngineErrorCode::HostedModelRejected
@@ -601,5 +684,12 @@ mod tests {
         let debug = format!("{client:?}");
         assert!(!debug.contains("sk-test"));
         assert!(debug.contains("[redacted]"));
+
+        // Nor does the configuration it was built from: it is what the desktop
+        // app holds on to, and anything that prints it - a log line, a panic
+        // message - would otherwise carry the key with it.
+        let settings = format!("{:?}", config(HostedProvider::Anthropic, "", ""));
+        assert!(!settings.contains("sk-test"), "{settings}");
+        assert!(settings.contains("[redacted]"));
     }
 }
