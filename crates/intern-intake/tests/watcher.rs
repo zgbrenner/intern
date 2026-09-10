@@ -834,6 +834,38 @@ fn an_unreadable_subfolder_is_counted_and_skipped_rather_than_failing_the_scan()
     result.unwrap();
 }
 
+/// Rescuing a claim a crashed machine left behind is still subject to the
+/// uploader gate. A document whose uploader cannot be established stays held,
+/// whoever's dead claim happens to be sitting on it.
+#[test]
+fn a_stranded_claim_over_an_unverified_upload_stays_held() {
+    let rig = Rig::start(true, &[]);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Unknown);
+    rig.step();
+    rig.write("unknown.pdf", b"nobody can vouch for this");
+    let facts = facts_for(rig.temp.path(), "unknown.pdf");
+    let crashed =
+        ClaimStore::new(rig.temp.path(), identity("crashed-machine", "elsewhere")).unwrap();
+    assert!(matches!(
+        crashed.acquire(&facts),
+        intern_intake::AcquireOutcome::Acquired
+    ));
+    rig.step();
+    rig.step();
+    rig.clock.advance(2 * CLAIM_LEASE_SECONDS);
+    rig.step();
+    rig.step();
+
+    assert!(rig.host.enqueued().is_empty());
+    let status = rig.watcher.status();
+    assert_eq!(status.uploader_unknown, 1, "{status:?}");
+    assert_eq!(
+        rig.read_claim(&facts.key()).machine_id,
+        "crashed-machine",
+        "an unverifiable document is not claimed, dead lease or not"
+    );
+}
+
 #[test]
 fn unknown_uploader_is_held_even_when_all_uploads_are_enabled() {
     let rig = Rig::start(true, &[]);
