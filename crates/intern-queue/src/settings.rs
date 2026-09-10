@@ -140,7 +140,12 @@ impl SettingsStore {
         let bytes = fs::read(&self.path).map_err(|_| {
             PipelineError::new("SETTINGS_UNAVAILABLE", "settings could not be read")
         })?;
-        serde_json::from_slice(&bytes)
+        // Windows tooling marks a UTF-8 file: one `Set-Content -Encoding utf8`
+        // in Windows PowerShell is enough, and serde_json refuses to read past
+        // the mark. A marked file is not a corrupt one, and the document
+        // parser reads text files by their mark for the same reason.
+        let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+        serde_json::from_slice(bytes)
             .map_err(|_| PipelineError::new("SETTINGS_INVALID", "settings are not valid"))
     }
 

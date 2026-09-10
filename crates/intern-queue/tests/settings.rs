@@ -100,3 +100,20 @@ fn every_layout_round_trips_through_its_snake_case_name() {
     }
     assert_eq!(DestinationLayout::default(), DestinationLayout::Flat);
 }
+
+#[test]
+fn a_settings_file_written_with_a_byte_order_mark_still_loads() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("settings.json");
+    // What Windows PowerShell's `Set-Content -Encoding utf8` writes.
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend_from_slice(
+        br#"{ "destination": "/somewhere/out", "startMinimized": true, "intakeEnabled": true }"#,
+    );
+    fs::write(&path, bytes).unwrap();
+
+    let loaded = SettingsStore::new(&path).load().unwrap();
+
+    assert_eq!(loaded.destination, "/somewhere/out");
+    assert!(loaded.intake_enabled);
+}
