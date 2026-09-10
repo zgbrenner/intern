@@ -9,7 +9,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use common::{MockClock, facts_for, identity, labelled_identity, wait_until};
@@ -1010,6 +1010,56 @@ fn a_held_placeholder_is_hydrated_when_the_host_can_reach_the_cloud() {
         !rig.claim_file(&key).exists(),
         "the released claim lets the next scan give the document a real attempt"
     );
+}
+
+/// A sync client can settle a file's size before it has finished with it and
+/// stamp the uploader's modification time at the end. From that moment the
+/// document has a different claim key, so the claim taken under the old key
+/// must not be left behind as a live lease and the document must still be
+/// filed exactly once.
+#[test]
+fn a_modification_time_stamped_after_the_claim_still_ends_in_one_filed_document() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("scan.pdf", b"a document the sync client is still finishing");
+    rig.step();
+    rig.step();
+    let first = facts_for(rig.temp.path(), "scan.pdf").key();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+
+    // The sync client finishes and puts the uploader's own timestamp on it.
+    let file = OpenOptions::new().write(true).open(&path).unwrap();
+    file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000))
+        .unwrap();
+    drop(file);
+    let second = facts_for(rig.temp.path(), "scan.pdf").key();
+    assert_ne!(
+        first, second,
+        "a new modification time is a new document key"
+    );
+
+    rig.step();
+    rig.step();
+    assert_eq!(
+        rig.host.enqueued(),
+        vec![path.clone(), path.clone()],
+        "the same path handed over again is what the queue's own (path, hash) \
+         uniqueness absorbs; a torn key is never processed on its own"
+    );
+
+    // The queue files it. Neither claim may be left behind as a live lease for
+    // another machine's takeover math to deal with.
+    rig.host.set_state(
+        &path,
+        ItemState::Done {
+            outcome: DoneOutcome::Renamed,
+            result_filename: Some("2020-09-13 Scan.pdf".to_string()),
+        },
+    );
+    fs::remove_file(&path).unwrap();
+    rig.step();
+    assert_eq!(rig.read_claim(&first).state, ClaimState::Done);
+    assert_eq!(rig.read_claim(&second).state, ClaimState::Done);
 }
 
 /// A Files On-Demand placeholder is a real path with real metadata and no
