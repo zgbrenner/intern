@@ -1075,6 +1075,11 @@ impl AppState {
             .lock()
             .map_err(|_| intake_state_conflict())?
             .clone()
+            .or_else(|| {
+                self.app
+                    .state::<Arc<crate::microsoft_intake::MicrosoftIntake>>()
+                    .local_only_contradiction()
+            })
             .or_else(|| self.filed_index.last_error());
         Ok(status_dto(
             settings.intake_enabled,
