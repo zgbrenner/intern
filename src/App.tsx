@@ -29,6 +29,11 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const [view, setView] = useState<QueueView>('queue');
   const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string>();
+  // Whether the selection is one a person made. Narrow, the inspector is a
+  // modal drawer, and the selection seeded below is not a person's: opening
+  // that drawer for it launched Intern inside a dialog nobody had asked for,
+  // over an inert queue, with the caret in a proposed filename.
+  const [selectedByPerson, setSelectedByPerson] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   // Until the real settings arrive these are placeholders, not the person's
@@ -92,13 +97,13 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
   const visible = query ? filtered.filter((item) => matchesQuery(item, query)) : filtered;
   const filterShown = filtered.length > FILTER_THRESHOLD || query.length > 0;
   const selected = items.find((item) => item.id === selectedId);
-  const drawerOpen = Boolean(selected && narrowInspector);
+  const drawerOpen = Boolean(selected && selectedByPerson && narrowInspector);
   const readyItems = items.filter((item) => item.status === 'ready' && item.proposedFilename);
   // Only items that have not started. Anything mid-flight, awaiting a decision,
   // or already renamed is deliberately out of reach of the discard action.
   const waitingItems = items.filter((item) => item.status === 'waiting');
   const queueStatus = queueStatusAnnouncement(items, paused);
-  const select = (item: QueueItem, trigger: HTMLButtonElement) => { seededSelection.current = true; focusRestoreVersion.current += 1; reviewTrigger.current = { element: trigger, itemId: item.id }; setSelectedId(item.id); };
+  const select = (item: QueueItem, trigger: HTMLButtonElement) => { seededSelection.current = true; focusRestoreVersion.current += 1; reviewTrigger.current = { element: trigger, itemId: item.id }; setSelectedId(item.id); setSelectedByPerson(true); };
   const restoreQueueFocus = () => {
     const invocation = reviewTrigger.current;
     const version = ++focusRestoreVersion.current;
@@ -243,6 +248,7 @@ export function App({ bridge: suppliedBridge, selection }: { bridge?: DesktopBri
     focusRestoreVersion.current += 1;
     reviewTrigger.current = null;
     setSelectedId(targetId);
+    setSelectedByPerson(true);
   };
   // Tauri's own drag-drop is on, so on the desktop a dropped file never
   // reaches the drop zone's HTML5 handler: the paths arrive as a window event
