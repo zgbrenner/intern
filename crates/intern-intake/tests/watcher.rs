@@ -112,9 +112,15 @@ struct FakeHydration {
     dehydrated: Mutex<HashSet<PathBuf>>,
     /// Whether a request for a placeholder's content would succeed.
     reachable: AtomicBool,
+    /// How often the scan asked the sync client for a file's bytes.
+    fetches: AtomicUsize,
 }
 
 impl FakeHydration {
+    fn fetches(&self) -> usize {
+        self.fetches.load(Ordering::SeqCst)
+    }
+
     fn set_dehydrated(&self, path: &Path, dehydrated: bool) {
         let mut paths = self.dehydrated.lock().unwrap();
         if dehydrated {
@@ -135,6 +141,7 @@ impl Hydration for FakeHydration {
     /// The sync client fetches the bytes when something opens the file;
     /// offline, the open fails and the file stays a placeholder.
     fn hydrate(&self, path: &Path) -> bool {
+        self.fetches.fetch_add(1, Ordering::SeqCst);
         if !self.reachable.load(Ordering::SeqCst) {
             return false;
         }
@@ -1002,6 +1009,88 @@ fn a_held_placeholder_is_hydrated_when_the_host_can_reach_the_cloud() {
     assert!(
         !rig.claim_file(&key).exists(),
         "the released claim lets the next scan give the document a real attempt"
+    );
+}
+
+/// A Files On-Demand placeholder is a real path with real metadata and no
+/// content, and claiming one must cost exactly the stat the walk already did.
+/// The sync client is asked for the bytes only once a document has actually
+/// failed to read, because that fetch happens on the scan thread and pulls the
+/// whole file down.
+#[test]
+fn a_placeholder_is_claimed_from_its_metadata_without_the_scan_fetching_it() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("online-only.pdf", b"bytes that live in the cloud");
+    rig.hydration.set_dehydrated(&path, true);
+    rig.hydration.reachable.store(true, Ordering::SeqCst);
+    rig.step();
+    rig.step();
+
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+    assert_eq!(rig.hydration.fetches(), 0);
+    assert!(
+        rig.hydration.is_dehydrated(&path),
+        "claiming a placeholder must not pull it down"
+    );
+    // And it stays that way while the queue works on it.
+    rig.step();
+    assert_eq!(rig.hydration.fetches(), 0);
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+}
+
+/// The whole round trip a placeholder takes: claimed from metadata, failed
+/// because there was nothing to read, held while the sync client fetches the
+/// content, and then given a real attempt with the bytes on disk. A document
+/// that was only ever waiting for its content must never end up tombstoned as
+/// a document that failed.
+#[test]
+fn a_placeholder_that_hydrates_is_given_a_real_attempt_rather_than_a_failure() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("contract.pdf", b"an online-only document");
+    rig.step();
+    rig.step();
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+
+    // Offline: extraction failed without anything having read the document,
+    // and every further scan asks again rather than giving up on it.
+    rig.hydration.set_dehydrated(&path, true);
+    rig.host.set_state(&path, ItemState::Failed);
+    rig.step();
+    rig.step();
+    assert_eq!(rig.hydration.fetches(), 2);
+    assert_eq!(rig.watcher.status().awaiting_hydration, 1);
+    assert_eq!(rig.read_claim(&key).state, ClaimState::Claimed);
+    assert_eq!(rig.read_claim(&key).machine_id, "here-machine");
+
+    // The bytes arrive, the claim is released, and the next scan hands the
+    // document back to the queue with something to read.
+    rig.hydration.reachable.store(true, Ordering::SeqCst);
+    rig.step();
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+    rig.step();
+    assert_eq!(
+        rig.host.enqueued(),
+        vec![path.clone(), path.clone()],
+        "the document deserves a second attempt now the content is here"
+    );
+
+    rig.host.set_state(
+        &path,
+        ItemState::Done {
+            outcome: DoneOutcome::Renamed,
+            result_filename: Some("2026-04-01 Contract.pdf".to_string()),
+        },
+    );
+    rig.step();
+    let claim = rig.read_claim(&key);
+    assert_eq!(claim.state, ClaimState::Done);
+    assert_eq!(claim.outcome, Some(DoneOutcome::Renamed));
+    assert_eq!(
+        claim.result_filename.as_deref(),
+        Some("2026-04-01 Contract.pdf")
     );
 }
 
