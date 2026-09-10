@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -191,17 +192,26 @@ impl SettingsStore {
         let bytes = serde_json::to_vec_pretty(settings)
             .map_err(|_| PipelineError::new("SETTINGS_INVALID", "settings could not be encoded"))?;
         // Written beside the target and renamed into place so a crash mid-write
-        // leaves the previous settings intact instead of a truncated file.
+        // leaves the previous settings intact instead of a truncated file, and
+        // flushed to the disk before the rename, because a rename can outlive
+        // the bytes it points at when the machine loses power - the shared
+        // folder's own state is written the same way.
         let mut temp = self.path.as_os_str().to_owned();
         temp.push(".tmp");
         let temp = PathBuf::from(temp);
-        fs::write(&temp, bytes).map_err(io_error)?;
+        write_sync(&temp, &bytes).map_err(io_error)?;
         fs::rename(&temp, &self.path).map_err(io_error)
     }
 
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+fn write_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 fn io_error(_: std::io::Error) -> PipelineError {
