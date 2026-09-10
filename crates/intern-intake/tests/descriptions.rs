@@ -202,6 +202,66 @@ fn refiling_the_same_path_replaces_the_record_and_an_undo_retracts_it() {
     );
 }
 
+/// The records live inside the destination library, so the sync client
+/// replicates them and can leave a conflict copy of one behind. An undo that
+/// removes only the record's own name leaves the copy in the library, where
+/// the flow that fills the column reads it exactly like a record - and writes
+/// the description of a document that is no longer filed.
+#[test]
+fn an_undo_retracts_the_copies_of_a_record_the_sync_client_left_too() {
+    let destination = TempDir::new().unwrap();
+    let ledger =
+        DescriptionLedger::new(destination.path(), identity("m", "Front desk"), Vec::new());
+    let document_path = destination.path().join(FILED_NAME);
+    let record = ledger.record(&filed(document_path.clone())).unwrap();
+    let key = record.file_stem().unwrap().to_string_lossy().into_owned();
+    let conflicted = record.with_file_name(format!("{key}-DESKTOP-A1B2C3.json"));
+    let numbered = record.with_file_name(format!("{key} (2).json"));
+    fs::copy(&record, &conflicted).unwrap();
+    fs::copy(&record, &numbered).unwrap();
+
+    assert!(ledger.retract(&document_path).unwrap());
+
+    assert!(!record.exists());
+    assert!(!conflicted.exists(), "the conflict copy is still a record");
+    assert!(!numbered.exists(), "so is the numbered copy");
+    // Nothing else in the folder is touched: another document's record is not
+    // this undo's business, and neither is the README.
+    assert!(
+        destination
+            .path()
+            .join(".intern")
+            .join("descriptions")
+            .join("README.txt")
+            .exists()
+    );
+}
+
+/// Windows hands the same folder out under two spellings - `C:\Users\...` from
+/// a settings dialog and `\\?\C:\Users\...` from `canonicalize` - and a record
+/// written under one has to be found and retracted under the other.
+#[cfg(windows)]
+#[test]
+fn a_record_is_found_through_the_verbatim_spelling_of_the_destination() {
+    let destination = TempDir::new().unwrap();
+    let ledger =
+        DescriptionLedger::new(destination.path(), identity("m", "Front desk"), Vec::new());
+    let document_path = destination.path().join(FILED_NAME);
+    let record = ledger.record(&filed(document_path)).unwrap();
+
+    let verbatim = fs::canonicalize(destination.path())
+        .unwrap()
+        .join(FILED_NAME);
+    assert!(
+        verbatim.to_string_lossy().starts_with(r"\\?\"),
+        "canonicalize is expected to produce the verbatim spelling"
+    );
+    assert_eq!(ledger.record_path(&verbatim).as_ref(), Some(&record));
+    assert!(ledger.read(&verbatim).is_some());
+    assert!(ledger.retract(&verbatim).unwrap());
+    assert!(!record.exists());
+}
+
 #[test]
 fn a_document_outside_the_destination_is_refused_not_recorded_somewhere_odd() {
     let destination = TempDir::new().unwrap();

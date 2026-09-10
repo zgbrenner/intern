@@ -199,15 +199,48 @@ impl DescriptionLedger {
 
     /// Removes the record for a document that is no longer filed at `filed`
     /// (an undone rename). True when a record was removed.
+    ///
+    /// Any copy the sync client left beside the record goes too. These records
+    /// live in the library, where a conflict copy of one is read by the flow
+    /// that fills the column exactly like the record it was copied from, so
+    /// leaving one behind would keep describing a document that is no longer
+    /// filed.
     pub fn retract(&self, filed: &Path) -> io::Result<bool> {
         let Some(path) = self.record_path(filed) else {
             return Ok(false);
         };
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(true),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(error),
+        let mut removed = match fs::remove_file(&path) {
+            Ok(()) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error),
+        };
+        for copy in self.copies_of(&path) {
+            removed |= fs::remove_file(&copy).is_ok();
         }
+        Ok(removed)
+    }
+
+    /// The files beside one record that are copies of it: a sync conflict copy
+    /// named after the machine that wrote it, or a numbered duplicate. A key is
+    /// a fixed-length hash, so nothing else in the folder can start with one.
+    fn copies_of(&self, record: &Path) -> Vec<PathBuf> {
+        let Some(key) = record.file_stem().and_then(|value| value.to_str()) else {
+            return Vec::new();
+        };
+        let Ok(entries) = fs::read_dir(self.directory()) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension().is_some_and(|value| value == "json")
+                    && path
+                        .file_stem()
+                        .and_then(|value| value.to_str())
+                        .is_some_and(|stem| stem.len() > key.len() && stem.starts_with(key))
+            })
+            .collect()
     }
 
     /// Reads the record for a filed document, if one exists and parses.
