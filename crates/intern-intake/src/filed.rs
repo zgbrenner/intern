@@ -202,6 +202,14 @@ impl FiledIndex {
             let Stored::Parsed(marker) = load::<FiledMarker>(&path) else {
                 continue;
             };
+            // A marker under any name but its content's is a sync conflict
+            // copy, and an undo removes only the marker it wrote. Reading the
+            // copy would go on reporting a filing that has been undone.
+            if path.file_stem().and_then(|value| value.to_str())
+                != Some(marker.content_hash.as_str())
+            {
+                continue;
+            }
             let Some(stored) = marker
                 .text_fingerprint
                 .as_deref()

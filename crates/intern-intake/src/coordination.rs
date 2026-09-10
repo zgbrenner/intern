@@ -542,7 +542,12 @@ impl ClaimStore {
             {
                 continue;
             }
-            if let Stored::Parsed(presence) = load::<MachinePresence>(&path) {
+            // A record under any name but its machine's is a sync conflict copy:
+            // the same machine a second time, with whatever name and heartbeat
+            // it had when the copy was made. `prune` clears it after a day.
+            if let Stored::Parsed(presence) = load::<MachinePresence>(&path)
+                && stem_of(&path) == Some(presence.machine_id.as_str())
+            {
                 machines.push(presence);
             }
         }
