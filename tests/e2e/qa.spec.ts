@@ -95,10 +95,16 @@ test.describe('whole-product browser QA', () => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto('/');
     const navigation = page.locator('.sidebar');
-    await expect(navigation).toHaveAttribute('inert', '');
+    // This used to open on the drawer, because the selection Intern seeds so
+    // the panel is not empty opened it. A person who has clicked nothing is
+    // owed their queue, so the drawer is opened here the way one is opened.
+    await expect(navigation).not.toHaveAttribute('inert', '');
+    await expect(page.getByRole('complementary', { name: 'Review item' })).toBeVisible();
     for (const name of ['Queue', 'Needs Review', 'Completed', 'Settings']) {
       await expect(navigation.locator(`button[aria-label="${name}"]`)).toBeVisible();
     }
+    await page.getByRole('button', { name: 'Select Lease Agreement - 123 Main St.pdf' }).click();
+    await expect(navigation).toHaveAttribute('inert', '');
     const drawer = page.getByRole('dialog', { name: 'Review item' });
     await expect(drawer).toBeVisible();
     await expect(page.getByLabel('Filename')).toBeFocused();
