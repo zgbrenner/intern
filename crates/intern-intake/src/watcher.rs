@@ -365,18 +365,35 @@ impl Scanner<'_> {
                 ClaimState::Done => self.status.processed_here += 1,
             },
             Some(claim) => {
+                // A machine that dies mid-document leaves its claim behind and
+                // nothing else ever clears it: the lease runs out, the
+                // heartbeat stops, and on a shared folder that document would
+                // sit unfiled for ever unless another machine took the claim
+                // over. Whether it may be taken over is the store's two-factor
+                // liveness rule; who may have it is the same uploader gate an
+                // unclaimed file goes through.
                 if claim.state == ClaimState::Claimed {
-                    self.status.claimed_by_others += 1;
+                    if self.store.is_takeable(&claim) {
+                        self.consider_admission(&doc, &key, facts);
+                    } else {
+                        self.status.claimed_by_others += 1;
+                    }
                 }
             }
-            None => match self.host.admission(&facts.path) {
-                IntakeAdmission::Verified => self.attempt_claim(&doc, &key, &facts.path),
-                IntakeAdmission::LocalOnly => self.consider_unclaimed(&doc, &key, facts),
-                IntakeAdmission::Other => self.status.held_for_others += 1,
-                IntakeAdmission::Unknown | IntakeAdmission::Revoked => {
-                    self.status.uploader_unknown += 1
-                }
-            },
+            None => self.consider_admission(&doc, &key, facts),
+        }
+    }
+
+    /// What this machine may do with a document nobody is processing: ask the
+    /// host who uploaded it, and claim it only if the answer allows.
+    fn consider_admission(&mut self, doc: &DocumentFacts, key: &str, facts: &FileFacts) {
+        match self.host.admission(&facts.path) {
+            IntakeAdmission::Verified => self.attempt_claim(doc, key, &facts.path),
+            IntakeAdmission::LocalOnly => self.consider_unclaimed(doc, key, facts),
+            IntakeAdmission::Other => self.status.held_for_others += 1,
+            IntakeAdmission::Unknown | IntakeAdmission::Revoked => {
+                self.status.uploader_unknown += 1
+            }
         }
     }
 

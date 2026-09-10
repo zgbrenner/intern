@@ -14,8 +14,8 @@ use std::{
 
 use common::{MockClock, facts_for, identity, labelled_identity, wait_until};
 use intern_intake::{
-    COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome, Hydration,
-    IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState,
+    CLAIM_LEASE_SECONDS, COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome,
+    Hydration, IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState,
     MachineIdentity, scan::is_conflict_copy,
 };
 use tempfile::TempDir;
@@ -464,6 +464,94 @@ fn a_file_claimed_by_another_machine_is_counted_and_left_alone() {
     assert_eq!(status.held_for_others, 0);
     let claim = rig.read_claim(&facts.key());
     assert_eq!(claim.machine_id, "other-machine");
+}
+
+/// A teammate's machine that crashes mid-document leaves its claim behind: the
+/// lease expires and the heartbeat never moves again. The store knows how to
+/// take such a claim over, but the watcher only ever asked it for a claim when
+/// there was no claim file at all, so on a shared SharePoint folder a crash
+/// left a document that no machine would ever process.
+#[test]
+fn a_claim_left_behind_by_a_crashed_machine_is_taken_over() {
+    let rig = Rig::start(true, &[]);
+    rig.step();
+    let path = rig.write("stranded.pdf", b"a teammate's document");
+    let facts = facts_for(rig.temp.path(), "stranded.pdf");
+    let crashed =
+        ClaimStore::new(rig.temp.path(), identity("crashed-machine", "elsewhere")).unwrap();
+    crashed.write_origin(&facts).unwrap();
+    assert!(matches!(
+        crashed.acquire(&facts),
+        intern_intake::AcquireOutcome::Acquired
+    ));
+
+    // That machine is now gone; nothing renews the claim again. Its lease is
+    // still live here, so the document is somebody else's business.
+    rig.clock.advance(COURTESY_DELAY_SECONDS + 1);
+    rig.step();
+    rig.step();
+    assert!(rig.host.enqueued().is_empty());
+    assert_eq!(rig.watcher.status().claimed_by_others, 1);
+
+    // The heartbeat has now stood still for a full lease as observed here,
+    // and the lease deadline is long past: the takeover rules are satisfied.
+    rig.clock.advance(2 * CLAIM_LEASE_SECONDS);
+    rig.step();
+    rig.step();
+    assert_eq!(
+        rig.host.enqueued(),
+        vec![path],
+        "the stranded document must be picked up: {:?}",
+        rig.watcher.status()
+    );
+    let claim = rig.read_claim(&facts.key());
+    assert_eq!(claim.machine_id, "here-machine");
+    assert_eq!(claim.state, ClaimState::Claimed);
+    assert_eq!(rig.watcher.status().claimed_by_others, 0);
+}
+
+/// Taking a stranded claim over does not widen whose documents this machine
+/// works on. A teammate's upload is still theirs in "mine" scope, however long
+/// the claim on it has been dead; a document uploaded here is ours to rescue.
+#[test]
+fn a_stranded_claim_is_taken_over_only_within_the_configured_scope() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    rig.write("theirs.pdf", b"a teammate's document");
+    let mine = rig.write("mine.pdf", b"uploaded on this machine");
+    let theirs_facts = facts_for(rig.temp.path(), "theirs.pdf");
+    let mine_facts = facts_for(rig.temp.path(), "mine.pdf");
+    ClaimStore::new(rig.temp.path(), identity("here-machine", "here"))
+        .unwrap()
+        .write_origin(&mine_facts)
+        .unwrap();
+    let crashed =
+        ClaimStore::new(rig.temp.path(), identity("crashed-machine", "elsewhere")).unwrap();
+    crashed.write_origin(&theirs_facts).unwrap();
+    for facts in [&theirs_facts, &mine_facts] {
+        assert!(matches!(
+            crashed.acquire(facts),
+            intern_intake::AcquireOutcome::Acquired
+        ));
+    }
+    rig.step();
+    rig.step();
+    assert_eq!(rig.watcher.status().claimed_by_others, 2);
+
+    rig.clock.advance(2 * CLAIM_LEASE_SECONDS);
+    rig.step();
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![mine]);
+    let status = rig.watcher.status();
+    assert_eq!(
+        status.held_for_others, 1,
+        "the teammate's document is still theirs: {status:?}"
+    );
+    assert_eq!(
+        rig.read_claim(&theirs_facts.key()).machine_id,
+        "crashed-machine"
+    );
+    assert_eq!(rig.read_claim(&mine_facts.key()).machine_id, "here-machine");
 }
 
 #[test]

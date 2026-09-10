@@ -309,16 +309,7 @@ impl ClaimStore {
                     if claim.machine_id == self.identity.id {
                         return AcquireOutcome::Acquired;
                     }
-                    let now = self.clock.now();
-                    let lease_stale = now >= claim.lease_expires_at;
-                    // Recorded before anything is decided: skipping the
-                    // observation on the scans that answer early would leave
-                    // the silence measured from a heartbeat this machine is no
-                    // longer looking at.
-                    let silence = self.observed_silence(&key, claim.heartbeat_at, now);
-                    let heartbeat_stale = now >= claim.heartbeat_at + CLAIM_LEASE_SECONDS
-                        && silence >= CLAIM_LEASE_SECONDS;
-                    if !(lease_stale && heartbeat_stale) {
+                    if !self.is_takeable(&claim) {
                         return AcquireOutcome::HeldByOther(claim);
                     }
                     match self.take_over(&path, &key, &claim, doc) {
@@ -336,6 +327,25 @@ impl ClaimStore {
                 "claim acquisition kept losing races and gave up",
             )),
         }
+    }
+
+    /// Whether another machine's claim has gone stale enough to take over:
+    /// the lease deadline has passed AND its heartbeat has stood still here
+    /// for a full lease period. `acquire` asks this before it takes a claim;
+    /// the watcher asks it first, because a document another machine is still
+    /// working on is not one to spend an uploader check on.
+    pub fn is_takeable(&self, claim: &ClaimInfo) -> bool {
+        if claim.state != ClaimState::Claimed || claim.machine_id == self.identity.id {
+            return false;
+        }
+        let now = self.clock.now();
+        // Recorded before anything is decided: skipping the observation on the
+        // scans that answer early would leave the silence measured from a
+        // heartbeat this machine is no longer looking at.
+        let silence = self.observed_silence(&claim.key, claim.heartbeat_at, now);
+        now >= claim.lease_expires_at
+            && now >= claim.heartbeat_at + CLAIM_LEASE_SECONDS
+            && silence >= CLAIM_LEASE_SECONDS
     }
 
     /// Re-reads the claim from disk; true iff it still names this machine in
