@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "status": "pending",
-  "release_inputs_sha256": "pending",
+  "status": "accepted",
+  "release_inputs_sha256": "dea704a9a8020e176d4b9bef9182a4ae4dc5278726fea332e0b668e2be99f9e1",
   "screenshot_path": "docs/qa/latest-implementation.png",
-  "screenshot_sha256": "pending",
-  "reviewer": "pending",
-  "reviewed_at": "pending",
-  "notes": "Awaiting a fresh alpha.7 capture. The accepted alpha.6 record was bound to release-input digest fe016f3944a190dd932d001367fdcc44a360b5cb6fd2030d6fe233e290a1c05c at commit 9e91511c12ad9a3e727e3fa56e15b7197de191d2. Eight pull requests and this version bump have changed the non-QA release inputs since, so that digest no longer describes what would ship, and the record it belongs to would be stale rather than merely old. This file is deliberately pending instead: a Whole-product QA evidence run binds cleanly against a pending sign-off and fails closed against an accepted one whose digest does not match, so leaving the alpha.6 record in place would block the very run that produces the capture needed to replace it. The screenshot named above is still alpha.6's capture until that run lands and a reviewer accepts its replacement."
+  "screenshot_sha256": "ccf5e44f2294e0e5d8b7ad0c673eb91d146c6e0470d66f849c80868c8470eb18",
+  "reviewer": "Zachary Brenner (maintainer), on the capture from Whole-product QA evidence run 34420596844",
+  "reviewed_at": "2026-09-10T00:56:00Z",
+  "notes": "Fresh 1536x1024 capture from run 34420596844 at commit 622ddec2d6342adb31250804805d6dcd9ca46fca, replacing the alpha.6 record that was bound to a digest no longer describing what ships. The maintainer inspected this capture and accepted it; Claude Opus 5 (Claude Code) inspected it first and recorded this file at the maintainer's direction. The alpha.6 concept still holds: sidebar counts, queue table, and review drawer read as three planes; the header states the privacy posture beside the brand tag; proposed filenames stay date-first with right-aligned confidence and em-dashes for absent values; Ready, Needs review, Processing, and Waiting differ by icon as well as colour; the drawer's evidence stays attributed under DATE, TYPE, and PARTIES headings with each party on its own line. No clipping, collisions, illegible copy, or ambiguous focus were seen. The run's automated contrast assertions passed. This release changes no reviewed surface: its work is reliability and correctness beneath the window, and the two visible additions - the reason a stopped queue gives for stopping, and sentences for the UNDONE and RECONCILIATION_REQUIRED states - reuse the banner and review-reason treatments already accepted. The sign-off is accepted only for the digest and screenshot hash above; any later change to a non-QA release input invalidates it and requires a new capture and review."
 }
