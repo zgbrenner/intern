@@ -9,13 +9,13 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use common::{MockClock, facts_for, identity, labelled_identity, wait_until};
 use intern_intake::{
-    COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome, Hydration,
-    IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState,
+    CLAIM_LEASE_SECONDS, COURTESY_DELAY_SECONDS, ClaimInfo, ClaimState, ClaimStore, DoneOutcome,
+    Hydration, IntakeAdmission, IntakeConfig, IntakeHost, IntakeStatus, IntakeWatcher, ItemState,
     MachineIdentity, scan::is_conflict_copy,
 };
 use tempfile::TempDir;
@@ -112,9 +112,15 @@ struct FakeHydration {
     dehydrated: Mutex<HashSet<PathBuf>>,
     /// Whether a request for a placeholder's content would succeed.
     reachable: AtomicBool,
+    /// How often the scan asked the sync client for a file's bytes.
+    fetches: AtomicUsize,
 }
 
 impl FakeHydration {
+    fn fetches(&self) -> usize {
+        self.fetches.load(Ordering::SeqCst)
+    }
+
     fn set_dehydrated(&self, path: &Path, dehydrated: bool) {
         let mut paths = self.dehydrated.lock().unwrap();
         if dehydrated {
@@ -135,6 +141,7 @@ impl Hydration for FakeHydration {
     /// The sync client fetches the bytes when something opens the file;
     /// offline, the open fails and the file stays a placeholder.
     fn hydrate(&self, path: &Path) -> bool {
+        self.fetches.fetch_add(1, Ordering::SeqCst);
         if !self.reachable.load(Ordering::SeqCst) {
             return false;
         }
@@ -466,6 +473,94 @@ fn a_file_claimed_by_another_machine_is_counted_and_left_alone() {
     assert_eq!(claim.machine_id, "other-machine");
 }
 
+/// A teammate's machine that crashes mid-document leaves its claim behind: the
+/// lease expires and the heartbeat never moves again. The store knows how to
+/// take such a claim over, but the watcher only ever asked it for a claim when
+/// there was no claim file at all, so on a shared SharePoint folder a crash
+/// left a document that no machine would ever process.
+#[test]
+fn a_claim_left_behind_by_a_crashed_machine_is_taken_over() {
+    let rig = Rig::start(true, &[]);
+    rig.step();
+    let path = rig.write("stranded.pdf", b"a teammate's document");
+    let facts = facts_for(rig.temp.path(), "stranded.pdf");
+    let crashed =
+        ClaimStore::new(rig.temp.path(), identity("crashed-machine", "elsewhere")).unwrap();
+    crashed.write_origin(&facts).unwrap();
+    assert!(matches!(
+        crashed.acquire(&facts),
+        intern_intake::AcquireOutcome::Acquired
+    ));
+
+    // That machine is now gone; nothing renews the claim again. Its lease is
+    // still live here, so the document is somebody else's business.
+    rig.clock.advance(COURTESY_DELAY_SECONDS + 1);
+    rig.step();
+    rig.step();
+    assert!(rig.host.enqueued().is_empty());
+    assert_eq!(rig.watcher.status().claimed_by_others, 1);
+
+    // The heartbeat has now stood still for a full lease as observed here,
+    // and the lease deadline is long past: the takeover rules are satisfied.
+    rig.clock.advance(2 * CLAIM_LEASE_SECONDS);
+    rig.step();
+    rig.step();
+    assert_eq!(
+        rig.host.enqueued(),
+        vec![path],
+        "the stranded document must be picked up: {:?}",
+        rig.watcher.status()
+    );
+    let claim = rig.read_claim(&facts.key());
+    assert_eq!(claim.machine_id, "here-machine");
+    assert_eq!(claim.state, ClaimState::Claimed);
+    assert_eq!(rig.watcher.status().claimed_by_others, 0);
+}
+
+/// Taking a stranded claim over does not widen whose documents this machine
+/// works on. A teammate's upload is still theirs in "mine" scope, however long
+/// the claim on it has been dead; a document uploaded here is ours to rescue.
+#[test]
+fn a_stranded_claim_is_taken_over_only_within_the_configured_scope() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    rig.write("theirs.pdf", b"a teammate's document");
+    let mine = rig.write("mine.pdf", b"uploaded on this machine");
+    let theirs_facts = facts_for(rig.temp.path(), "theirs.pdf");
+    let mine_facts = facts_for(rig.temp.path(), "mine.pdf");
+    ClaimStore::new(rig.temp.path(), identity("here-machine", "here"))
+        .unwrap()
+        .write_origin(&mine_facts)
+        .unwrap();
+    let crashed =
+        ClaimStore::new(rig.temp.path(), identity("crashed-machine", "elsewhere")).unwrap();
+    crashed.write_origin(&theirs_facts).unwrap();
+    for facts in [&theirs_facts, &mine_facts] {
+        assert!(matches!(
+            crashed.acquire(facts),
+            intern_intake::AcquireOutcome::Acquired
+        ));
+    }
+    rig.step();
+    rig.step();
+    assert_eq!(rig.watcher.status().claimed_by_others, 2);
+
+    rig.clock.advance(2 * CLAIM_LEASE_SECONDS);
+    rig.step();
+    rig.step();
+    assert_eq!(rig.host.enqueued(), vec![mine]);
+    let status = rig.watcher.status();
+    assert_eq!(
+        status.held_for_others, 1,
+        "the teammate's document is still theirs: {status:?}"
+    );
+    assert_eq!(
+        rig.read_claim(&theirs_facts.key()).machine_id,
+        "crashed-machine"
+    );
+    assert_eq!(rig.read_claim(&mine_facts.key()).machine_id, "here-machine");
+}
+
 #[test]
 fn update_config_rearms_on_a_new_folder_and_rebuilds_the_backlog() {
     let rig = Rig::start(false, &[]);
@@ -594,6 +689,45 @@ fn a_machine_suffix_is_only_a_conflict_copy_when_the_folder_knows_that_machine()
     assert!(!is_conflict_copy(Path::new("Invoice.pdf"), &machines));
 }
 
+/// A sync client that finds its conflict name already taken decorates it
+/// further: OneDrive numbers the repeat the way Explorer does, and some
+/// clients stamp the day the conflict happened. The document underneath is
+/// still the losing side of a conflict, and filing it would put a second copy
+/// of an already filed document into the destination.
+#[test]
+fn a_numbered_or_dated_conflict_copy_is_still_a_conflict_copy() {
+    let machines = vec!["DESKTOP-A1B2C3".to_string()];
+
+    assert!(is_conflict_copy(
+        Path::new("report-DESKTOP-A1B2C3 (2).pdf"),
+        &machines
+    ));
+    assert!(is_conflict_copy(
+        Path::new("report-DESKTOP-A1B2C3 2026-08-31.pdf"),
+        &machines
+    ));
+    assert!(is_conflict_copy(
+        Path::new("report-DESKTOP-A1B2C3 2026-08-31 (3).pdf"),
+        &machines
+    ));
+    assert!(is_conflict_copy(
+        Path::new("report (Jane's conflicted copy 2026-08-31) (2).pdf"),
+        &[]
+    ));
+
+    // The decoration is never the evidence: a name has to end in a machine
+    // this folder has actually seen, counter or no counter.
+    assert!(!is_conflict_copy(
+        Path::new("Invoice-ACME (2).pdf"),
+        &machines
+    ));
+    assert!(!is_conflict_copy(Path::new("report (2).pdf"), &machines));
+    assert!(!is_conflict_copy(
+        Path::new("report 2026-08-31.pdf"),
+        &machines
+    ));
+}
+
 #[test]
 fn a_document_that_failed_while_still_in_the_cloud_is_held_not_tombstoned() {
     let rig = Rig::start(false, &[]);
@@ -698,6 +832,38 @@ fn an_unreadable_subfolder_is_counted_and_skipped_rather_than_failing_the_scan()
     }));
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
     result.unwrap();
+}
+
+/// Rescuing a claim a crashed machine left behind is still subject to the
+/// uploader gate. A document whose uploader cannot be established stays held,
+/// whoever's dead claim happens to be sitting on it.
+#[test]
+fn a_stranded_claim_over_an_unverified_upload_stays_held() {
+    let rig = Rig::start(true, &[]);
+    *rig.host.admission.lock().unwrap() = Some(IntakeAdmission::Unknown);
+    rig.step();
+    rig.write("unknown.pdf", b"nobody can vouch for this");
+    let facts = facts_for(rig.temp.path(), "unknown.pdf");
+    let crashed =
+        ClaimStore::new(rig.temp.path(), identity("crashed-machine", "elsewhere")).unwrap();
+    assert!(matches!(
+        crashed.acquire(&facts),
+        intern_intake::AcquireOutcome::Acquired
+    ));
+    rig.step();
+    rig.step();
+    rig.clock.advance(2 * CLAIM_LEASE_SECONDS);
+    rig.step();
+    rig.step();
+
+    assert!(rig.host.enqueued().is_empty());
+    let status = rig.watcher.status();
+    assert_eq!(status.uploader_unknown, 1, "{status:?}");
+    assert_eq!(
+        rig.read_claim(&facts.key()).machine_id,
+        "crashed-machine",
+        "an unverifiable document is not claimed, dead lease or not"
+    );
 }
 
 #[test]
@@ -875,6 +1041,138 @@ fn a_held_placeholder_is_hydrated_when_the_host_can_reach_the_cloud() {
     assert!(
         !rig.claim_file(&key).exists(),
         "the released claim lets the next scan give the document a real attempt"
+    );
+}
+
+/// A sync client can settle a file's size before it has finished with it and
+/// stamp the uploader's modification time at the end. From that moment the
+/// document has a different claim key, so the claim taken under the old key
+/// must not be left behind as a live lease and the document must still be
+/// filed exactly once.
+#[test]
+fn a_modification_time_stamped_after_the_claim_still_ends_in_one_filed_document() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("scan.pdf", b"a document the sync client is still finishing");
+    rig.step();
+    rig.step();
+    let first = facts_for(rig.temp.path(), "scan.pdf").key();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+
+    // The sync client finishes and puts the uploader's own timestamp on it.
+    let file = OpenOptions::new().write(true).open(&path).unwrap();
+    file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000))
+        .unwrap();
+    drop(file);
+    let second = facts_for(rig.temp.path(), "scan.pdf").key();
+    assert_ne!(
+        first, second,
+        "a new modification time is a new document key"
+    );
+
+    rig.step();
+    rig.step();
+    assert_eq!(
+        rig.host.enqueued(),
+        vec![path.clone(), path.clone()],
+        "the same path handed over again is what the queue's own (path, hash) \
+         uniqueness absorbs; a torn key is never processed on its own"
+    );
+
+    // The queue files it. Neither claim may be left behind as a live lease for
+    // another machine's takeover math to deal with.
+    rig.host.set_state(
+        &path,
+        ItemState::Done {
+            outcome: DoneOutcome::Renamed,
+            result_filename: Some("2020-09-13 Scan.pdf".to_string()),
+        },
+    );
+    fs::remove_file(&path).unwrap();
+    rig.step();
+    assert_eq!(rig.read_claim(&first).state, ClaimState::Done);
+    assert_eq!(rig.read_claim(&second).state, ClaimState::Done);
+}
+
+/// A Files On-Demand placeholder is a real path with real metadata and no
+/// content, and claiming one must cost exactly the stat the walk already did.
+/// The sync client is asked for the bytes only once a document has actually
+/// failed to read, because that fetch happens on the scan thread and pulls the
+/// whole file down.
+#[test]
+fn a_placeholder_is_claimed_from_its_metadata_without_the_scan_fetching_it() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("online-only.pdf", b"bytes that live in the cloud");
+    rig.hydration.set_dehydrated(&path, true);
+    rig.hydration.reachable.store(true, Ordering::SeqCst);
+    rig.step();
+    rig.step();
+
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+    assert_eq!(rig.hydration.fetches(), 0);
+    assert!(
+        rig.hydration.is_dehydrated(&path),
+        "claiming a placeholder must not pull it down"
+    );
+    // And it stays that way while the queue works on it.
+    rig.step();
+    assert_eq!(rig.hydration.fetches(), 0);
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+}
+
+/// The whole round trip a placeholder takes: claimed from metadata, failed
+/// because there was nothing to read, held while the sync client fetches the
+/// content, and then given a real attempt with the bytes on disk. A document
+/// that was only ever waiting for its content must never end up tombstoned as
+/// a document that failed.
+#[test]
+fn a_placeholder_that_hydrates_is_given_a_real_attempt_rather_than_a_failure() {
+    let rig = Rig::start(false, &[]);
+    rig.step();
+    let path = rig.write("contract.pdf", b"an online-only document");
+    rig.step();
+    rig.step();
+    let key = facts_for(rig.temp.path(), "contract.pdf").key();
+    assert_eq!(rig.host.enqueued(), vec![path.clone()]);
+
+    // Offline: extraction failed without anything having read the document,
+    // and every further scan asks again rather than giving up on it.
+    rig.hydration.set_dehydrated(&path, true);
+    rig.host.set_state(&path, ItemState::Failed);
+    rig.step();
+    rig.step();
+    assert_eq!(rig.hydration.fetches(), 2);
+    assert_eq!(rig.watcher.status().awaiting_hydration, 1);
+    assert_eq!(rig.read_claim(&key).state, ClaimState::Claimed);
+    assert_eq!(rig.read_claim(&key).machine_id, "here-machine");
+
+    // The bytes arrive, the claim is released, and the next scan hands the
+    // document back to the queue with something to read.
+    rig.hydration.reachable.store(true, Ordering::SeqCst);
+    rig.step();
+    assert_eq!(rig.watcher.status().awaiting_hydration, 0);
+    rig.step();
+    assert_eq!(
+        rig.host.enqueued(),
+        vec![path.clone(), path.clone()],
+        "the document deserves a second attempt now the content is here"
+    );
+
+    rig.host.set_state(
+        &path,
+        ItemState::Done {
+            outcome: DoneOutcome::Renamed,
+            result_filename: Some("2026-04-01 Contract.pdf".to_string()),
+        },
+    );
+    rig.step();
+    let claim = rig.read_claim(&key);
+    assert_eq!(claim.state, ClaimState::Done);
+    assert_eq!(claim.outcome, Some(DoneOutcome::Renamed));
+    assert_eq!(
+        claim.result_filename.as_deref(),
+        Some("2026-04-01 Contract.pdf")
     );
 }
 

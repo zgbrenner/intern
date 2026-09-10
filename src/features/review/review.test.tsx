@@ -79,19 +79,46 @@ describe('review actions', () => {
     expect(trigger).toHaveFocus();
   });
 
-  it('turns the narrow inspector into a contained drawer and restores row focus', async () => {
-    vi.stubGlobal('matchMedia', vi.fn(() => ({
-      matches: true,
-      media: '(max-width: 1100px)',
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })));
+  // 1100px and below is where the inspector becomes a modal drawer, and 1024
+  // is the narrowest window Intern supports. Both tests below drive that width.
+  const stubNarrowWindow = () => vi.stubGlobal('matchMedia', vi.fn(() => ({
+    matches: true,
+    media: '(max-width: 1100px)',
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })));
+
+  // The panel is seeded with the first item needing review so it is not empty
+  // on launch. Narrow, that seeding used to open the modal drawer: Intern
+  // started inside a dialog nobody had asked for, over an inert queue, with
+  // the caret already in a proposed filename.
+  it('does not launch a narrow window inside a modal nobody opened', async () => {
+    stubNarrowWindow();
     render(<App bridge={createInMemoryBridge()} />);
 
+    const seeded = await screen.findByRole('complementary', { name: 'Review item' });
+    expect(seeded).not.toHaveAttribute('aria-modal');
+    expect(screen.getByRole('banner')).not.toHaveAttribute('inert');
+    expect(screen.getByRole('navigation', { name: 'Queue navigation' })).not.toHaveAttribute('inert');
+    expect(screen.getByLabelText('Filename')).not.toHaveFocus();
+
+    // A selection a person makes is still the modal drawer it was.
+    fireEvent.click(screen.getByRole('button', { name: 'Select Lease Agreement - 123 Main St.pdf' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Review item' })).toHaveAttribute('aria-modal', 'true');
+    await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveFocus());
+  });
+
+  it('turns the narrow inspector into a contained drawer and restores row focus', async () => {
+    stubNarrowWindow();
+    render(<App bridge={createInMemoryBridge()} />);
+
+    const trigger = await screen.findByRole('button', { name: 'Select Lease Agreement - 123 Main St.pdf' });
+    fireEvent.click(trigger);
     const initialDrawer = await screen.findByRole('dialog', { name: 'Review item' });
     await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveFocus());
     expect(screen.getByRole('banner')).toHaveAttribute('inert');
@@ -103,7 +130,6 @@ describe('review actions', () => {
     expect(screen.getByRole('button', { name: 'Close review' })).toHaveFocus();
     fireEvent.keyDown(initialDrawer, { key: 'Escape' });
 
-    const trigger = screen.getByRole('button', { name: 'Select Lease Agreement - 123 Main St.pdf' });
     fireEvent.click(trigger);
     const reopenedDrawer = await screen.findByRole('dialog', { name: 'Review item' });
     await waitFor(() => expect(screen.getByLabelText('Filename')).toHaveFocus());

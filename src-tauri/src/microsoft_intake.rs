@@ -22,6 +22,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
+    time::{Duration, Instant},
 };
 use tauri::State;
 
@@ -94,7 +95,23 @@ pub struct MicrosoftIntake {
     audit: AuditVerifier,
     generation: AtomicU64,
     documents: Mutex<BTreeMap<String, Attribution>>,
+    /// The last answer to "is the saved intake folder synced or on a network
+    /// share", the folder it was about, and when it was reached.
+    shared_intake: Mutex<Option<(String, Instant, bool)>>,
 }
+
+/// What a folder that claims to be a private local intake but is not is told
+/// about itself. Held documents inherit this, and `intake_status` shows it,
+/// because a folder that started syncing after it was configured is an
+/// ordinary thing to happen and the person has to be able to find out why
+/// their documents stopped moving.
+const LOCAL_ONLY_BUT_SHARED: &str = "This intake folder is a OneDrive, SharePoint, or network folder, although it was saved as a private local intake. Uploads to it are verified through Microsoft: connect Microsoft and pair the folder, or point intake at a folder that is not shared.";
+
+/// How long an answer about the intake folder is reused. Deciding it reads
+/// the Windows registry and the network drive table, and `scope` asks about
+/// every file of every scan; the answer changes only when someone moves the
+/// folder or starts syncing it, and every save re-asks anyway.
+const SHARED_INTAKE_RECHECK: Duration = Duration::from_secs(30);
 impl MicrosoftIntake {
     pub fn new(settings: SettingsStore, data: PathBuf) -> Self {
         let loaded = read_config(&data.join("microsoft-intake.json"));
@@ -126,7 +143,48 @@ impl MicrosoftIntake {
             audit: AuditVerifier::default(),
             generation: AtomicU64::new(0),
             documents: Mutex::new(documents),
+            shared_intake: Mutex::new(None),
         }
+    }
+
+    /// Whether `folder` is a OneDrive, SharePoint, or network folder, from
+    /// the remembered answer when it is still fresh.
+    fn folder_is_shared(&self, folder: &str) -> bool {
+        let folder = folder.trim();
+        if folder.is_empty() {
+            return false;
+        }
+        if let Ok(remembered) = self.shared_intake.lock()
+            && let Some((about, decided, shared)) = remembered.as_ref()
+            && about == folder
+            && decided.elapsed() < SHARED_INTAKE_RECHECK
+        {
+            return *shared;
+        }
+        self.recheck_folder_is_shared(folder)
+    }
+
+    /// Asks the machine itself, and remembers the answer.
+    fn recheck_folder_is_shared(&self, folder: &str) -> bool {
+        let folder = folder.trim();
+        if folder.is_empty() {
+            return false;
+        }
+        let shared = classify(Path::new(folder), &detect_cloud_roots()).is_some();
+        if let Ok(mut remembered) = self.shared_intake.lock() {
+            *remembered = Some((folder.to_owned(), Instant::now(), shared));
+        }
+        shared
+    }
+
+    /// Why documents in the watched folder are held even though intake is
+    /// saved as private and local, if that is what is wrong. Read by
+    /// `intake_status`, so the reason reaches Settings rather than only the
+    /// documents it holds.
+    pub fn local_only_contradiction(&self) -> Option<String> {
+        let settings = self.settings.load().unwrap_or_default();
+        (settings.intake_local_only && self.folder_is_shared(&settings.intake_folder))
+            .then(|| LOCAL_ONLY_BUT_SHARED.to_owned())
     }
     /// Why Microsoft verification cannot be relied on right now, if anything
     /// is wrong. A document only inherits this when it is inside a folder the
@@ -193,9 +251,9 @@ impl MicrosoftIntake {
     /// Remember strict intake roots before saving settings. Disabling watching
     /// or choosing a new root cannot bypass checks on already queued documents.
     pub fn protect_settings(&self, settings: &AppSettings) -> Result<(), String> {
-        if settings.intake_local_only
-            && classify(Path::new(&settings.intake_folder), &detect_cloud_roots()).is_some()
-        {
+        // A save asks the machine again rather than reusing a remembered
+        // answer, and what it learns is what the scan path then reads.
+        if settings.intake_local_only && self.recheck_folder_is_shared(&settings.intake_folder) {
             return Err("Local-only intake cannot be used for OneDrive, SharePoint, or a network share. Microsoft upload verification is required.".into());
         }
         self.generation.fetch_add(1, Ordering::SeqCst);
@@ -362,11 +420,22 @@ impl MicrosoftIntake {
             .lock()
             .map_err(|_| "Microsoft configuration is unavailable.")?;
         let mut protected = config.protected_roots.iter().any(|root| within(path, root));
-        protected |= !settings.intake_local_only
-            && !settings.intake_folder.trim().is_empty()
-            && within(path, &settings.intake_folder);
+        let watched =
+            !settings.intake_folder.trim().is_empty() && within(path, &settings.intake_folder);
+        // `intake_local_only` is a claim made about a folder on the day it was
+        // saved, and folders change: one moved into OneDrive, or one whose
+        // parent starts syncing, is a shared folder from that moment however
+        // the settings still read. Trusting the stored flag defeated the whole
+        // verification - documents teammates synced in were processed as this
+        // machine's own uploads - so what the save refused is re-derived here.
+        let contradicted =
+            settings.intake_local_only && self.folder_is_shared(&settings.intake_folder);
+        protected |= watched && (!settings.intake_local_only || contradicted);
         if !protected {
             return Ok(None);
+        }
+        if watched && contradicted {
+            return Err(LOCAL_ONLY_BUT_SHARED.into());
         }
         // Whether the path is covered is decided before the configuration is
         // asked anything, so a file that could never have been a Microsoft
@@ -709,6 +778,66 @@ mod tests {
             ..AppSettings::default()
         };
         assert!(intake.protect_settings(&watched).is_ok());
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// A Microsoft intake whose stored configuration is simply absent, in a
+    /// directory of its own, with the settings it will read already saved.
+    fn configured(name: &str, settings: &AppSettings) -> (PathBuf, MicrosoftIntake) {
+        let data =
+            std::env::temp_dir().join(format!("intern-microsoft-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&data);
+        fs::create_dir_all(&data).unwrap();
+        let store = SettingsStore::new(data.join("settings.json"));
+        store.save(settings).unwrap();
+        let intake = MicrosoftIntake::new(store, data.clone());
+        (data, intake)
+    }
+
+    #[test]
+    fn an_intake_folder_that_is_shared_is_verified_whatever_local_only_claims() {
+        // The folder was saved as a private local intake and has since become
+        // a network share - or was moved into OneDrive, which reaches this
+        // same decision through the detected sync roots.
+        let settings = AppSettings {
+            intake_folder: r"\\fileserver\legal\intake".into(),
+            intake_local_only: true,
+            ..AppSettings::default()
+        };
+        let (data, intake) = configured("shared-local-only", &settings);
+
+        let scope = intake.scope(
+            Path::new(r"\\fileserver\legal\intake\contract.pdf"),
+            &settings,
+        );
+
+        assert_eq!(scope.err().as_deref(), Some(LOCAL_ONLY_BUT_SHARED));
+        assert_eq!(
+            intake.local_only_contradiction().as_deref(),
+            Some(LOCAL_ONLY_BUT_SHARED),
+            "and the reason reaches the intake status a person can read"
+        );
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn an_ordinary_local_folder_saved_as_local_only_is_still_not_verified() {
+        let folder =
+            std::env::temp_dir().join(format!("intern-microsoft-local-{}", std::process::id()));
+        let settings = AppSettings {
+            intake_folder: folder.to_string_lossy().into_owned(),
+            intake_local_only: true,
+            ..AppSettings::default()
+        };
+        let (data, intake) = configured("local", &settings);
+
+        assert!(
+            intake
+                .scope(&folder.join("scan.pdf"), &settings)
+                .unwrap()
+                .is_none()
+        );
+        assert!(intake.local_only_contradiction().is_none());
         let _ = fs::remove_dir_all(&data);
     }
 

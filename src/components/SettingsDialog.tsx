@@ -367,6 +367,9 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
   const activeMachines = intake?.machines.filter((machine) => machine.active).length ?? 0;
+  // The backend reports a settings file it could not read in full through the
+  // same channel as intake trouble, prefixed so the two can be told apart.
+  const settingsFileProblem = intake?.error?.startsWith('SETTINGS_') ? intake.error : '';
   /*
     Grouped rather than stacked. This dialog had grown to a destination, four
     checkboxes, a watched folder with its own machine name and status block,
@@ -378,6 +381,15 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
   return <div className="dialog-backdrop" role="presentation"><section ref={dialog} className="settings-dialog settings-panel" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="dialog-head"><h2>Settings</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Close settings"><Icon icon={X} /></button></div>
     <div className="dialog-body">
+      {/*
+        A settings file Intern could not read in full is reported here rather
+        than beside the watched folder, because the intake panel is hidden
+        while intake is off - and a file Intern could not read at all loads
+        defaults, in which intake is off. That is exactly the case a person
+        most needs told: the app looks configured for nothing, and the reason
+        would otherwise be in a log nobody opens.
+      */}
+      {settingsFileProblem && <p className="form-error" role="alert" aria-label="Settings file problem">{settingsFileProblem}</p>}
       <section className="settings-group">
         <h3>Filing</h3>
         <p className="section-lead">Where renamed documents are put, and when Intern may file one without asking.</p>
@@ -509,7 +521,7 @@ export function SettingsDialog({ settings, bridge, selection, onSave, onClose, o
           {intake && intake.syncConflicts > 0 && <p className="check-hint" role="status">{intake.syncConflicts === 1 ? '1 file is' : `${intake.syncConflicts} files are`} a sync conflict copy left behind by OneDrive or SharePoint. Intern leaves {intake.syncConflicts === 1 ? 'it' : 'them'} alone — resolve the conflict in the folder and the surviving document is picked up on the next scan.</p>}
           {intake && intake.awaitingHydration > 0 && <p className="check-hint" role="status">{intake.awaitingHydration === 1 ? '1 document is' : `${intake.awaitingHydration} documents are`} waiting for OneDrive to download {intake.awaitingHydration === 1 ? 'its' : 'their'} contents. Intern is holding {intake.awaitingHydration === 1 ? 'it' : 'them'} rather than failing {intake.awaitingHydration === 1 ? 'it' : 'them'}; connect this machine and the next scan picks {intake.awaitingHydration === 1 ? 'it' : 'them'} up.</p>}
           {intake && intake.unreadableFolders > 0 && <p className="check-hint" role="status">{intake.unreadableFolders === 1 ? '1 subfolder' : `${intake.unreadableFolders} subfolders`} could not be read on the last scan — usually a folder this account has no permission to open. Everything else was scanned; documents in {intake.unreadableFolders === 1 ? 'that folder' : 'those folders'} are not.</p>}
-          {(intakeError || intake?.error) && <p className="form-error" role="alert">{intakeError || intake?.error}</p>}
+          {(intakeError || (intake?.error && !settingsFileProblem)) && <p className="form-error" role="alert">{intakeError || intake?.error}</p>}
           <button type="button" disabled={scanning} onClick={() => void runScanNow()}>{scanning ? 'Scanning…' : 'Scan now'}</button>
         </div>}
       </section>

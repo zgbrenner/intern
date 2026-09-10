@@ -219,6 +219,41 @@ fn a_marker_under_the_wrong_name_or_a_future_version_reads_as_nothing() {
     assert_eq!(front_desk.lookup(&"2".repeat(64)), None);
 }
 
+/// A marker is named by the content it records, and `.intern` sits inside the
+/// synced folder, so the sync client can leave a conflict copy of one beside
+/// it. An undo removes the marker it wrote and only that one, so a copy read
+/// by the near-duplicate search would go on reporting a filing that has been
+/// undone - and every fresh scan of that document would be sent to review as
+/// a duplicate of a document that is no longer there.
+#[test]
+fn a_conflicted_copy_of_a_marker_does_not_outlive_the_filing_it_records() {
+    let intake = TempDir::new().unwrap();
+    let front_desk = index(&intake, identity("aaa", "Front desk"));
+    let fingerprint = "00000000000000ff";
+    let marker = front_desk
+        .record(
+            HASH,
+            &intake.path().join("scan.pdf"),
+            FILED_NAME,
+            1_757_000_000,
+            Some(fingerprint),
+        )
+        .unwrap();
+    fs::copy(
+        &marker,
+        marker.with_file_name(format!("{HASH}-DESKTOP-A1B2C3.json")),
+    )
+    .unwrap();
+
+    assert!(front_desk.retract(HASH).unwrap());
+    assert_eq!(front_desk.lookup(HASH), None);
+    assert_eq!(
+        front_desk.lookup_similar(0x0000_0000_0000_00ff, 4),
+        None,
+        "the undone filing must not be read back out of a conflict copy"
+    );
+}
+
 #[test]
 fn prune_keeps_markers_for_a_year_and_clears_conflict_copies_after_a_day() {
     let intake = TempDir::new().unwrap();

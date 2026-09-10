@@ -386,10 +386,51 @@ pub fn is_conflict_copy(path: &Path, machines: &[String]) -> bool {
     if stem.contains("conflicted copy") {
         return true;
     }
+    let stem = strip_conflict_decorations(&stem);
     machines.iter().any(|machine| {
         let machine = machine.trim().to_lowercase();
         !machine.is_empty() && stem.ends_with(&format!("-{machine}"))
     })
+}
+
+/// The decorations a sync client adds when the conflict name it wants is
+/// already taken: OneDrive numbers the repeat the way Explorer does -
+/// `report-DESKTOP-A1B2C3 (2).pdf` - and some clients stamp the day the
+/// conflict happened. Peeling them off leaves the machine name where the
+/// suffix check can see it. They are never the evidence themselves: the name
+/// underneath still has to end in a machine this folder has seen, so
+/// `Invoice-ACME (2).pdf` remains an ordinary document.
+fn strip_conflict_decorations(stem: &str) -> &str {
+    let mut rest = stem.trim_end();
+    loop {
+        let peeled = strip_counter(rest).unwrap_or(rest);
+        let peeled = strip_iso_date(peeled).unwrap_or(peeled);
+        if peeled.len() == rest.len() {
+            return rest;
+        }
+        rest = peeled;
+    }
+}
+
+/// A trailing ` (2)`.
+fn strip_counter(text: &str) -> Option<&str> {
+    let (head, digits) = text.strip_suffix(')')?.rsplit_once('(')?;
+    (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| head.trim_end())
+}
+
+/// A trailing ` 2026-08-31`.
+fn strip_iso_date(text: &str) -> Option<&str> {
+    let (head, last) = text.rsplit_once(' ')?;
+    let bytes = last.as_bytes();
+    (last.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit()))
+    .then(|| head.trim_end())
 }
 
 fn skipped_name(path: &Path) -> bool {

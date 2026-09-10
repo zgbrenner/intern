@@ -9,10 +9,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[cfg(not(windows))]
-use intern_intake::detect_cloud_roots_with;
 use intern_intake::{
-    CloudProviderKind, CloudRoot, EnvProbe, classify, network_share, relative_to_root, unc_share,
+    CloudProviderKind, CloudRoot, EnvProbe, classify, detect_cloud_roots_with, network_share,
+    relative_to_root, unc_share,
 };
 
 #[derive(Default)]
@@ -107,6 +106,51 @@ fn duplicate_detections_of_the_same_path_are_reported_once() {
 fn a_missing_home_yields_no_roots_rather_than_an_error() {
     let roots = detect_cloud_roots_with(&FakeEnv::default());
     assert!(roots.is_empty());
+}
+
+/// A work OneDrive cannot be conjured on a machine that has none, so the
+/// environment the sync client leaves behind is the only way to exercise the
+/// Windows detection: `OneDriveCommercial` names a work account and
+/// `OneDriveConsumer` a personal one. Whatever accounts the registry of the
+/// machine running this happens to hold, these two must be found and told
+/// apart, and a folder inside one must classify as that account's kind.
+#[cfg(windows)]
+#[test]
+fn windows_environment_variables_name_the_work_and_personal_onedrive_folders() {
+    let mut env = FakeEnv::default();
+    env.vars.insert(
+        "OneDriveCommercial".to_string(),
+        r"C:\Users\pat\OneDrive - Contoso".to_string(),
+    );
+    env.vars.insert(
+        "OneDriveConsumer".to_string(),
+        r"C:\Users\pat\OneDrive - Personal".to_string(),
+    );
+
+    let roots = detect_cloud_roots_with(&env);
+    let find = |path: &str| {
+        roots
+            .iter()
+            .find(|candidate| candidate.root == Path::new(path))
+            .unwrap_or_else(|| panic!("missing root {path}; got {roots:?}"))
+    };
+    let work = find(r"C:\Users\pat\OneDrive - Contoso");
+    assert_eq!(work.kind, CloudProviderKind::OneDriveBusiness);
+    assert_eq!(work.display_name, "OneDrive – Work");
+    let personal = find(r"C:\Users\pat\OneDrive - Personal");
+    assert_eq!(personal.kind, CloudProviderKind::OneDrivePersonal);
+    assert_eq!(personal.display_name, "OneDrive – Personal");
+
+    let location = classify(
+        Path::new(r"C:\Users\pat\OneDrive - Contoso\Legal\intake"),
+        &roots,
+    )
+    .expect("a folder under a work OneDrive is in that OneDrive");
+    assert_eq!(location.kind, CloudProviderKind::OneDriveBusiness);
+    assert_eq!(
+        CloudProviderKind::OneDriveBusiness.as_str(),
+        "onedrive_business"
+    );
 }
 
 #[test]

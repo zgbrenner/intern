@@ -489,6 +489,107 @@ fn presence_is_listed_across_machines_and_refresh_is_self_gated() {
     );
 }
 
+/// The `.intern` directory lives inside the synced folder, so the sync client
+/// replicates it like anything else and can leave a conflict copy of a claim
+/// beside the claim. The protocol reads a claim by its name, so a stale copy
+/// must neither be mistaken for the claim nor block one.
+#[test]
+fn a_conflicted_copy_of_a_claim_file_does_not_disturb_the_claim() {
+    let temp = TempDir::new().unwrap();
+    let start = 1_000_000;
+    let clock = MockClock::at(start);
+    let owner =
+        ClaimStore::with_clock(temp.path(), identity("aaa", "owner"), clock.clone()).unwrap();
+    let rival =
+        ClaimStore::with_clock(temp.path(), identity("bbb", "rival"), clock.clone()).unwrap();
+    let document = doc("contract.pdf");
+    let key = document.key();
+    assert!(matches!(owner.acquire(&document), AcquireOutcome::Acquired));
+
+    // OneDrive renames the losing side of a conflict after the machine that
+    // wrote it, and it does that to bookkeeping files as readily as documents.
+    let conflicted = foreign_claim(&key, &document, "bbb", start);
+    fs::write(
+        temp.path()
+            .join(".intern")
+            .join("claims")
+            .join(format!("{key}-DESKTOP-A1B2C3.json")),
+        serde_json::to_vec_pretty(&conflicted).unwrap(),
+    )
+    .unwrap();
+
+    assert!(owner.verify(&key), "the claim is still the owner's");
+    owner.renew(&key).unwrap();
+    assert!(matches!(
+        rival.acquire(&document),
+        AcquireOutcome::HeldByOther(_)
+    ));
+    owner
+        .mark_done(&key, DoneOutcome::Renamed, Some("2026 Contract.pdf"))
+        .unwrap();
+    assert!(matches!(rival.acquire(&document), AcquireOutcome::Done(_)));
+    assert_eq!(read_claim(temp.path(), &key).machine_id, "aaa");
+}
+
+/// A presence record is named after the machine it describes. A sync conflict
+/// copy of one is a second file describing the same machine, and listing it
+/// shows that machine twice in Settings and feeds a stale name to the conflict
+/// copy check.
+#[test]
+fn a_conflicted_copy_of_a_presence_record_is_not_a_second_machine() {
+    let temp = TempDir::new().unwrap();
+    let clock = MockClock::at(1_000_000);
+    let store =
+        ClaimStore::with_clock(temp.path(), identity("aaa", "front-desk"), clock.clone()).unwrap();
+    store.touch_presence().unwrap();
+    let machines = temp.path().join(".intern").join("machines");
+    fs::copy(
+        machines.join("aaa.json"),
+        machines.join("aaa-DESKTOP-A1B2C3.json"),
+    )
+    .unwrap();
+
+    let listed = store.list_machines();
+    assert_eq!(
+        listed.len(),
+        1,
+        "one machine, however many copies of its record the sync client made: {listed:?}"
+    );
+    assert_eq!(listed[0].machine_id, "aaa");
+}
+
+/// A sync client brings a folder down piece by piece, so `.intern` can arrive
+/// with only some of its subdirectories, or with the README and nothing else.
+/// Coordination has to build what is missing rather than refuse to run.
+#[test]
+fn a_partially_synced_coordination_directory_is_completed_not_refused() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join(".intern");
+    fs::create_dir_all(root.join("claims")).unwrap();
+    fs::write(root.join("README.txt"), b"the README arrived first").unwrap();
+    let store = ClaimStore::with_clock(
+        temp.path(),
+        identity("aaa", "here"),
+        MockClock::at(1_000_000),
+    )
+    .unwrap();
+
+    for subdir in ["claims", "origins", "machines", "filed"] {
+        assert!(root.join(subdir).is_dir(), "{subdir} was not created");
+    }
+    let document = doc("contract.pdf");
+    assert!(matches!(store.acquire(&document), AcquireOutcome::Acquired));
+    store.write_origin(&document).unwrap();
+    store.touch_presence().unwrap();
+    store.prune();
+    assert!(store.verify(&document.key()));
+    assert_eq!(
+        fs::read(root.join("README.txt")).unwrap(),
+        b"the README arrived first",
+        "a README already in the folder is left as it is"
+    );
+}
+
 #[test]
 fn a_recreated_store_reacquires_its_own_surviving_claim() {
     // A crash and restart must not lock the machine out of its own lease.

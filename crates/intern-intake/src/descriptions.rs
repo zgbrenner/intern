@@ -103,6 +103,34 @@ pub struct DescriptionRecord {
     pub user_name: String,
 }
 
+/// A path with every spelling the filesystem can settle resolved, leaving the
+/// rest alone.
+///
+/// `canonicalize` answers only for something that exists, and a record is
+/// written for a document by the name it is about to have as often as by one
+/// it already has. So the deepest ancestor that does exist is resolved and the
+/// remaining names are put back on the end: enough to make two spellings of
+/// the same folder agree, without requiring the document itself to be there.
+fn resolved(path: &Path) -> PathBuf {
+    let mut trailing = Vec::new();
+    let mut current = path;
+    loop {
+        if let Ok(canonical) = fs::canonicalize(current) {
+            let mut out = canonical;
+            out.extend(trailing.iter().rev());
+            return out;
+        }
+        let Some(name) = current.file_name() else {
+            return path.to_path_buf();
+        };
+        trailing.push(name);
+        match current.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => current = parent,
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
 /// Writes and removes description records under one destination folder.
 pub struct DescriptionLedger {
     root: PathBuf,
@@ -130,6 +158,23 @@ impl DescriptionLedger {
         &self.root
     }
 
+    /// Where a document sits inside the destination, comparing the two paths
+    /// as the filesystem sees them rather than as they happen to be spelled.
+    ///
+    /// Windows hands the same folder out under more than one name: a settings
+    /// dialog gives `C:\Users\alexander\Filed`, `canonicalize` gives the
+    /// verbatim `\\?\C:\...` form, and anything that inherited an 8.3 path
+    /// gives `C:\Users\ALEXAN~1\Filed`. Comparing the text alone finds no
+    /// record written under a different spelling, so an undo would leave the
+    /// record behind and a re-file would write a second one. Both sides are
+    /// resolved through the filesystem when they exist; when they do not - a
+    /// document already moved away, a destination not mounted - the plain
+    /// comparison still answers, exactly as before.
+    fn relative_to_ledger(&self, filed: &Path) -> Option<String> {
+        relative_to_root(filed, &self.root)
+            .or_else(|| relative_to_root(&resolved(filed), &resolved(&self.root)))
+    }
+
     /// Where the records live: `<root>/.intern/descriptions`.
     pub fn directory(&self) -> PathBuf {
         Self::directory_under(&self.root)
@@ -143,7 +188,7 @@ impl DescriptionLedger {
     /// The record file for a filed document, or `None` when the document is
     /// not inside the ledger root.
     pub fn record_path(&self, filed: &Path) -> Option<PathBuf> {
-        let relative = relative_to_root(filed, &self.root)?;
+        let relative = self.relative_to_ledger(filed)?;
         Some(
             self.directory()
                 .join(format!("{}.json", record_key(&relative))),
@@ -153,7 +198,7 @@ impl DescriptionLedger {
     /// Writes the record for one filed document, replacing any earlier record
     /// for the same path, and returns the record's path.
     pub fn record(&self, document: &FiledDocument) -> io::Result<PathBuf> {
-        let relative = relative_to_root(&document.path, &self.root).ok_or_else(|| {
+        let relative = self.relative_to_ledger(&document.path).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "the filed document is not inside the destination folder",
@@ -199,15 +244,48 @@ impl DescriptionLedger {
 
     /// Removes the record for a document that is no longer filed at `filed`
     /// (an undone rename). True when a record was removed.
+    ///
+    /// Any copy the sync client left beside the record goes too. These records
+    /// live in the library, where a conflict copy of one is read by the flow
+    /// that fills the column exactly like the record it was copied from, so
+    /// leaving one behind would keep describing a document that is no longer
+    /// filed.
     pub fn retract(&self, filed: &Path) -> io::Result<bool> {
         let Some(path) = self.record_path(filed) else {
             return Ok(false);
         };
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(true),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(error),
+        let mut removed = match fs::remove_file(&path) {
+            Ok(()) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error),
+        };
+        for copy in self.copies_of(&path) {
+            removed |= fs::remove_file(&copy).is_ok();
         }
+        Ok(removed)
+    }
+
+    /// The files beside one record that are copies of it: a sync conflict copy
+    /// named after the machine that wrote it, or a numbered duplicate. A key is
+    /// a fixed-length hash, so nothing else in the folder can start with one.
+    fn copies_of(&self, record: &Path) -> Vec<PathBuf> {
+        let Some(key) = record.file_stem().and_then(|value| value.to_str()) else {
+            return Vec::new();
+        };
+        let Ok(entries) = fs::read_dir(self.directory()) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension().is_some_and(|value| value == "json")
+                    && path
+                        .file_stem()
+                        .and_then(|value| value.to_str())
+                        .is_some_and(|stem| stem.len() > key.len() && stem.starts_with(key))
+            })
+            .collect()
     }
 
     /// Reads the record for a filed document, if one exists and parses.
