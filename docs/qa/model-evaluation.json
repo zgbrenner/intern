@@ -7,12 +7,12 @@
     {
       "description": "An employment agreement between Northstar Lantern Works LLC and Mira Vale regarding work at 18 Lantern Way, Fictional Harbor, WA.",
       "digest_characters": 180,
-      "extraction_millis": 63,
+      "extraction_millis": 44,
       "file": "employment-agreement.pdf",
       "filename": "2025-02-14 Employment Agreement between Northstar Lantern Works LLC and Mira Vale.pdf",
       "pages": 1,
       "proposal": {
-        "confidence": 0.8999999761581421,
+        "confidence": 1.0,
         "date_role": "effective",
         "description": "An employment agreement between Northstar Lantern Works LLC and Mira Vale regarding work at 18 Lantern Way, Fictional Harbor, WA.",
         "document_date": "2025-02-14",
@@ -53,39 +53,42 @@
       "telemetry": {
         "compressionRatio": 1.034482717514038,
         "digestCharacters": 180,
-        "distillMicros": 161,
-        "inferenceMillis": 43813,
+        "distillMicros": 222,
+        "inferenceMillis": 41728,
         "sourceCharacters": 174
       }
     },
     {
-      "description": "A lease agreement between a property owner and a studio company for a property at a specific address.",
+      "description": "A lease agreement dated September 1, 1999, between Effeltiwe and Orion Glass Studio Inc for Property 4° Juniper Loop.",
       "digest_characters": 126,
-      "extraction_millis": 2847,
+      "extraction_millis": 3257,
       "file": "scanned-lease.pdf",
-      "filename": "Lease Agreement.pdf",
+      "filename": "Lease Agreement - Effeltiwe.pdf",
       "pages": 1,
       "proposal": {
         "confidence": 0.8999999761581421,
         "date_role": null,
-        "description": "A lease agreement between a property owner and a studio company for a property at a specific address.",
+        "description": "A lease agreement dated September 1, 1999, between Effeltiwe and Orion Glass Studio Inc for Property 4° Juniper Loop.",
         "document_date": null,
         "document_type": "Lease Agreement",
         "evidence": {
-          "date": "SEPTEMBER 1 4h24",
-          "document_type": "LEASE AGREEMENT",
+          "date": "LEASE AGREEMENT EFFELTIWE SEPTEMBER 1 4h24 PROPERTY 4° JUNIPER LOOP LEDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC",
+          "document_type": "LEASE AGREEMENT EFFELTIWE SEPTEMBER 1 4h24 PROPERTY 4° JUNIPER LOOP LEDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC",
           "parties": [
             "LEASE AGREEMENT EFFELTIWE SEPTEMBER 1 4h24 PROPERTY 4° JUNIPER LOOP LEDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC"
           ]
         },
         "parties": [
-          "LEASE AGREEMENT EFFELTIWE SEPTEMBER 1 4h24 PROPERTY 4° JUNIPER LOOP LEDAR FINCH PROPERTIES LLC ORION GLASS STUDIO INC"
+          "Effeltiwe",
+          "Property 4° Juniper Loop"
         ],
         "party_relation": "none"
       },
       "readiness": "needs_review",
       "review_reasons": [
-        "date_unsupported"
+        "date_unsupported",
+        "party_unsupported",
+        "description_unsupported"
       ],
       "scores": {
         "date_correct": false,
@@ -96,8 +99,8 @@
         "description_specific": true,
         "parties_correct": false,
         "parties_expected": 2,
-        "parties_matched": 1,
-        "parties_spurious": 0,
+        "parties_matched": 0,
+        "parties_spurious": 2,
         "party_forbidden": false,
         "readiness_match": true,
         "ready": false,
@@ -109,15 +112,15 @@
       "telemetry": {
         "compressionRatio": 1.076923131942749,
         "digestCharacters": 126,
-        "distillMicros": 84,
-        "inferenceMillis": 28078,
+        "distillMicros": 83,
+        "inferenceMillis": 36152,
         "sourceCharacters": 117
       }
     },
     {
       "description": "Services Agreement dated January 8, 2025, between Lumen Kite Cooperative and Solstice Index LLC for the Aurora Catalog Project.",
       "digest_characters": 212,
-      "extraction_millis": 3450,
+      "extraction_millis": 4049,
       "file": "mixed-signature.pdf",
       "filename": "2025-01-08 Services Agreement between Lumen Kite Cooperative and Solstice Index LLC.pdf",
       "pages": 2,
@@ -165,31 +168,28 @@
       "telemetry": {
         "compressionRatio": 1.0984456539154053,
         "digestCharacters": 212,
-        "distillMicros": 103,
-        "inferenceMillis": 24193,
+        "distillMicros": 82,
+        "inferenceMillis": 23678,
         "sourceCharacters": 193
       }
     },
     {
-      "description": "This Mutual Non-Disclosure Agreement is effective March 3, 2025, between Fable Harbor Labs LLC and Copper Wren Design Inc. for Project Marigold.",
+      "description": "A Mutual Non-Disclosure Agreement effective March 3, 2025 between Fable Harbor Labs LLC and Copper Wren Design Inc.",
       "digest_characters": 282,
-      "extraction_millis": 29,
+      "extraction_millis": 32,
       "file": "nda.docx",
       "filename": "2025-03-03 Mutual Non-Disclosure Agreement between Fable Harbor Labs LLC and Copper Wren Design Inc.docx",
       "pages": 1,
       "proposal": {
         "confidence": 1.0,
         "date_role": "effective",
-        "description": "This Mutual Non-Disclosure Agreement is effective March 3, 2025, between Fable Harbor Labs LLC and Copper Wren Design Inc. for Project Marigold.",
+        "description": "A Mutual Non-Disclosure Agreement effective March 3, 2025 between Fable Harbor Labs LLC and Copper Wren Design Inc.",
         "document_date": "2025-03-03",
         "document_type": "Mutual Non-Disclosure Agreement",
         "evidence": {
           "date": "Effective March 3, 2025",
           "document_type": "Mutual Non-Disclosure Agreement",
-          "parties": [
-            "Either party",
-            "Fable Harbor Labs LLC and Copper Wren Design Inc."
-          ]
+          "parties": []
         },
         "parties": [
           "Fable Harbor Labs LLC",
@@ -205,7 +205,7 @@
         "date_forbidden": false,
         "date_present": true,
         "date_role_correct": true,
-        "description_covers_facts": true,
+        "description_covers_facts": false,
         "description_specific": true,
         "parties_correct": true,
         "parties_expected": 2,
@@ -222,15 +222,15 @@
       "telemetry": {
         "compressionRatio": 1.029197096824646,
         "digestCharacters": 282,
-        "distillMicros": 139,
-        "inferenceMillis": 26647,
+        "distillMicros": 136,
+        "inferenceMillis": 25183,
         "sourceCharacters": 274
       }
     },
     {
       "description": "An invoice for $1,248.00 from Nimbus Orchard Supply Co. to Atlas Threadworks LLC.",
       "digest_characters": 276,
-      "extraction_millis": 36,
+      "extraction_millis": 17,
       "file": "multi-date-invoice.pdf",
       "filename": "2025-04-30 Invoice from Nimbus Orchard Supply Co.pdf",
       "pages": 1,
@@ -275,15 +275,15 @@
       "telemetry": {
         "compressionRatio": 1.8904109001159668,
         "digestCharacters": 276,
-        "distillMicros": 106,
-        "inferenceMillis": 24393,
+        "distillMicros": 103,
+        "inferenceMillis": 24896,
         "sourceCharacters": 146
       }
     },
     {
       "description": "The Fictional Meridian Committee reviewed inventory, safety, and the next quarterly plan.",
       "digest_characters": 152,
-      "extraction_millis": 75,
+      "extraction_millis": 68,
       "file": "meeting-minutes.md",
       "filename": "2025-05-07 Quarterly Operations Review.md",
       "pages": 1,
@@ -326,30 +326,29 @@
       "telemetry": {
         "compressionRatio": 1.0555555820465088,
         "digestCharacters": 152,
-        "distillMicros": 72,
-        "inferenceMillis": 19694,
+        "distillMicros": 84,
+        "inferenceMillis": 20065,
         "sourceCharacters": 144
       }
     },
     {
-      "description": "A delivery receipt for Pine Echo Courters LLC and Violet Cartography Studio dated June 12, 2025.",
+      "description": "A delivery receipt issued to Pine Echo Courters LLC from Violet Cartography Studio on June 12, 2025.",
       "digest_characters": 95,
-      "extraction_millis": 933,
+      "extraction_millis": 942,
       "file": "rotated-low-resolution-scan.png",
       "filename": "Delivery Receipt between Pine Echo Courters LLC and Violet Cartography Studio.png",
       "pages": 1,
       "proposal": {
         "confidence": 0.8999999761581421,
         "date_role": null,
-        "description": "A delivery receipt for Pine Echo Courters LLC and Violet Cartography Studio dated June 12, 2025.",
+        "description": "A delivery receipt issued to Pine Echo Courters LLC from Violet Cartography Studio on June 12, 2025.",
         "document_date": null,
         "document_type": "Delivery Receipt",
         "evidence": {
           "date": "JUNE 12 2a25",
           "document_type": "DELIVERY RECEIPT OR-?771",
           "parties": [
-            "Pine Echo Courters LLC",
-            "Violet Cartography Studio"
+            "Pine Echo Courters LLC VIOLET CARTOGRAPHY STUDIO"
           ]
         },
         "parties": [
@@ -386,13 +385,13 @@
       "telemetry": {
         "compressionRatio": 1.1046512126922607,
         "digestCharacters": 95,
-        "distillMicros": 34,
-        "inferenceMillis": 22733,
+        "distillMicros": 67,
+        "inferenceMillis": 27204,
         "sourceCharacters": 86
       }
     },
     {
-      "extraction_millis": 10,
+      "extraction_millis": 45,
       "file": "encrypted.pdf",
       "parser_error": "PARSE_FAILED",
       "readiness": "failed",
@@ -402,7 +401,7 @@
       "status": "expected_error"
     },
     {
-      "extraction_millis": 29,
+      "extraction_millis": 21,
       "file": "malformed.pdf",
       "parser_error": "PARSE_FAILED",
       "readiness": "failed",
@@ -414,7 +413,7 @@
     {
       "description": "A fictional observation journal dated July 1, 2025.",
       "digest_characters": 103,
-      "extraction_millis": 43,
+      "extraction_millis": 24,
       "file": "long-document-100-pages.pdf",
       "filename": "2025-07-01 Moonlit Archive Project Journal.pdf",
       "pages": 100,
@@ -460,41 +459,37 @@
       "telemetry": {
         "compressionRatio": 0.010738114826381207,
         "digestCharacters": 103,
-        "distillMicros": 752,
-        "inferenceMillis": 20266,
+        "distillMicros": 489,
+        "inferenceMillis": 22915,
         "sourceCharacters": 9592
       }
     },
     {
-      "description": "A purchase order dated July 14, 2025, issued to Post Manufacturing LLC by Ebermer for manufacturing services.",
+      "description": "A purchase order dated July 14, 2025, from Post Manufacturing LLC.",
       "digest_characters": 77,
-      "extraction_millis": 1070,
+      "extraction_millis": 830,
       "file": "document-image.png",
-      "filename": "Purchase Order from Post Manufacturing LLC.png",
+      "filename": "Purchase Order - Post Manufacturing LLC.png",
       "pages": 1,
       "proposal": {
-        "confidence": 1.0,
+        "confidence": 0.8999999761581421,
         "date_role": null,
-        "description": "A purchase order dated July 14, 2025, issued to Post Manufacturing LLC by Ebermer for manufacturing services.",
+        "description": "A purchase order dated July 14, 2025, from Post Manufacturing LLC.",
         "document_date": null,
         "document_type": "Purchase Order",
         "evidence": {
           "date": "PO-Sie DATE JULY 14 2625",
           "document_type": "PURCHASE ORDER",
-          "parties": [
-            "Post Manufacturing LLC",
-            "Ebermer"
-          ]
+          "parties": []
         },
         "parties": [
           "Post Manufacturing LLC"
         ],
-        "party_relation": "from"
+        "party_relation": "none"
       },
       "readiness": "needs_review",
       "review_reasons": [
         "date_unsupported",
-        "party_unsupported",
         "description_unsupported",
         "parser_warning"
       ],
@@ -520,17 +515,17 @@
       "telemetry": {
         "compressionRatio": 1.1323529481887817,
         "digestCharacters": 77,
-        "distillMicros": 46,
-        "inferenceMillis": 21799,
+        "distillMicros": 51,
+        "inferenceMillis": 22162,
         "sourceCharacters": 68
       }
     },
     {
       "description": "A packing slip for Quartz Meadow Retail LLC dated July 15, 2025.",
       "digest_characters": 71,
-      "extraction_millis": 688,
+      "extraction_millis": 691,
       "file": "document-image.jpg",
-      "filename": "2025-07-15 Packing Slip Date July Quartz Meadow Retail LLC - Quartz Meadow Retail LLC.jpg",
+      "filename": "2025-07-15 Packing Slip Date July Quartz Meadow Retail LLC from Quartz Meadow Retail LLC.jpg",
       "pages": 1,
       "proposal": {
         "confidence": 0.8999999761581421,
@@ -539,14 +534,14 @@
         "document_date": "2025-07-15",
         "document_type": "Packing Slip Date July Quartz Meadow Retail LLC",
         "evidence": {
-          "date": "JULY 15 2025",
+          "date": "DATE JULY 15 2025",
           "document_type": "PACKING SLIP PS-311",
           "parties": []
         },
         "parties": [
           "Quartz Meadow Retail LLC"
         ],
-        "party_relation": "none"
+        "party_relation": "from"
       },
       "readiness": "needs_review",
       "review_reasons": [
@@ -577,22 +572,22 @@
       "telemetry": {
         "compressionRatio": 1.1451612710952759,
         "digestCharacters": 71,
-        "distillMicros": 29,
-        "inferenceMillis": 20665,
+        "distillMicros": 33,
+        "inferenceMillis": 22843,
         "sourceCharacters": 62
       }
     },
     {
-      "description": "A work order dated July 16, 2026, for Harbor Comet Repairs LLC.",
+      "description": "A work order dated July 16, 2026 for Harbor Comet Repairs LLC repairs.",
       "digest_characters": 70,
-      "extraction_millis": 516,
+      "extraction_millis": 570,
       "file": "document-image.tiff",
-      "filename": "Work Order - HARBOR COMET REPAIRS LLC.tiff",
+      "filename": "Work Order - Harbor Comet Repairs LLC.tiff",
       "pages": 1,
       "proposal": {
         "confidence": 1.0,
         "date_role": null,
-        "description": "A work order dated July 16, 2026, for Harbor Comet Repairs LLC.",
+        "description": "A work order dated July 16, 2026 for Harbor Comet Repairs LLC repairs.",
         "document_date": null,
         "document_type": "Work Order",
         "evidence": {
@@ -603,7 +598,7 @@
           ]
         },
         "parties": [
-          "HARBOR COMET REPAIRS LLC"
+          "Harbor Comet Repairs LLC"
         ],
         "party_relation": "none"
       },
@@ -635,15 +630,15 @@
       "telemetry": {
         "compressionRatio": 1.1475409269332886,
         "digestCharacters": 70,
-        "distillMicros": 39,
-        "inferenceMillis": 22896,
+        "distillMicros": 45,
+        "inferenceMillis": 29390,
         "sourceCharacters": 61
       }
     },
     {
       "description": "A Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc. for a $248,000 project, effective April 1, 2026, through March 31, 2027.",
       "digest_characters": 12650,
-      "extraction_millis": 34,
+      "extraction_millis": 54,
       "file": "statement-of-work.pdf",
       "filename": "2026-04-01 Statement of Work between Ridgeline Cartography LLC and Vistage Worldwide, Inc.pdf",
       "pages": 14,
@@ -692,22 +687,22 @@
       "telemetry": {
         "compressionRatio": 0.4319617450237274,
         "digestCharacters": 12650,
-        "distillMicros": 9422,
-        "inferenceMillis": 136449,
+        "distillMicros": 14776,
+        "inferenceMillis": 125651,
         "sourceCharacters": 29285
       }
     },
     {
-      "description": "A notice of termination sent to John Smith regarding the termination of his employment with Northstar Lantern Works LLC effective January 31, 2027.",
+      "description": "A notice of termination sent to John Smith from Northstar Lantern Works LLC, terminating an employment agreement effective January 31, 2027.",
       "digest_characters": 1833,
-      "extraction_millis": 12,
+      "extraction_millis": 398,
       "file": "termination-notice.pdf",
       "filename": "2026-12-29 Notice of Termination to John Smith.pdf",
       "pages": 1,
       "proposal": {
         "confidence": 1.0,
         "date_role": "notice",
-        "description": "A notice of termination sent to John Smith regarding the termination of his employment with Northstar Lantern Works LLC effective January 31, 2027.",
+        "description": "A notice of termination sent to John Smith from Northstar Lantern Works LLC, terminating an employment agreement effective January 31, 2027.",
         "document_date": "2026-12-29",
         "document_type": "Notice of Termination",
         "evidence": {
@@ -745,22 +740,22 @@
       "telemetry": {
         "compressionRatio": 1.3771600723266602,
         "digestCharacters": 1833,
-        "distillMicros": 659,
-        "inferenceMillis": 36109,
+        "distillMicros": 470,
+        "inferenceMillis": 32775,
         "sourceCharacters": 1331
       }
     },
     {
-      "description": "This First Amendment to Consulting Agreement is dated September 14, 2025, and amends the Consulting Agreement between Vistage Worldwide, Inc. and Jane Ellery.",
+      "description": "This First Amendment to Consulting Agreement is dated September 14, 2025, and amends the Consulting Agreement between Vistage Worldwide, Inc. and Jane Ellery regarding fees and term.",
       "digest_characters": 3963,
-      "extraction_millis": 15,
+      "extraction_millis": 77,
       "file": "consulting-amendment.pdf",
       "filename": "2025-09-14 First Amendment to Consulting Agreement between Vistage Worldwide, Inc and Jane Ellery.pdf",
       "pages": 2,
       "proposal": {
         "confidence": 1.0,
         "date_role": "amendment",
-        "description": "This First Amendment to Consulting Agreement is dated September 14, 2025, and amends the Consulting Agreement between Vistage Worldwide, Inc. and Jane Ellery.",
+        "description": "This First Amendment to Consulting Agreement is dated September 14, 2025, and amends the Consulting Agreement between Vistage Worldwide, Inc. and Jane Ellery regarding fees and term.",
         "document_date": "2025-09-14",
         "document_type": "First Amendment to Consulting Agreement",
         "evidence": {
@@ -799,22 +794,22 @@
       "telemetry": {
         "compressionRatio": 1.2454431056976318,
         "digestCharacters": 3963,
-        "distillMicros": 1106,
-        "inferenceMillis": 76201,
+        "distillMicros": 1349,
+        "inferenceMillis": 67930,
         "sourceCharacters": 3182
       }
     },
     {
-      "description": "An invoice from Acme Corporation to Vistage Worldwide, Inc. for an annual platform subscription and services totaling $56,700.",
+      "description": "An invoice dated January 5, 2026, from Acme Corporation to Vistage Worldwide, Inc., for an annual platform subscription and services totaling $56,700.",
       "digest_characters": 845,
-      "extraction_millis": 16,
+      "extraction_millis": 1022,
       "file": "vendor-invoice.pdf",
       "filename": "2026-01-05 Invoice from Acme Corporation.pdf",
       "pages": 1,
       "proposal": {
         "confidence": 1.0,
         "date_role": "invoice",
-        "description": "An invoice from Acme Corporation to Vistage Worldwide, Inc. for an annual platform subscription and services totaling $56,700.",
+        "description": "An invoice dated January 5, 2026, from Acme Corporation to Vistage Worldwide, Inc., for an annual platform subscription and services totaling $56,700.",
         "document_date": "2026-01-05",
         "document_type": "Invoice",
         "evidence": {
@@ -855,15 +850,15 @@
       "telemetry": {
         "compressionRatio": 1.318252682685852,
         "digestCharacters": 845,
-        "distillMicros": 274,
-        "inferenceMillis": 46122,
+        "distillMicros": 201,
+        "inferenceMillis": 52197,
         "sourceCharacters": 641
       }
     },
     {
       "description": "Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc. settle a dispute over invoices under a logistics services agreement for $312,500.",
       "digest_characters": 12282,
-      "extraction_millis": 28,
+      "extraction_millis": 18,
       "file": "settlement-agreement.pdf",
       "filename": "2026-07-22 Settlement Agreement between Harborline Freight Systems LLC and Quill and Vane Advisory Group, Inc.pdf",
       "pages": 7,
@@ -912,22 +907,22 @@
       "telemetry": {
         "compressionRatio": 0.8277953863143921,
         "digestCharacters": 12282,
-        "distillMicros": 4929,
-        "inferenceMillis": 138324,
+        "distillMicros": 6744,
+        "inferenceMillis": 113401,
         "sourceCharacters": 14837
       }
     },
     {
-      "description": "A document discussing a pending matter with Rowan and Priya regarding an offsite.",
+      "description": "A document discussing a pending matter involving Rowan and Priya regarding an offsite.",
       "digest_characters": 301,
-      "extraction_millis": 15,
+      "extraction_millis": 11,
       "file": "ambiguous-note.pdf",
       "filename": "Document.pdf",
       "pages": 1,
       "proposal": {
         "confidence": 0.5,
         "date_role": null,
-        "description": "A document discussing a pending matter with Rowan and Priya regarding an offsite.",
+        "description": "A document discussing a pending matter involving Rowan and Priya regarding an offsite.",
         "document_date": null,
         "document_type": null,
         "evidence": {
@@ -960,15 +955,15 @@
       "telemetry": {
         "compressionRatio": 1.0134680271148682,
         "digestCharacters": 301,
-        "distillMicros": 139,
-        "inferenceMillis": 14765,
+        "distillMicros": 135,
+        "inferenceMillis": 18094,
         "sourceCharacters": 297
       }
     },
     {
       "description": "A quarterly business review presented to Vistage Worldwide, Inc. by Ridgeline Cartography LLC outlining Q2 pipeline and a roadmap through December 2027.",
       "digest_characters": 528,
-      "extraction_millis": 27,
+      "extraction_millis": 16,
       "file": "board-deck.pptx",
       "filename": "2026-05-21 Quarterly Business Review for Vistage Worldwide, Inc.pptx",
       "pages": 1,
@@ -981,10 +976,7 @@
         "evidence": {
           "date": "Presented on May 21, 2026",
           "document_type": "QUARTERLY BUSINESS REVIEW",
-          "parties": [
-            "Presented for Vistage Worldwide, Inc.",
-            "Presented by Ridgeline Cartography LLC"
-          ]
+          "parties": []
         },
         "parties": [
           "Vistage Worldwide, Inc."
@@ -1016,30 +1008,28 @@
       "telemetry": {
         "compressionRatio": 1.4465752840042114,
         "digestCharacters": 528,
-        "distillMicros": 175,
-        "inferenceMillis": 21794,
+        "distillMicros": 164,
+        "inferenceMillis": 23460,
         "sourceCharacters": 365
       }
     },
     {
-      "description": "This Order Form is entered into by and between Tessellate Analytics Ltd. and Vistage Worldwide, Inc. under the Master Subscription Agreement.",
+      "description": "An Order Form signed by authorized representatives of both parties under the Master Subscription Agreement, specifying an annual fee of $96,000 and a subscription period from February 1, 2026, to January 31, 2028.",
       "digest_characters": 721,
-      "extraction_millis": 23,
+      "extraction_millis": 24,
       "file": "order-form.docx",
       "filename": "2026-02-01 Order Form between Tessellate Analytics Ltd and Vistage Worldwide, Inc.docx",
       "pages": 1,
       "proposal": {
         "confidence": 1.0,
         "date_role": "effective",
-        "description": "This Order Form is entered into by and between Tessellate Analytics Ltd. and Vistage Worldwide, Inc. under the Master Subscription Agreement.",
+        "description": "An Order Form signed by authorized representatives of both parties under the Master Subscription Agreement, specifying an annual fee of $96,000 and a subscription period from February 1, 2026, to January 31, 2028.",
         "document_date": "2026-02-01",
         "document_type": "Order Form",
         "evidence": {
           "date": "February 1, 2026",
           "document_type": "Order Form",
-          "parties": [
-            "Tessellate Analytics Ltd. and Vistage Worldwide, Inc."
-          ]
+          "parties": []
         },
         "parties": [
           "Tessellate Analytics Ltd.",
@@ -1072,8 +1062,8 @@
       "telemetry": {
         "compressionRatio": 1.688524603843689,
         "digestCharacters": 721,
-        "distillMicros": 230,
-        "inferenceMillis": 21866,
+        "distillMicros": 177,
+        "inferenceMillis": 24962,
         "sourceCharacters": 427
       }
     }
@@ -1106,8 +1096,8 @@
       "total": 14
     },
     "description_covers_facts": {
-      "correct": 16,
-      "rate": 0.8888888888888888,
+      "correct": 15,
+      "rate": 0.8333333333333334,
       "total": 18
     },
     "description_specific": {
@@ -1123,10 +1113,10 @@
     },
     "inference_millis": {
       "count": 19,
-      "max": 138324,
-      "mean": 40358,
-      "median": 24193,
-      "min": 14765
+      "max": 125651,
+      "mean": 39720,
+      "median": 25183,
+      "min": 18094
     },
     "parties_correct": {
       "correct": 16,
@@ -1155,10 +1145,10 @@
     },
     "total_millis": {
       "count": 19,
-      "max": 138352,
-      "mean": 40880,
-      "median": 24429,
-      "min": 14780
+      "max": 125705,
+      "mean": 40359,
+      "median": 27727,
+      "min": 18105
     },
     "type_correct": {
       "correct": 18,
@@ -1172,12 +1162,12 @@
     }
   },
   "status": "completed",
-  "commit": "622ddec2d6342adb31250804805d6dcd9ca46fca",
-  "release_inputs_sha256": "dea704a9a8020e176d4b9bef9182a4ae4dc5278726fea332e0b668e2be99f9e1",
+  "commit": "a9a96a482b099c4b848a00df8ee66bb4013caf18",
+  "release_inputs_sha256": "c4db219b6db91a98eab8f9fae4e359860825a0f7dacf86772f1c44cb5d5471fd",
   "runner": {
     "os": "Microsoft Windows NT 10.0.26100.0",
     "logical_processors": 4,
-    "ci_run_id": "34420596844",
+    "ci_run_id": "34538797800",
     "ci_run_attempt": "1"
   },
   "acceptance": {
@@ -1191,6 +1181,6 @@
   "model_sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
   "model_bytes": 1280835840,
   "threads": 2,
-  "peak_model_rss_bytes": 2154823680,
-  "wall_clock_seconds": 777.0
+  "peak_model_rss_bytes": 2144837632,
+  "wall_clock_seconds": 767.1
 }

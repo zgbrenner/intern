@@ -1,55 +1,57 @@
-# Intern alpha.8 rendered-fidelity ledger
+# Intern alpha.9 rendered-fidelity ledger
 
-**Rendered sign-off status: accepted for alpha.8.**
+**Rendered sign-off status: accepted for alpha.9.**
 `docs/qa/rendered-fidelity-signoff.json` is bound to release-input digest
-`dea704a9a8020e176d4b9bef9182a4ae4dc5278726fea332e0b668e2be99f9e1` and to the
+`c4db219b6db91a98eab8f9fae4e359860825a0f7dacf86772f1c44cb5d5471fd` and to the
 1536x1024 capture `docs/qa/latest-implementation.png`, SHA-256
-`ccf5e44f2294e0e5d8b7ad0c673eb91d146c6e0470d66f849c80868c8470eb18`, taken by
-Whole-product QA evidence run 34420596844 at commit
-`622ddec2d6342adb31250804805d6dcd9ca46fca`.
+`ee46abcfe76433b6ed25b6f7a53c80056bf36918b8b44009ae8f5511c54167a4`, taken by
+Whole-product QA evidence run 34538797800 at commit
+`a9a96a482b099c4b848a00df8ee66bb4013caf18`.
 
-## alpha.8 record
+## alpha.9 record
 
-The alpha.7 sign-off was never taken: that version was prepared and not
-published, and the reliability work that became alpha.8 changed the non-QA
-release inputs again, so the pending record it left behind was replaced rather
-than accepted. Run 34420596844 supplies the capture this record accepts.
+Run 34538797800 passed every gate on Windows: frontend checks, the browser QA
+suite including its contrast assertions, `cargo fmt --check`, workspace clippy
+with warnings denied, the Rust workspace tests, native fixture parsing with the
+pinned assets, the verified pinned runtime, an NSIS build, installer and
+uninstall smoke with user data retained, and an accepted whole-corpus
+evaluation with real inference. That evaluation reproduces alpha.8's scores
+exactly - date role 14/14, type 18/18, description specific 19/19, parties
+16/19, review rate 42.1%, nothing filed under a date the corpus marks as a trap
+- which is the point: this release changes no naming behaviour, and the numbers
+show it did not.
 
-That run completed every substantive gate on Windows: frontend checks, the
-browser QA suite including its contrast assertions, `cargo fmt --check`,
-workspace clippy with warnings denied, the Rust workspace tests, native
-fixture parsing with the pinned assets, the verified pinned runtime, an NSIS
-build, installer and uninstall smoke with user data retained, and an accepted
-whole-corpus evaluation with real inference. That evaluation reproduces the
-replay scores exactly - date role 14/14, type 18/18, description specific
-19/19, parties 16/19, review rate 42.1%, and nothing filed under a date the
-corpus marks as a trap - so the deterministic fixes behind those numbers hold
-against the model as well as against the recording.
+The capture is materially unchanged from alpha.8's, deliberately. This
+release's one visible change is that a window of 1100 pixels or less no longer
+opens inside a modal review drawer over an inert queue, and this frame is 1536
+wide, where the inspector has always been a side panel. The narrow behaviour is
+held by the 1024-pixel browser gate and by a unit test rather than by this
+picture; the frame was re-taken because the release inputs changed, not because
+it was expected to look different.
 
-Nothing this release changes is a reviewed surface. The work is reliability and
-correctness beneath the window: a queue that cannot freeze, an undo that stays
-undone, sidecar processes that stop with the app, a hosted model on this machine
-that no longer travels through a system proxy, and parsers that refuse hostile
-input instead of dying on it. Two additions are visible and both reuse accepted
-treatments - the reason a stopped queue gives for stopping appears in the
-existing banner, and the new `UNDONE` and `RECONCILIATION_REQUIRED` states read
-as sentences in the existing review-reason list.
+Everything else in the release sits beneath the window and cannot be
+photographed: a shared folder that recovers when a teammate's machine crashes
+mid-document, a private-local-intake setting that is re-derived per folder
+rather than trusted for ever, coordination files that survive an antivirus or
+sync-client hold, description records found whichever way Windows spells the
+folder, and a settings file that reports what it could not read instead of
+silently starting with defaults.
 
 The capture was inspected against the accepted concept. Core hierarchy and
-interaction emphasis align: sidebar counts, queue table, and review drawer read
+interaction emphasis align: sidebar counts, queue table and review drawer read
 as three distinct planes, and the header states the privacy posture beside the
-brand tag. Date-first proposed filenames, right-aligned confidence, and
+brand tag. Date-first proposed filenames, right-aligned confidence and
 em-dashes for absent values stay consistent down the column. Ready, Needs
-review, Processing, and Waiting are each distinguishable by icon as well as
-colour. Evidence stays attributed under DATE, TYPE, and PARTIES headings with
+review, Processing and Waiting are each distinguishable by icon as well as
+colour. Evidence stays attributed under DATE, TYPE and PARTIES headings with
 each party on its own line, the approve and keep actions sit in a pinned bar at
-the foot of the drawer, and the selected row carries an accent bar as well as a
-tint. No clipping, collisions, illegible copy, excessive density, or ambiguous
+the foot of the panel, and the selected row carries an accent bar as well as a
+tint. No clipping, collisions, illegible copy, excessive density or ambiguous
 focus were observed.
 
 This is not a pixel-equality assertion: the reference and implementation can
 differ where supported behaviour requires it. The native title bar, the
-1024-pixel layout, hover states, and motion remain covered by the hosted
+1024-pixel layout, hover states and motion remain covered by the hosted
 automated browser and installed-app gates rather than by a claim that one frame
 captures every state.
 
@@ -58,7 +60,7 @@ captures every state.
 Reviewed by the maintainer, Zachary Brenner, who inspected the capture named
 above and accepted it. Claude Opus 5 (Claude Code) inspected it first and wrote
 this record and the sign-off at the maintainer's direction, the same standing
-under which the superseded alpha.6 record was written.
+under which the alpha.6 and alpha.8 records were written.
 
 ### Freshness boundary
 
